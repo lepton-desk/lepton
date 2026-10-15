@@ -112,6 +112,12 @@ impl Toolchain {
         }
     }
 
+    /// Probes one program by name (`<name> --version`): the project's package manager,
+    /// which may be another than the one [`detect`](Self::detect) found.
+    pub fn probe_program(name: &'static str) -> ToolStatus {
+        probe(name, &["--version"])
+    }
+
     /// The tools a given command needs, and the first one that is missing.
     ///
     /// Reported as a single blocker rather than a list, because the thing a

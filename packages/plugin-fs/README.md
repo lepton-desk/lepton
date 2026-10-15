@@ -5,7 +5,7 @@ Files inside the directories the application allows, from a Lepton core:
 `stat`, `exists` and `BaseDirectory` — the names Tauri's `@tauri-apps/plugin-fs` uses.
 
 ```bash
-pnpm add @lepton-desk/plugin-fs
+npm install @lepton-desk/plugin-fs   # or: pnpm add, yarn add, bun add
 ```
 
 ```ts

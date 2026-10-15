@@ -156,6 +156,11 @@ pub struct Manifest {
     /// Drives the file extensions of everything injected, so a JavaScript project gets
     /// `main.js` and its `index.html` agrees.
     pub language: Language,
+
+    /// Plugins chosen at `lepton new` (`plugin_catalog` names): their commands join
+    /// `permissions`, `fs` gets `$APPDATA` as its scope, and each package becomes a
+    /// dependency.
+    pub plugins: Vec<&'static str>,
 }
 
 impl Manifest {
@@ -178,6 +183,7 @@ impl Manifest {
             window_height: 800,
             sdk_scope: "@lepton-desk".to_owned(),
             language: Language::default(),
+            plugins: Vec::new(),
         }
     }
 }
@@ -272,7 +278,26 @@ pub fn render_manifest(manifest: &Manifest) -> String {
     let _ = writeln!(out, "  }},");
     // The commands the page may call. Explicit and short: the template's own `app.name`
     // and nothing else. A command is granted by naming it here — there is no wildcard.
-    let _ = writeln!(out, "  \"permissions\": [\"app.name\"]");
+    let mut granted = vec![json_string("app.name")];
+    for name in &manifest.plugins {
+        if let Some(plugin) = crate::plugin_catalog::find(name) {
+            granted.extend(plugin.commands.iter().map(|command| json_string(command)));
+        }
+    }
+    let fs = manifest.plugins.contains(&"fs");
+    let _ = writeln!(
+        out,
+        "  \"permissions\": [{}]{}",
+        granted.join(", "),
+        if fs { "," } else { "" }
+    );
+    if fs {
+        // The application's own directory and nothing else; widening it is the
+        // developer's decision, written here by name.
+        let _ = writeln!(out, "  \"plugins\": {{");
+        let _ = writeln!(out, "    \"fs\": {{ \"scope\": [\"$APPDATA\"] }}");
+        let _ = writeln!(out, "  }}");
+    }
     let _ = writeln!(out, "}}");
 
     out

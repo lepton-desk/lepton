@@ -19,14 +19,21 @@ frontend is a Vite project; Lepton puts it in a native window.
 
 - Rust (stable) and Zig 0.16
 - WPE WebKit 2.54+ with `wpe-platform` (`pkg-config wpe-webkit-2.0`), libsoup 3
-- Node 20+ and pnpm, for the frontend
+- Node 20+ and any of npm, pnpm, Yarn or Bun, for the frontend
 
 ## Start
 
 ```bash
+npm create lepton-app@latest
+```
+
+`pnpm create lepton-app`, `yarn create lepton-app` and `bun create lepton-app` work the
+same. The project uses the package manager you created it with, and so do `lepton dev`,
+`lepton build` and `lepton run`: they read the lockfile. From a checkout:
+
+```bash
 cargo build --release --bin lepton
-./target/release/lepton new my-app --template vue-ts --target webview
-cd my-app && pnpm install && ../target/release/lepton dev
+./target/release/lepton new my-app --template vue-ts --target webview --plugins os,fs --install
 ```
 
 Templates: `vanilla-ts`, `vanilla-js`, `react-ts`, `react-js`, `vue-ts`, `svelte-ts`,
@@ -65,6 +72,7 @@ See [`packages/api`](packages/api/README.md).
 | `crates/orchestrator` | toolchain discovery, process supervision |
 | `packages/api` | `@lepton-desk/api` |
 | `packages/cli` | `@lepton-desk/cli` (`npx lepton`) |
+| `packages/create-lepton-app` | `npm create lepton-app` |
 | `packages/plugin-*` | plugins: `plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog` (TypeScript + Zig in one npm package) |
 
 ```bash

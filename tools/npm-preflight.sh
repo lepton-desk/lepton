@@ -7,17 +7,19 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 plugins=(plugin-os plugin-clipboard plugin-fs plugin-dialog)
-packages=(cli-linux-x64 cli api "${plugins[@]}")
+packages=(cli-linux-x64 cli api "${plugins[@]}" create-lepton-app)
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'preflight: %s\n' "$*" >&2; exit 1; }
 
 step "versions agree"
 version="$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' "$root/Cargo.toml")"
 [ -n "$version" ] || fail "no [workspace.package] version in Cargo.toml"
-for package in api cli "${plugins[@]}"; do
+for package in api cli "${plugins[@]}" create-lepton-app; do
   have="$(node -p "require('$root/packages/$package/package.json').version")"
   [ "$have" = "$version" ] || fail "packages/$package is $have, the CLI is $version"
 done
+wanted="$(node -p "require('$root/packages/create-lepton-app/package.json').dependencies['@lepton-desk/cli']")"
+[ "$wanted" = "$version" ] || fail "create-lepton-app depends on @lepton-desk/cli $wanted, not $version"
 echo "all at $version"
 
 step "not already published"
@@ -53,6 +55,9 @@ for plugin in "${plugins[@]}"; do
   step "@lepton-desk/$plugin: install, build, check, test"
   (cd "$root/packages/$plugin" && pnpm install --frozen-lockfile && pnpm run build && pnpm run check && pnpm test)
 done
+
+step "create-lepton-app: test, lint"
+(cd "$root/packages/create-lepton-app" && LEPTON_BINARY="$root/target/release/lepton" node --test test/ && "$root/packages/api/node_modules/.bin/biome" check .)
 
 step "@lepton-desk/cli: test, lint"
 (cd "$root/packages/cli" && node --test test/ && "$root/packages/api/node_modules/.bin/biome" check .)

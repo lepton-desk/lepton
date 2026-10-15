@@ -5,7 +5,7 @@ Facts about the machine, from a Lepton core: `platform()`, `arch()`, `family()`,
 `@tauri-apps/plugin-os` uses.
 
 ```bash
-pnpm add @lepton-desk/plugin-os
+npm install @lepton-desk/plugin-os   # or: pnpm add, yarn add, bun add
 ```
 
 ```ts

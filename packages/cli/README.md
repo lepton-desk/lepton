@@ -3,8 +3,9 @@
 The Lepton CLI from npm:
 
 ```bash
+npm create lepton-app@latest        # the guided way
 npx @lepton-desk/cli new my-app
-pnpm add -D @lepton-desk/cli && pnpm lepton dev
+npm install -D @lepton-desk/cli && npx lepton dev
 ```
 
 This package is a 1.6 KB launcher. The CLI itself is a native binary in a platform

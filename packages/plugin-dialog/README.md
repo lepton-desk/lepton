@@ -4,7 +4,7 @@ The desktop's own file dialogs, from a Lepton core: `open(options)` and `save(op
 the names Tauri's `@tauri-apps/plugin-dialog` uses.
 
 ```bash
-pnpm add @lepton-desk/plugin-dialog
+npm install @lepton-desk/plugin-dialog   # or: pnpm add, yarn add, bun add
 ```
 
 ```ts

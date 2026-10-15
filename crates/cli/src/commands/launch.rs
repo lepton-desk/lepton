@@ -11,21 +11,9 @@
 
 use std::path::{Path, PathBuf};
 
-use lepton_orchestrator::{Step, Toolchain, run_streaming};
+use lepton_orchestrator::{Step, run_streaming};
 
 use super::{CliError, Outcome};
-
-/// The package manager a frontend step runs through.
-///
-/// pnpm when the probe found a usable one, npm otherwise: npm ships with Node, so a
-/// machine that passed the `Develop`/`Build` requirement has it.
-pub fn package_manager(chain: &Toolchain) -> &'static str {
-    if chain.package_manager.is_usable() && chain.package_manager.name == "pnpm" {
-        "pnpm"
-    } else {
-        "npm"
-    }
-}
 
 /// The executable's name for a product, as `zig build -Dname=` receives it.
 ///

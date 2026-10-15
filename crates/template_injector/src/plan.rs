@@ -115,7 +115,7 @@ pub fn plan(manifest: &Manifest) -> Result<Plan, InjectionError> {
         // beside them rather than replacing them.
         Injection {
             path: "package.json".to_owned(),
-            contents: crate::assets::package_manifest(),
+            contents: crate::assets::package_manifest(&manifest.plugins),
             mode: Mode::MergeJson,
         },
         Injection {

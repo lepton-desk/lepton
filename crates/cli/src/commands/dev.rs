@@ -86,6 +86,9 @@ impl Flags {
         let native =
             self.native || manifest.render_path == lepton_template_injector::RenderPath::Native;
 
+        if !native && root.join("package.json").is_file() {
+            super::package_manager::ensure_installed(root, &chain)?;
+        }
         let mut steps = self.plan(root, &chain, native);
         let binary = super::launch::binary_name(&manifest.product_name);
         super::launch::name_core(&mut steps, &binary);
@@ -243,22 +246,21 @@ impl Flags {
     /// `run dev` rather than a bare `dev` because the script name is a project's
     /// choice, not Lepton's; the flag is what Lepton owns.
     fn server_step(&self, chain: &Toolchain, root: &Path) -> Step {
-        let manager = super::launch::package_manager(chain);
-        let mut step = Step::new(NAME, manager).args(["run", "dev"]);
-        // npm needs `--` to forward flags to the script; pnpm forwards them on its own and
-        // passes a `--` through *literally* — measured: `vite -- --port 5199` opened on
-        // 5173, i.e. Vite ignored every flag after it, `--port` and `--strict-port`
-        // included, ever since this command existed.
-        if manager == "npm" {
-            step = step.arg("--");
-        }
-        step.arg("--port")
-            .arg(self.port.to_string())
-            .arg("--strict-port")
+        let manager = super::package_manager::for_project(root, chain);
+        // Only npm wants a `--` before the script's own flags; pnpm passes one through
+        // literally — measured: `vite -- --port 5199` opened on 5173, Vite ignoring every
+        // flag after it (`package_manager.rs`).
+        let flags = [
+            "--port".to_owned(),
+            self.port.to_string(),
+            "--strict-port".to_owned(),
             // The exact address the core is given below. `localhost` resolves to `::1`
             // on some machines, and a server there is refused at `127.0.0.1`.
-            .arg("--host")
-            .arg(DEV_HOST)
+            "--host".to_owned(),
+            DEV_HOST.to_owned(),
+        ];
+        Step::new(NAME, manager.program())
+            .args(manager.run_script("dev", &flags))
             .in_dir(root.to_path_buf())
     }
 

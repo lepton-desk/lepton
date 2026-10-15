@@ -63,6 +63,9 @@ impl Flags {
         let native = !self.webview
             && (self.native
                 || manifest.render_path == lepton_template_injector::RenderPath::Native);
+        if !native && root.join("package.json").is_file() {
+            super::package_manager::ensure_installed(root, &chain)?;
+        }
         let mut steps = self.plan(root, &chain, native);
         if !native {
             super::command_types::types_first(&mut steps, root);
@@ -109,9 +112,10 @@ impl Flags {
         // The bundle is written to disk because the binary reads it from there; a
         // native build has no bundle to write.
         if !native && root.join("package.json").is_file() {
+            let manager = super::package_manager::for_project(root, chain);
             steps.push(
-                Step::new(NAME, super::launch::package_manager(chain))
-                    .args(["run", "build"])
+                Step::new(NAME, manager.program())
+                    .args(manager.run_script("build", &[]))
                     .in_dir(root.to_path_buf()),
             );
         }

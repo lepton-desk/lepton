@@ -1,0 +1,40 @@
+{
+  "name": "create-lepton-app",
+  "version": "0.1.4",
+  "description": "Create a Lepton desktop app: npm create lepton-app, pnpm create lepton-app, yarn create lepton-app, bun create lepton-app.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lepton-desk/lepton",
+    "directory": "packages/create-lepton-app"
+  },
+  "keywords": [
+    "lepton",
+    "desktop",
+    "zig",
+    "wpe",
+    "webview",
+    "create"
+  ],
+  "type": "module",
+  "bin": {
+    "create-lepton-app": "bin/create.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "LICENSE*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@lepton-desk/cli": "0.1.4"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

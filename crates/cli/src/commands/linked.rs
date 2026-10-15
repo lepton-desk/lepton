@@ -45,16 +45,14 @@ pub fn stale(root: &Path) -> Vec<PathBuf> {
 /// only the working directory, so a printed plan says which package it builds rather than
 /// showing a second, identical `pnpm run build`.
 pub fn rebuild_steps(root: &Path, program: &str) -> Vec<Step> {
-    let flag = if program == "pnpm" {
-        "--dir"
-    } else {
-        "--prefix"
-    };
     stale(root)
         .into_iter()
         .map(|package| {
-            Step::new(TOOL, program)
-                .arg(flag)
+            // The package's own manager (its lockfile), `program` only when it has none:
+            // a linked checkout is built the way its own repository builds it.
+            let manager = super::package_manager::detect(&package, None, program == "pnpm").0;
+            Step::new(TOOL, manager.program())
+                .arg(manager.directory_flag())
                 .arg(package.display().to_string())
                 .args(["run", "build"])
                 .in_dir(package)

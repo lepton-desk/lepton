@@ -24,6 +24,7 @@ pub mod manifest;
 pub mod merge;
 pub mod permissions;
 pub mod plan;
+pub mod plugin_catalog;
 pub mod read;
 
 pub use assets::{

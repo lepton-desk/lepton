@@ -122,7 +122,20 @@ pub const BIOME_VERSION: &str = "2.5.15";
 /// without a global install. Both are pinned to a range that starts at this CLI's own
 /// version: the generated `lepton-commands.d.ts` and the core's frame layout are this
 /// version's, and an older SDK would read neither.
-pub fn package_manifest() -> String {
+pub fn package_manifest(plugins: &[&str]) -> String {
+    let mut dependencies = format!(
+        "    \"@lepton-desk/api\": \"^{}\"",
+        env!("CARGO_PKG_VERSION")
+    );
+    for name in plugins {
+        if let Some(plugin) = crate::plugin_catalog::find(name) {
+            dependencies.push_str(&format!(
+                ",\n    \"{}\": \"^{}\"",
+                plugin.package,
+                env!("CARGO_PKG_VERSION")
+            ));
+        }
+    }
     format!(
         concat!(
             "{{\n",
@@ -133,7 +146,7 @@ pub fn package_manifest() -> String {
             "    \"format\": \"biome format --write .\"\n",
             "  }},\n",
             "  \"dependencies\": {{\n",
-            "    \"@lepton-desk/api\": \"^{version}\"\n",
+            "{dependencies}\n",
             "  }},\n",
             "  \"devDependencies\": {{\n",
             "    \"@biomejs/biome\": \"{biome}\",\n",
@@ -142,6 +155,7 @@ pub fn package_manifest() -> String {
             "}}\n"
         ),
         biome = BIOME_VERSION,
+        dependencies = dependencies,
         version = env!("CARGO_PKG_VERSION"),
     )
 }

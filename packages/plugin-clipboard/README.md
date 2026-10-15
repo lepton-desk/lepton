@@ -4,7 +4,7 @@ The system clipboard as text, from a Lepton core: `writeText(text)` and `readTex
 the names Tauri's `@tauri-apps/plugin-clipboard-manager` uses.
 
 ```bash
-pnpm add @lepton-desk/plugin-clipboard
+npm install @lepton-desk/plugin-clipboard   # or: pnpm add, yarn add, bun add
 ```
 
 ```ts

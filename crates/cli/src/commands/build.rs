@@ -98,6 +98,9 @@ impl Flags {
             && (self.native
                 || manifest.render_path == lepton_template_injector::RenderPath::Native);
 
+        if !native && root.join("package.json").is_file() {
+            super::package_manager::ensure_installed(root, &chain)?;
+        }
         let mut steps = self.plan(root, &chain, native, platform);
         if !native {
             super::command_types::types_first(&mut steps, root);
@@ -183,11 +186,7 @@ impl Flags {
     /// arguments — and neither is a shell string, which is what keeps a project name
     /// with a space in it from being re-split by a shell.
     fn package_manager_step(&self, chain: &Toolchain, root: &Path, args: &[&str]) -> Step {
-        let program = if chain.package_manager.is_usable() && chain.package_manager.name == "pnpm" {
-            "pnpm"
-        } else {
-            "npm"
-        };
+        let program = super::package_manager::for_project(root, chain).program();
 
         Step::new(NAME, program)
             .args(args.iter().map(|arg| (*arg).to_owned()))

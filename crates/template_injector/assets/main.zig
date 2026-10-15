@@ -28,7 +28,7 @@ const core = @import("lepton_core");
 ///
 /// Loaded from disk rather than from a development server: this binary is what ships,
 /// and a shipped binary that silently depended on `localhost:5173` would be a binary
-/// that only worked on the machine that built it. Run `pnpm lepton dev` for the
+/// that only worked on the machine that built it. Run `lepton dev` (`npm run lepton:dev`, `pnpm lepton:dev`, …) for the
 /// server-driven loop.
 /// The bundler's output directory, relative to the project and to `share/<name>/`.
 const frontend = "dist";

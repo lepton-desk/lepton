@@ -38,9 +38,26 @@ pub struct Flags {
     #[arg(long, short = 't')]
     pub template: Option<String>,
 
-    /// How the project renders.
-    #[arg(long, value_enum, default_value_t = RenderMode::Native)]
-    pub target: RenderMode,
+    /// How the project renders. Omitted: the wizard asks (webview first), and
+    /// `--non-interactive` takes `native`.
+    #[arg(long, value_enum)]
+    pub target: Option<RenderMode>,
+
+    /// Plugins to add, comma-separated: `os`, `clipboard`, `fs`, `dialog`. Each becomes a
+    /// dependency with its commands under `permissions`; `fs` starts with `$APPDATA` as
+    /// its scope. Omitted: the wizard asks.
+    #[arg(long, value_name = "LIST")]
+    pub plugins: Option<String>,
+
+    /// The package manager the project will use: `npm`, `pnpm`, `yarn` or `bun`. Omitted:
+    /// the one that started this command (`npm create`, `pnpm create`, …), else pnpm when
+    /// installed, else npm.
+    #[arg(long, value_name = "NAME")]
+    pub package_manager: Option<String>,
+
+    /// Installs the dependencies once the project is written.
+    #[arg(long)]
+    pub install: bool,
 
     /// Never asks anything; fails instead.
     ///
@@ -79,7 +96,8 @@ impl Flags {
         let resolved = match self.template.clone() {
             Some(_) => Resolved {
                 template: self.template.clone().unwrap_or_default(),
-                target: self.target,
+                target: self.target.unwrap_or(RenderMode::Native),
+                plugins: super::new_setup::plugins_from_flag(self.plugins.as_deref())?,
                 identifier: self.identifier.clone().unwrap_or_else(|| {
                     lepton_template_injector::manifest::identifier_for(&self.name)
                 }),
@@ -93,6 +111,7 @@ impl Flags {
             None => wizard(&self)?,
         };
 
+        let manager = super::new_setup::choose_manager(self.package_manager.as_deref(), &chain)?;
         let manifest = self.manifest_for(&resolved)?;
         let root = self.root()?;
 
@@ -139,8 +158,11 @@ impl Flags {
         // The one step whose failure is not cleaned up: `commit` removes the staging
         // directory itself, because by the time it fails there is nothing left to tidy.
         staging.commit(&root)?;
+        super::new_setup::prepare_for(&root, manager)?;
 
         report(&root, &manifest, &vendored, &base_files, &written);
+        let installed = self.install && super::new_setup::install(&root, manager)?;
+        super::new_setup::next_steps(&root, manager, installed);
         Ok(())
     }
 
@@ -154,6 +176,7 @@ impl Flags {
             RenderMode::Native => RenderPath::Native,
             RenderMode::Webview => RenderPath::Webview,
         };
+        manifest.plugins = resolved.plugins.clone();
         manifest.window_width = self.width;
         manifest.window_height = self.height;
 
@@ -344,7 +367,30 @@ fn wizard(flags: &Flags) -> Result<Resolved, CliError> {
             })?,
     };
 
-    let target = flags.target;
+    let target = match flags.target {
+        Some(target) => target,
+        None => {
+            let choices = vec![
+                "webview — your Vite frontend in WPE WebKit",
+                "native — drawn by the core, no web engine",
+            ];
+            let picked = inquire::Select::new("Render", choices)
+                .prompt()
+                .map_err(|failure| {
+                    CliError::Invalid(format!("could not read the render choice: {failure}"))
+                })?;
+            if picked.starts_with("webview") {
+                RenderMode::Webview
+            } else {
+                RenderMode::Native
+            }
+        }
+    };
+    let plugins = match flags.plugins.as_deref() {
+        Some(list) => super::new_setup::plugins_from_flag(Some(list))?,
+        None if target == RenderMode::Webview => super::new_setup::ask_plugins()?,
+        None => Vec::new(),
+    };
 
     let default_identifier = lepton_template_injector::manifest::identifier_for(&flags.name);
     let identifier = inquire::Text::new("App identifier")
@@ -358,6 +404,7 @@ fn wizard(flags: &Flags) -> Result<Resolved, CliError> {
         template,
         target,
         identifier,
+        plugins,
     })
 }
 
@@ -366,6 +413,7 @@ struct Resolved {
     template: String,
     target: RenderMode,
     identifier: String,
+    plugins: Vec<&'static str>,
 }
 
 /// The directory-safe spelling of a project name.
@@ -479,10 +527,6 @@ fn report(
         let relative = path.strip_prefix(root).unwrap_or(path);
         println!("    {}", relative.display());
     }
-
-    println!("\nnext: cd {}", root.display());
-    println!("     pnpm install");
-    println!("     lepton dev");
 }
 
 /// How a scaffolded project renders.

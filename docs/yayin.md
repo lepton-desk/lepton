@@ -1,12 +1,12 @@
 # npm yayını: `@lepton-desk/*`
 
-Şu anki sürüm: **0.1.3** (0.1.0–0.1.2 yayımlandı; `plugin-fs` ve `plugin-dialog` ilk kez 0.1.3 ile çıkar). Sürüm artırımı: `Cargo.toml`
+Şu anki sürüm: **0.1.4** (0.1.0–0.1.3 yayımlandı; `create-lepton-app` ilk kez 0.1.4 ile çıkar). Sürüm artırımı: `Cargo.toml`
 `[workspace.package] version`, `packages/api`, `packages/cli` ve `packages/plugin-*`
-`package.json` (cli'nin `optionalDependencies`'i ve eklentilerin `peerDependencies`'i dahil);
+ve `packages/create-lepton-app` `package.json` (cli'nin `optionalDependencies`'i ve eklentilerin `peerDependencies`'i dahil);
 platform paketini `stage.mjs` yazar.
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
-`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
+`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
 
 ## 1. Sizin kararınız gerekenler (ön kontrol bunlarsız geçmez)
 - ~~Lisans metinleri~~ — eklendi: `LICENSE-MIT` (2026 Lepton Desk Contributors) ve
@@ -63,6 +63,10 @@ cd packages/plugin-fs && npm publish
 cd packages/plugin-dialog && npm publish
 ```
 
+```bash
+cd packages/create-lepton-app && npm publish
+```
+
 `publishConfig.access: public` her pakette var; `--access public` gerekmez.
 `api` yayından önce kendi `prepublishOnly`'sini çalıştırır (derleme + denetim + test).
 
@@ -73,10 +77,10 @@ npm view @lepton-desk/cli version
 ```
 
 ```bash
-npx @lepton-desk/cli@0.1.3 --version
+npx @lepton-desk/cli@0.1.4 --version
 ```
 
-Beklenen: `lepton 0.1.3`.
+Beklenen: `lepton 0.1.4`.
 
 ## 6. Geri alma
 - 72 saat içinde: `npm unpublish @lepton-desk/<paket>@<sürüm>` (aynı sürüm bir daha kullanılamaz).

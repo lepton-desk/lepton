@@ -54,6 +54,7 @@ pub fn parse_config(text: &str) -> Result<Manifest, ManifestError> {
             .unwrap_or_else(|| format!("/lepton-{}", identifier_for(&product_name))),
         sdk_scope: optional_string(&root, "sdkScope")?
             .unwrap_or_else(|| String::from("@lepton-desk")),
+        plugins: Vec::new(),
     };
 
     // Validated after parsing, so the same rules apply to a file that was hand-edited
