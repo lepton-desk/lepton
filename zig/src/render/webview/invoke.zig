@@ -132,6 +132,7 @@ pub fn handle(frame: []const u8, registry: *const Registry, window: Window, effe
         const written = command.run(registry.context, argument, out[result_at..]) catch |err| return switch (err) {
             error.Failed => reply(out, sequence, .failed, &.{}),
             error.TooLarge => reply(out, sequence, .too_large, &.{}),
+            error.Denied => reply(out, sequence, .denied, &.{}),
         };
         if (written > out.len - result_at) return reply(out, sequence, .too_large, &.{});
         return replyInPlace(out, sequence, .ok, written);
@@ -307,6 +308,22 @@ fn shout(_: *NoState, argument: []const u8, out: []u8) registry_mod.HandlerError
 
 fn broken(_: *NoState, _: []const u8, _: []u8) registry_mod.HandlerError!usize {
     return error.Failed;
+}
+
+fn outOfScope(_: *NoState, _: []const u8, _: []u8) registry_mod.HandlerError!usize {
+    return error.Denied;
+}
+
+test "a granted command refusing this use of it answers denied" {
+    const app = [_]registry_mod.Command(NoState){.{ .name = "files.read", .run = &outOfScope }};
+    var state: NoState = .{};
+    const granted = (comptime registry_mod.checked(NoState, &app, registry_mod.permissionList("files.read"))).bind(&state);
+    var in: [256]u8 = undefined;
+    var out: [256]u8 = undefined;
+    var effects: Effects = .{};
+    const refused = try decodeReply(try handle(try request(&in, 1, registry_mod.first_app_id, "/etc/shadow"), &granted, .{}, &effects, &out));
+    try std.testing.expectEqual(@intFromEnum(Status.denied), refused.reply.status);
+    try std.testing.expectEqual(@as(u32, 0), refused.reply.result_len);
 }
 
 test "an application command answers in place; ungranted and failing ones are named" {

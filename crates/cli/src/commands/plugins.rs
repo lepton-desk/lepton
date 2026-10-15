@@ -7,6 +7,10 @@
 //! `devDependencies` and hands the core build `-Dplugins=<module>=<path>,…`; the project's
 //! `build.zig` makes each a module and `main.zig` registers their commands, which still
 //! run only when `permissions` lists them.
+//!
+//! A plugin that takes settings names them in `"lepton": { "settings": "fs" }`; the
+//! application gives them in `lepton.config.json` → `"plugins": { "fs": { … } }`, and the
+//! core build gets them flattened to `key=value` lines as `-Dplugin-config`.
 
 use std::path::{Path, PathBuf};
 
@@ -25,6 +29,8 @@ pub struct Plugin {
     pub module: String,
     /// The plugin's Zig root, resolved and inside the package.
     pub root: PathBuf,
+    /// The `plugins.<name>` section of `lepton.config.json` it reads, if any.
+    pub settings: Option<String>,
 }
 
 /// The plugins among the project's dependencies, sorted by package name.
@@ -77,10 +83,16 @@ pub fn discover(root: &Path) -> Result<Vec<Plugin>, CliError> {
                 "{name} declares the plugin \"{relative}\", which is not a file inside the package"
             )));
         }
+        let settings = package
+            .get("lepton")
+            .and_then(|lepton| lepton.get("settings"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         found.push(Plugin {
             package: name.to_owned(),
             module: module_name(name),
             root: plugin_root,
+            settings,
         });
     }
     Ok(found)
@@ -95,25 +107,47 @@ pub fn module_name(package: &str) -> String {
         .collect()
 }
 
-/// Adds `-Dplugins=…` to every core build step, when the project's build takes it and
-/// there is at least one plugin. An older project's `build.zig` declares no such option,
-/// and `zig build` refuses an unknown one.
+/// Adds `-Dplugins=…` and `-Dplugin-config=…` to every core build step, when the project's
+/// build takes them and there is at least one plugin. An older project's `build.zig`
+/// declares no such options, and `zig build` refuses an unknown one.
 pub fn pass_to_core(steps: &mut [Step], root: &Path) -> Result<Vec<Plugin>, CliError> {
     let plugins = discover(root)?;
+    let config_path = root.join(lepton_orchestrator::CONFIG_FILE);
+    let config: Value = match std::fs::read_to_string(&config_path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|error| {
+            CliError::Invalid(format!(
+                "{} is not valid JSON: {error}",
+                config_path.display()
+            ))
+        })?,
+        Err(_) => Value::Null,
+    };
+    let settings = settings_text(&config, &plugins)?;
     if plugins.is_empty() {
         return Ok(plugins);
     }
     let build = root.join(super::build::CORE_DIR).join("build.zig");
-    let takes_option =
-        std::fs::read_to_string(&build).is_ok_and(|text| text.contains("\"plugins\""));
-    if !takes_option {
+    let build_text = std::fs::read_to_string(&build).unwrap_or_default();
+    let names = || {
+        plugins
+            .iter()
+            .map(|plugin| plugin.package.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if !build_text.contains("\"plugins\"") {
         return Err(CliError::Invalid(format!(
             "{} is installed, but this project's src-lepton/build.zig predates plugins; recreate it with a current `lepton new`",
-            plugins
-                .iter()
-                .map(|plugin| plugin.package.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            names()
+        )));
+    }
+    let takes_settings = build_text.contains("\"plugin-config\"");
+    let needs_settings =
+        config.get("plugins").is_some() || plugins.iter().any(|plugin| plugin.settings.is_some());
+    if needs_settings && !takes_settings {
+        return Err(CliError::Invalid(format!(
+            "{} takes settings, but this project's src-lepton/build.zig predates plugin settings; recreate it with a current `lepton new`",
+            names()
         )));
     }
     let value = plugins
@@ -124,14 +158,91 @@ pub fn pass_to_core(steps: &mut [Step], root: &Path) -> Result<Vec<Plugin>, CliE
     for step in steps.iter_mut() {
         if super::launch::is_core_build(step) {
             step.args.push(format!("-Dplugins={value}"));
+            if takes_settings {
+                step.args.push(format!("-Dplugin-config={settings}"));
+            }
         }
     }
     Ok(plugins)
 }
 
+/// `lepton.config.json`'s `plugins` section as `key=value` lines — `"fs": { "scope":
+/// ["$APPDATA", "$DOCUMENT"] }` gives `fs.scope=$APPDATA` and `fs.scope=$DOCUMENT` — after
+/// `app.identifier=<identifier>`. Each section must belong to an installed plugin, so a
+/// misspelt one is an error rather than settings nobody reads.
+pub fn settings_text(config: &Value, plugins: &[Plugin]) -> Result<String, CliError> {
+    let invalid = |reason: String| CliError::Invalid(format!("lepton.config.json: {reason}"));
+    let mut lines = Vec::new();
+    if let Some(identifier) = config.get("identifier").and_then(Value::as_str) {
+        lines.push(format!("app.identifier={identifier}"));
+    }
+    let Some(section) = config.get("plugins") else {
+        return Ok(lines.join("\n"));
+    };
+    let Value::Object(sections) = section else {
+        return Err(invalid(
+            "\"plugins\" must be an object of plugin settings".to_owned(),
+        ));
+    };
+    for (name, fields) in sections {
+        if !plugins
+            .iter()
+            .any(|plugin| plugin.settings.as_deref() == Some(name.as_str()))
+        {
+            let readers: Vec<&str> = plugins
+                .iter()
+                .filter_map(|plugin| plugin.settings.as_deref())
+                .collect();
+            return Err(invalid(format!(
+                "\"plugins.{name}\" is read by no installed plugin (plugins taking settings: {})",
+                if readers.is_empty() {
+                    "none".to_owned()
+                } else {
+                    readers.join(", ")
+                }
+            )));
+        }
+        let Value::Object(fields) = fields else {
+            return Err(invalid(format!("\"plugins.{name}\" must be an object")));
+        };
+        for (field, value) in fields {
+            if !plain_word(field) {
+                return Err(invalid(format!(
+                    "\"plugins.{name}.{field}\": a setting name is lowercase letters, digits and _"
+                )));
+            }
+            let items: Vec<&Value> = match value {
+                Value::Array(items) => items.iter().collect(),
+                other => vec![other],
+            };
+            for item in items {
+                let Value::String(text) = item else {
+                    return Err(invalid(format!(
+                        "\"plugins.{name}.{field}\" must be a string or an array of strings"
+                    )));
+                };
+                if text.contains('\n') || text.contains('\0') {
+                    return Err(invalid(format!(
+                        "\"plugins.{name}.{field}\" has a line break or NUL in {text:?}"
+                    )));
+                }
+                lines.push(format!("{name}.{field}={text}"));
+            }
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+/// `[a-z][a-z0-9_]*`.
+pub fn plain_word(word: &str) -> bool {
+    let mut chars = word.chars();
+    chars.next().is_some_and(|first| first.is_ascii_lowercase())
+        && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{discover, module_name, pass_to_core};
+    use super::{discover, module_name, pass_to_core, settings_text};
     use lepton_orchestrator::testing::{Failure, Scratch};
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok, ensure};
 
@@ -226,6 +337,123 @@ mod tests {
         )?;
         let error = assert_err!(discover(scratch.path()), "escape");
         assert_contains!(&error.to_string(), "not a file inside the package");
+        Ok(())
+    }
+
+    fn fs_plugin(scratch: &Scratch, build: &str, config: &str) -> Result<(), Failure> {
+        scratch.write(
+            "package.json",
+            r#"{"dependencies":{"@lepton-desk/plugin-fs":"^0.1.3"}}"#,
+        )?;
+        scratch.write(
+            "node_modules/@lepton-desk/plugin-fs/package.json",
+            r#"{"lepton":{"plugin":"zig/plugin.zig","settings":"fs"}}"#,
+        )?;
+        scratch.write("node_modules/@lepton-desk/plugin-fs/zig/plugin.zig", "\n")?;
+        scratch.write("src-lepton/build.zig", build)?;
+        scratch.write("lepton.config.json", config)
+    }
+
+    fn core_step(scratch: &Scratch) -> Vec<lepton_orchestrator::Step> {
+        vec![
+            lepton_orchestrator::Step::new("lepton", "zig")
+                .arg("build")
+                .in_dir(scratch.path().join("src-lepton")),
+        ]
+    }
+
+    #[test]
+    fn plugin_settings_reach_the_core_as_lines() -> Result<(), Failure> {
+        let scratch = Scratch::new("plugins-settings")?;
+        fs_plugin(
+            &scratch,
+            r#""plugins" "plugin-config""#,
+            r#"{"identifier":"style.notes","plugins":{"fs":{"scope":["$APPDATA","$DOCUMENT/notlar"]}}}"#,
+        )?;
+        let mut steps = core_step(&scratch);
+        let plugins = assert_ok!(pass_to_core(&mut steps, scratch.path()), "passes");
+        assert_eq!(plugins[0].settings.as_deref(), Some("fs"));
+        let setting = steps[0]
+            .args
+            .iter()
+            .find(|arg| arg.starts_with("-Dplugin-config="));
+        assert_eq!(
+            setting.map(String::as_str),
+            Some(
+                "-Dplugin-config=app.identifier=style.notes\nfs.scope=$APPDATA\nfs.scope=$DOCUMENT/notlar"
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_settings_section_no_plugin_reads_is_an_error() -> Result<(), Failure> {
+        let scratch = Scratch::new("plugins-settings-typo")?;
+        fs_plugin(
+            &scratch,
+            r#""plugins" "plugin-config""#,
+            r#"{"plugins":{"fss":{"scope":["$APPDATA"]}}}"#,
+        )?;
+        let error = assert_err!(
+            pass_to_core(&mut core_step(&scratch), scratch.path()),
+            "typo"
+        );
+        assert_contains!(
+            &error.to_string(),
+            "\"plugins.fss\" is read by no installed plugin"
+        );
+        assert_contains!(&error.to_string(), "fs");
+        Ok(())
+    }
+
+    #[test]
+    fn settings_need_a_build_file_that_takes_them() -> Result<(), Failure> {
+        let scratch = Scratch::new("plugins-settings-old")?;
+        fs_plugin(
+            &scratch,
+            r#""plugins""#,
+            r#"{"plugins":{"fs":{"scope":["$APPDATA"]}}}"#,
+        )?;
+        let error = assert_err!(
+            pass_to_core(&mut core_step(&scratch), scratch.path()),
+            "old"
+        );
+        assert_contains!(&error.to_string(), "predates plugin settings");
+        Ok(())
+    }
+
+    #[test]
+    fn setting_values_are_strings_without_line_breaks() -> Result<(), Failure> {
+        let fs = vec![super::Plugin {
+            package: "@lepton-desk/plugin-fs".to_owned(),
+            module: "lepton_desk_plugin_fs".to_owned(),
+            root: std::path::PathBuf::from("/p/zig/plugin.zig"),
+            settings: Some("fs".to_owned()),
+        }];
+        for (config, expected) in [
+            (
+                r#"{"plugins":{"fs":{"scope":[1]}}}"#,
+                "must be a string or an array of strings",
+            ),
+            (r#"{"plugins":{"fs":{"scope":["a\nb"]}}}"#, "line break"),
+            (
+                r#"{"plugins":{"fs":{"Scope":"x"}}}"#,
+                "a setting name is lowercase",
+            ),
+            (r#"{"plugins":["fs"]}"#, "must be an object"),
+        ] {
+            let value: serde_json::Value = assert_ok!(serde_json::from_str(config), "json");
+            let error = assert_err!(settings_text(&value, &fs), "{}", config);
+            assert_contains!(&error.to_string(), expected);
+        }
+        let single: serde_json::Value = assert_ok!(
+            serde_json::from_str(r#"{"plugins":{"fs":{"mode":"strict"}}}"#),
+            "json"
+        );
+        assert_eq!(
+            assert_ok!(settings_text(&single, &fs), "single"),
+            "fs.mode=strict"
+        );
         Ok(())
     }
 

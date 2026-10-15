@@ -29,6 +29,10 @@ pub const HandlerError = error{
     Failed,
     /// The result does not fit the space it was given.
     TooLarge,
+    /// The command exists and is granted, but this use of it is not: a path outside the
+    /// directories the application allowed. The page sees `denied`, as for an unlisted
+    /// command.
+    Denied,
 };
 
 /// An application command with its state: reads `argument`, writes its result into the

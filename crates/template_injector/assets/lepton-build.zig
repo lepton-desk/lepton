@@ -104,6 +104,16 @@ pub fn build(b: *std.Build) !void {
     // is the tuple `main.zig` hands to the registry. No plugins: an empty tuple.
     const plugin_list = b.option([]const u8, "plugins", "Plugin modules, <module>=<path>, comma-separated") orelse "";
     const plugins_source = b.addWriteFiles();
+    // Their settings: `lepton.config.json`'s `plugins` section flattened by `lepton` into
+    // `key=value` lines (`fs.scope=$APPDATA`), plus `app.identifier`. Every plugin may
+    // `@import("lepton_plugin_config").text` and read it with `core.pluginConfig`.
+    const plugin_config = b.option([]const u8, "plugin-config", "Plugin settings, key=value lines") orelse "";
+    const plugin_config_module = b.createModule(.{
+        .root_source_file = plugins_source.add(
+            "lepton_plugin_config.zig",
+            b.fmt("pub const text = \"{f}\";\n", .{std.zig.fmtString(plugin_config)}),
+        ),
+    });
     var plugin_imports: std.ArrayList(std.Build.Module.Import) = .empty;
     var plugin_tuple: std.ArrayList(u8) = .empty;
     plugin_tuple.appendSlice(b.allocator, "pub const all = .{") catch @panic("out of memory");
@@ -116,7 +126,10 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = .{ .cwd_relative = entry[split + 1 ..] },
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "lepton_core", .module = configured.module }},
+            .imports = &.{
+                .{ .name = "lepton_core", .module = configured.module },
+                .{ .name = "lepton_plugin_config", .module = plugin_config_module },
+            },
         });
         plugin_imports.append(b.allocator, .{ .name = module_name, .module = plugin }) catch @panic("out of memory");
         plugin_tuple.appendSlice(b.allocator, b.fmt(" @import(\"{s}\"),", .{module_name})) catch @panic("out of memory");

@@ -26,6 +26,10 @@ pub const ownership = @import("ipc/ownership.zig");
 pub const probe = @import("metrics/probe.zig");
 pub const latency = @import("metrics/latency.zig");
 pub const display = @import("platform/linux/display.zig");
+/// The user's base directories (`$APPDATA`, `$DOCUMENT`, …), for plugins.
+pub const paths = @import("platform/linux/paths.zig");
+/// A plugin's settings from `lepton.config.json`'s `plugins`, read at compile time.
+pub const pluginConfig = @import("plugin_config.zig");
 pub const window = @import("window/window.zig");
 
 /// The frame the render layer draws into, and the render paths that fill it.

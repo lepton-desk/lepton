@@ -168,6 +168,9 @@ pub const setenv = @extern(
 );
 
 pub fn setDataDirectory(path: [*:0]const u8) void {
+    // After this the environment no longer says where the user's data lives; plugins
+    // resolving `$APPDATA` need the value from before.
+    @import("../../platform/linux/paths.zig").rememberDataHome();
     _ = setenv("XDG_DATA_HOME", path, 1);
 }
 

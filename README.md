@@ -65,7 +65,7 @@ See [`packages/api`](packages/api/README.md).
 | `crates/orchestrator` | toolchain discovery, process supervision |
 | `packages/api` | `@lepton-desk/api` |
 | `packages/cli` | `@lepton-desk/cli` (`npx lepton`) |
-| `packages/plugin-*` | plugins: `plugin-os`, `plugin-clipboard` (TypeScript + Zig in one npm package) |
+| `packages/plugin-*` | plugins: `plugin-os`, `plugin-clipboard`, `plugin-fs` (TypeScript + Zig in one npm package) |
 
 ```bash
 cargo test && cargo clippy --workspace --all-targets
