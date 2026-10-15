@@ -83,7 +83,9 @@ Beklenen: `lepton 0.1.3`.
 - Sonrası: `npm deprecate @lepton-desk/<paket>@<sürüm> "<neden>"`.
 
 ## Yayından sonra (benim işim)
-- Yeni sürüm kayıt defterinde görünür olunca (ilk yayında ~5 dk sürdü) `npx` ve yeni bir
+- Yeni sürüm kayıt defterinde görünür olunca (ilk yayında ~5 dk sürdü; ilk kez yayımlanan bir
+  paketin pnpm'in okuduğu kısaltılmış belgesi — `Accept: application/vnd.npm.install-v1+json` —
+  sürüm adresinden ~3 dk sonra geldi) `npx` ve yeni bir
   proje `pnpm install` + `lepton run` ile doğrulanır.
 - Diğer platformlar: kendi makinelerinde/CI'da `cargo build --release` + `stage.mjs`, sonra
   `cli`'nin `optionalDependencies`'ine eklenip `cli` yeni sürümle yeniden yayımlanır.
