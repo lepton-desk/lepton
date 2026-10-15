@@ -31,6 +31,7 @@ const e_display_get_default = @extern(*const fn () callconv(.c) ?*anyopaque, .{ 
 const e_display_get_clipboard = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "wpe_display_get_clipboard" });
 const e_clipboard_get_formats = @extern(*const fn (?*anyopaque) callconv(.c) ?[*:null]const ?[*:0]const u8, .{ .name = "wpe_clipboard_get_formats" });
 const e_clipboard_read_text = @extern(*const fn (?*anyopaque, [*:0]const u8, ?*usize) callconv(.c) ?[*]u8, .{ .name = "wpe_clipboard_read_text" });
+const e_clipboard_get_change_count = @extern(*const fn (?*anyopaque) callconv(.c) i64, .{ .name = "wpe_clipboard_get_change_count" });
 const e_clipboard_set_content = @extern(*const fn (?*anyopaque, ?*anyopaque) callconv(.c) void, .{ .name = "wpe_clipboard_set_content" });
 const e_content_new = @extern(*const fn () callconv(.c) ?*anyopaque, .{ .name = "wpe_clipboard_content_new" });
 const e_content_set_text = @extern(*const fn (?*anyopaque, [*:0]const u8) callconv(.c) void, .{ .name = "wpe_clipboard_content_set_text" });
@@ -41,6 +42,13 @@ const e_free = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_
 fn clipboard() ?*anyopaque {
     const display = e_display_get_default() orelse return null;
     return e_display_get_clipboard(display);
+}
+
+/// How many times the clipboard has changed, as WPE counts; -1 without a clipboard.
+pub fn changeCount() i64 {
+    if (comptime !available) return -1;
+    const board = clipboard() orelse return -1;
+    return e_clipboard_get_change_count(board);
 }
 
 /// The first of [`text_formats`] that `offered` contains, as the offered string.

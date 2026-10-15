@@ -24,12 +24,12 @@ An unlisted command rejects with `InvokeError` reason `denied`.
 On Linux the clipboard is WPE's (`WPEClipboardWayland` under Wayland), so text written here
 is what other applications paste, and what they copy is read here.
 
-**Focus.** The compositor shares the selection only with the focused window, and ignores a
-selection set by a window that has not had input. So, like `navigator.clipboard`, both
-functions reject with a `NotAllowedError` `DOMException` while `document.hasFocus()` is
-false — at page load the window usually does not have focus yet (measured: it arrives
-~30 ms later). After focus, the selection itself arrives a moment later (80–160 ms
-measured); a read in that moment answers `""`.
+**Focus.** The compositor tells a window what the selection is only once it has focus,
+and ignores a selection set by a window without it — at page load the window usually has
+no focus yet. So `writeText` waits until the window has focus, and `readText` waits until
+the compositor has told the window what the selection is (it follows focus by tens of
+milliseconds; measured, a read at page load answered after 71–162 ms). Once that has
+happened neither waits. Pass `{ signal }` (an `AbortSignal`) to stop waiting.
 
 Text containing a NUL character rejects with `InvokeError` reason `failed`, as do both
 commands in a native (non-webview) application. Requires `lepton` 0.1.2 or newer.
