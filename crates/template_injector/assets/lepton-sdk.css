@@ -1,0 +1,301 @@
+/*
+ * Lepton starter styles.
+ *
+ * Palette roles, each with one job:
+ *   --lp-bed    the steel table; everything sits on it
+ *   --lp-face   raised type catching the lamp; the only bright thing
+ *   --lp-groove lead spacing between sorts; the darkest thing, and the grid
+ *   --lp-spot   the single ink; out of tolerance and nothing else
+ */
+
+/*
+ * Faces.
+ *
+ * No `@font-face` block, and that is a decision rather than an omission. A face
+ * declared from a `url()` is a request the project has to satisfy: either the file
+ * ships with the template or the browser logs a 404 on every window, forever. The
+ * alternative — declaring a family nobody has — is worse, because the type silently
+ * changes shape between machines and the whole sheet is tuned to its metrics.
+ *
+ * So the type is set from faces that are already on the machine, named one per
+ * class, worst last. Charter and the two Linux text faces are chosen for their
+ * x-height and their slabby serifs; the sheet's measure of 34rem and its 1.5rem
+ * baseline are set against these, not against a hypothetical future.
+ *
+ * Swap in a `@font-face` when the project has a woff2 to point at — this file is the
+ * only place that would change.
+ */
+
+:root {
+  --lp-bed: #14181c;
+  --lp-bed-ramp-1: #191e23;
+  --lp-bed-ramp-2: #1f252b;
+  --lp-bed-ramp-3: #262d34;
+
+  --lp-face: #cdd3d8;
+  --lp-face-dim: #8e979f;
+  --lp-face-faint: #626c74;
+
+  --lp-groove: #0b0e11;
+  --lp-rule: #2b333a;
+
+  --lp-spot: #c8963c;
+
+  --lp-measure: 34rem;
+  --lp-baseline: 1.5rem;
+  --lp-gutter: 1.5rem;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background-color: var(--lp-bed);
+  /* The grain runs one way because the light does. A two-axis overlay would be a
+     grid pretending to be a material. */
+  background-image: linear-gradient(100deg, rgb(255 255 255 / 2%) 0%, rgb(255 255 255 / 0%) 38%);
+  color: var(--lp-face);
+  font-family: Charter, "Bitstream Charter", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  line-height: var(--lp-baseline);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The forme: a hard rectangular boundary, like type locked into a chase. */
+.forme {
+  display: grid;
+  grid-template-columns: 13rem 1fr;
+  min-height: 100vh;
+}
+
+/* The rail is metal, and it is the only place a border reads as structure. */
+.rail {
+  background-color: var(--lp-groove);
+  border-right: 1px solid var(--lp-rule);
+  padding: var(--lp-gutter);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.rail__label {
+  font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, "Courier New", monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lp-face-faint);
+  margin-bottom: 0.75rem;
+}
+
+.rail__item {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.375rem 0.75rem;
+  text-align: left;
+  font: inherit;
+  font-size: 0.9375rem;
+  color: var(--lp-face-dim);
+  cursor: pointer;
+  transition:
+    color 120ms cubic-bezier(0.19, 1, 0.22, 1),
+    border-color 120ms cubic-bezier(0.19, 1, 0.22, 1);
+}
+
+.rail__item:hover {
+  color: var(--lp-face);
+}
+
+.rail__item[aria-current="page"] {
+  /* Marked in the type's own vocabulary: a rule, not a pill. */
+  border-left-color: var(--lp-face);
+  color: var(--lp-face);
+}
+
+.rail__item:focus-visible {
+  outline: 2px solid var(--lp-face);
+  outline-offset: -2px;
+}
+
+.bay {
+  padding: calc(var(--lp-gutter) * 1.5);
+  overflow: auto;
+}
+
+.bay__title {
+  font-size: 1.5rem;
+  font-weight: 400;
+  line-height: 2rem;
+  margin: 0 0 var(--lp-gutter);
+  /* Tracking stops well short of the floor: a display size needs little. */
+  letter-spacing: -0.01em;
+}
+
+/*
+ * The measures table.
+ *
+ * Columns are set in the type and separated by the groove, so the rules carry the
+ * grid rather than any cell border. Rows sit on the baseline lattice, which is why
+ * the vertical padding is a multiple of the baseline and nothing is.
+ */
+.measures {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.measures caption {
+  text-align: left;
+  font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, "Courier New", monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lp-face-faint);
+  padding-bottom: 0.5rem;
+}
+
+.measures th {
+  font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, "Courier New", monospace;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lp-face-faint);
+  text-align: left;
+  padding: 0 1rem 0.5rem 0;
+  border-bottom: 1px solid var(--lp-rule);
+}
+
+.measures th[aria-sort] {
+  cursor: pointer;
+  color: var(--lp-face-dim);
+}
+
+.measures td {
+  padding: 0 1rem 0 0;
+  border-bottom: 1px solid var(--lp-groove);
+  vertical-align: baseline;
+}
+
+.measures td:first-child {
+  padding-right: 2rem;
+}
+
+.measures__value {
+  font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, "Courier New", monospace;
+  text-align: right;
+  color: var(--lp-face);
+}
+
+.measures__cast {
+  font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, "Courier New", monospace;
+  font-size: 0.6875rem;
+  color: var(--lp-face-faint);
+}
+
+/*
+ * Out of tolerance.
+ *
+ * The only use of the spot ink in the whole sheet. It is identified by its flat
+ * shape as well as its colour, so it is found by form and not only by hue — a
+ * reader who cannot see the hue still finds the band.
+ */
+.out-of-tolerance {
+  background-color: var(--lp-spot);
+  color: var(--lp-groove);
+  /* Square: the ink is a chip of colour laid into the forme, not a badge. */
+  border-radius: 0;
+  padding: 0 0.375rem;
+  font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, "Courier New", monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Registration crosshairs at the forme's corners.
+   They exist to show where the furniture sits, so the eye can check that the
+   lattice really is registered rather than approximately aligned. */
+.forme--registered {
+  position: relative;
+}
+
+.forme--registered::before,
+.forme--registered::after {
+  content: "";
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  pointer-events: none;
+  opacity: 0.5;
+  background:
+    linear-gradient(var(--lp-face), var(--lp-face)) center / 1px 100% no-repeat,
+    linear-gradient(var(--lp-face), var(--lp-face)) center / 100% 1px no-repeat;
+}
+
+.forme--registered::before {
+  top: 6px;
+  left: 6px;
+}
+
+.forme--registered::after {
+  right: 6px;
+  bottom: 6px;
+}
+
+/* Text selection, caret and scrollbar belong to no design system unless they are
+   given one. On a cold ground the defaults are the brightest thing on screen. */
+::selection {
+  background-color: var(--lp-face);
+  color: var(--lp-groove);
+}
+
+* {
+  scrollbar-color: var(--lp-rule) var(--lp-groove);
+  scrollbar-width: thin;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * Both declarations are suppressed rather than the rule being switched off.
+   *
+   * A reduced-motion override has to beat whatever motion the rest of the sheet
+   * introduces, and `!important` is the only way to say that. Turning the rule off
+   * project-wide would also stop catching the `!important` a developer adds by
+   * accident, which is the case the rule is actually for.
+   */
+  * {
+    /* biome-ignore lint/complexity/noImportantStyles: must win against every other rule */
+    transition-duration: 0ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: must win against every other rule */
+    animation-duration: 0ms !important;
+  }
+}
+
+@media (max-width: 48rem) {
+  .forme {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    border-right: 0;
+    border-bottom: 1px solid var(--lp-rule);
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .rail__label {
+    flex-basis: 100%;
+  }
+}

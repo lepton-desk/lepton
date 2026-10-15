@@ -1,0 +1,214 @@
+//! The desktop entry that lets a shell recognise the running application.
+//!
+//! On Wayland a panel, dock or task switcher matches a window to an application by its
+//! `app_id`, looking for `<app_id>.desktop` in the XDG applications directories. With no
+//! such file the window has no name or icon of its own, and some shells (measured on
+//! COSMIC) leave it out of the app list altogether. Lepton sets the `app_id` from
+//! `identifier` in `lepton.config.json`, so this writes the matching entry next to the
+//! user's other applications — after `run` and `dev` build, so it always points at the
+//! binary that was just built.
+
+use std::path::{Path, PathBuf};
+
+use super::CliError;
+
+/// The text of the entry, per the Desktop Entry Specification.
+///
+/// `StartupWMClass` repeats the `app_id`: some shells match on it rather than on the file
+/// name, and it costs nothing to be matched both ways.
+pub fn entry_text(app_id: &str, name: &str, exec: &Path) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nExec={exec}\nTerminal=false\nStartupWMClass={app_id}\nCategories=Development;\nX-Lepton-Generated=true\n",
+        name = escape_value(name),
+        exec = quote_exec(&exec.to_string_lossy()),
+    )
+}
+
+/// Where entries go: `$XDG_DATA_HOME/applications`, else `~/.local/share/applications`.
+///
+/// Taken as arguments rather than read here, so the rule is testable without changing the
+/// test process's environment.
+pub fn applications_dir(xdg_data_home: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
+    match xdg_data_home {
+        Some(dir) if !dir.is_empty() && Path::new(dir).is_absolute() => {
+            Some(Path::new(dir).join("applications"))
+        }
+        _ => home
+            .filter(|dir| !dir.is_empty())
+            .map(|dir| Path::new(dir).join(".local/share/applications")),
+    }
+}
+
+/// Writes the entry into `dir` and returns its path.
+///
+/// Refuses to overwrite an entry Lepton did not write: an `app_id` that collides with an
+/// installed application must not replace that application's launcher.
+pub fn install(dir: &Path, app_id: &str, text: &str) -> Result<PathBuf, CliError> {
+    if app_id.is_empty() || app_id.contains('/') {
+        return Err(CliError::Invalid(format!(
+            "identifier {app_id:?} cannot name a desktop entry"
+        )));
+    }
+    let path = dir.join(format!("{app_id}.desktop"));
+    if let Ok(existing) = std::fs::read_to_string(&path)
+        && !existing.contains("X-Lepton-Generated=true")
+    {
+        return Err(CliError::Invalid(format!(
+            "{} exists and was not written by Lepton; change `identifier` in lepton.config.json",
+            path.display()
+        )));
+    }
+    std::fs::create_dir_all(dir).map_err(|error| {
+        CliError::Invalid(format!("could not create {}: {error}", dir.display()))
+    })?;
+    std::fs::write(&path, text).map_err(|error| {
+        CliError::Invalid(format!("could not write {}: {error}", path.display()))
+    })?;
+    Ok(path)
+}
+
+/// Installs the entry for a freshly built project in the user's applications directory.
+pub fn register(app_id: &str, name: &str, exec: &Path) -> Result<PathBuf, CliError> {
+    let xdg = std::env::var("XDG_DATA_HOME").ok();
+    let home = std::env::var("HOME").ok();
+    let dir = applications_dir(xdg.as_deref(), home.as_deref()).ok_or_else(|| {
+        CliError::Invalid(String::from(
+            "neither XDG_DATA_HOME nor HOME is set; no place for a desktop entry",
+        ))
+    })?;
+    install(&dir, app_id, &entry_text(app_id, name, exec))
+}
+
+/// Registers the entry and says where, or why not, without stopping the run.
+///
+/// A missing entry costs the application its name in the dock, not its window, so a
+/// failure is reported and the command carries on.
+pub fn announce(app_id: &str, name: &str, exec: &Path) {
+    match register(app_id, name, exec) {
+        Ok(path) => println!("desktop entry  {}", path.display()),
+        Err(error) => eprintln!("desktop entry  not written: {error}"),
+    }
+}
+
+/// A string value: newlines and backslashes are the only characters the format reserves.
+fn escape_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
+/// The program path as one `Exec` argument.
+///
+/// Always quoted, so a space in a path (a home directory, a project folder) stays one
+/// argument; inside quotes the specification reserves `"`, `` ` ``, `$` and `\`. `%` is
+/// a field code everywhere and is doubled.
+fn quote_exec(program: &str) -> String {
+    let mut quoted = String::with_capacity(program.len() + 2);
+    quoted.push('"');
+    for ch in program.chars() {
+        match ch {
+            '"' | '`' | '$' | '\\' => {
+                quoted.push('\\');
+                quoted.push(ch);
+            }
+            '%' => quoted.push_str("%%"),
+            _ => quoted.push(ch),
+        }
+    }
+    quoted.push('"');
+    // The value is then a string value, whose own escaping doubles every backslash.
+    escape_value(&quoted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{applications_dir, entry_text, install};
+    use lepton_orchestrator::testing::{Failure, Scratch};
+    use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok, ensure};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn the_entry_is_matched_by_the_app_id() -> Result<(), Failure> {
+        let text = entry_text("run-app", "run-app", Path::new("/opt/run-app/bin/run-app"));
+        assert_contains!(&text, "[Desktop Entry]\n");
+        assert_contains!(&text, "StartupWMClass=run-app\n");
+        assert_contains!(&text, "Exec=\"/opt/run-app/bin/run-app\"\n");
+        Ok(())
+    }
+
+    #[test]
+    fn a_path_with_spaces_and_reserved_characters_stays_one_argument() -> Result<(), Failure> {
+        let text = entry_text("a", "a", Path::new("/home/x/My Apps/100% $cash/app"));
+        // Quoted, `$` escaped inside quotes, `%` doubled, and the escaping backslash
+        // itself doubled by the string-value rule.
+        assert_contains!(&text, "Exec=\"/home/x/My Apps/100%% \\\\$cash/app\"\n");
+        Ok(())
+    }
+
+    #[test]
+    fn xdg_data_home_wins_and_home_is_the_fallback() -> Result<(), Failure> {
+        assert_eq!(
+            applications_dir(Some("/data"), Some("/home/u")),
+            Some(PathBuf::from("/data/applications"))
+        );
+        // A relative XDG_DATA_HOME is invalid per the base-directory spec and ignored.
+        assert_eq!(
+            applications_dir(Some("rel"), Some("/home/u")),
+            Some(PathBuf::from("/home/u/.local/share/applications"))
+        );
+        assert_eq!(applications_dir(None, None), None::<PathBuf>);
+        Ok(())
+    }
+
+    #[test]
+    fn an_entry_is_written_and_rewritten_by_lepton() -> Result<(), Failure> {
+        let scratch = Scratch::new("desktop-write")?;
+        let dir = scratch.path().join("applications");
+
+        let first = assert_ok!(
+            install(&dir, "notes", "X-Lepton-Generated=true\nv1\n"),
+            "first write"
+        );
+        assert_eq!(first, dir.join("notes.desktop"));
+        assert_ok!(
+            install(&dir, "notes", "X-Lepton-Generated=true\nv2\n"),
+            "rewrite of our own entry"
+        );
+        assert_contains!(&scratch.read("applications/notes.desktop")?, "v2");
+        Ok(())
+    }
+
+    #[test]
+    fn someone_elses_entry_is_never_replaced() -> Result<(), Failure> {
+        let scratch = Scratch::new("desktop-foreign")?;
+        scratch.write(
+            "applications/firefox.desktop",
+            "[Desktop Entry]\nName=Firefox\n",
+        )?;
+
+        let error = assert_err!(
+            install(
+                &scratch.path().join("applications"),
+                "firefox",
+                "X-Lepton-Generated=true\n"
+            ),
+            "a foreign launcher must survive"
+        );
+        assert_contains!(&error.to_string(), "identifier");
+        ensure!(
+            scratch
+                .read("applications/firefox.desktop")?
+                .contains("Firefox"),
+            "the foreign entry was modified"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_identifier_with_a_slash_is_refused() -> Result<(), Failure> {
+        let scratch = Scratch::new("desktop-slash")?;
+        let _ = assert_err!(install(scratch.path(), "../evil", "x"), "path escape");
+        Ok(())
+    }
+}

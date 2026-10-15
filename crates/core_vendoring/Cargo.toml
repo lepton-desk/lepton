@@ -1,0 +1,19 @@
+[package]
+name = "lepton-core-vendoring"
+description = "Carries the Zig core inside the CLI so a scaffolded project builds with no Lepton checkout beside it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+# The walk runs at compile time and needs nothing at run time: the file list it
+# produces is generated into the binary, not recomputed by it.
+walkdir = "2"
+
+[dev-dependencies]
+lepton-orchestrator = { path = "../orchestrator" }
+
+[lints]
+workspace = true

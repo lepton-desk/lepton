@@ -1,0 +1,47 @@
+{
+  "name": "@lepton-desk/api",
+  "version": "0.1.0",
+  "description": "Call a Lepton core from the page: binary invoke, no JSON.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lepton-desk/lepton",
+    "directory": "packages/api"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "default": "./dist/core.js"
+    },
+    "./event": {
+      "types": "./dist/event.d.ts",
+      "default": "./dist/event.js"
+    },
+    "./window": {
+      "types": "./dist/window.d.ts",
+      "default": "./dist/window.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "generate": "../../zig/zig-out/bin/lepton-invoke-check types > src/commands.gen.ts",
+    "check": "biome check . && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --test test/",
+    "prepublishOnly": "pnpm run build && pnpm run check && pnpm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

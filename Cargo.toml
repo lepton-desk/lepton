@@ -1,0 +1,82 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/cli",
+    "crates/core_vendoring",
+    "crates/orchestrator",
+    "crates/template_injector",
+]
+
+# One place decides what "current" means for every crate in the workspace, so a
+# build never mixes two incompatible major versions of the same dependency.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/lepton-desk/lepton"
+
+[workspace.dependencies]
+# Argument parsing. The derive API is used rather than the builder one: a command
+# surface this wide is a data structure, and describing it as a struct keeps the
+# flags and the fields that hold them from drifting apart.
+clap = { version = "4.5", features = ["derive"] }
+
+# Reading `lepton.config.json`, which is the one file in the workspace that is
+# genuinely JSON because a human is meant to edit it. Nothing on the IPC path
+# goes near it: that channel is zero-copy binary by construction.
+serde_json = "1"
+
+# No error-handling crate. `std::error::Error` plus a small shared error enum
+# keeps the dependency list short and, more importantly, keeps every failure in
+# this workspace described rather than boxed into a string.
+#
+# `serde`/`serde_json` appear only where a config file genuinely is JSON, which
+# is `lepton.config.json` — never on the IPC path, which is zero-copy binary.
+
+# Process supervision for `lepton dev` / `lepton run`. A signal handler is `unsafe`
+# code, which this workspace forbids, so the handler is the vetted one: `ctrlc` runs the
+# callback on an ordinary thread, and `termination` adds SIGTERM and SIGHUP to SIGINT.
+# Measured without it: `timeout 60 lepton dev` left Vite and the app running, and the
+# next `dev` failed on a held channel name and a busy port.
+ctrlc = { version = "3.5", features = ["termination"] }
+# `kill(2)` with a chosen signal, safely. `Child::kill` only sends SIGKILL, which a
+# child cannot pass on to its own children.
+nix = { version = "0.31", default-features = false, features = ["signal"] }
+
+# `lepton package` writes release archives itself, with no `tar`/`gzip` subprocess: the
+# entries, their order, owners and times are chosen here, so two packages of one build
+# are byte-identical. `flate2` uses its pure-Rust backend (`miniz_oxide`) by default.
+tar = { version = "0.4.46", default-features = false }
+flate2 = "1.1"
+# zstd for the Arch package, pure Rust (its fastest level; stronger ones are unimplemented).
+ruzstd = "0.9"
+# The SHA-256 written beside every archive.
+sha2 = "0.11"
+
+[workspace.lints.rust]
+# Panics and index-out-of-bounds are bugs, not error paths. Every failure in this
+# workspace is a `Result`; these lints make an accidental panic a compile error
+# rather than something a user discovers.
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+# The three that matter most for a tool people run in CI: a silent map-and-unwrap,
+# a clone that should not exist, and an `unwrap` reaching production code.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+# A CLI is distributed as a single binary that developers copy around, so size
+# matters more than the last percent of speed. `opt-level = "s"` and LTO are what
+# actually move the number; `panic = "abort"` removes the unwinding tables the
+# tool never uses.
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

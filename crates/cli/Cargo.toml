@@ -1,0 +1,26 @@
+[package]
+name = "lepton-cli"
+description = "The Lepton developer CLI: scaffold, develop and build desktop applications."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "lepton"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+flate2 = { workspace = true }
+ruzstd = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+inquire = "0.9"
+lepton-core-vendoring = { path = "../core_vendoring" }
+lepton-orchestrator = { path = "../orchestrator" }
+lepton-template-injector = { path = "../template_injector" }
+
+[lints]
+workspace = true

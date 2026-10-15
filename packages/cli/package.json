@@ -1,0 +1,32 @@
+{
+  "name": "@lepton-desk/cli",
+  "version": "0.1.0",
+  "description": "The Lepton CLI: npx lepton new | dev | run | build | package.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lepton-desk/lepton",
+    "directory": "packages/cli"
+  },
+  "type": "module",
+  "bin": {
+    "lepton": "bin/lepton.js"
+  },
+  "files": [
+    "bin",
+    "LICENSE*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@lepton-desk/cli-linux-x64": "0.1.0"
+  },
+  "scripts": {
+    "stage": "node scripts/stage.mjs",
+    "test": "node --test test/"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

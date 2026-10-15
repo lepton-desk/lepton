@@ -1,0 +1,22 @@
+[package]
+name = "lepton-template-injector"
+description = "Wires Lepton's SDK, configuration and Zig bindings into a scaffolded frontend project."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rust-embed = "8"
+# The one place JSON is genuinely the format: a human reads and edits
+# `lepton.config.json`. The IPC path is zero-copy binary and never goes near this.
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The panics-free assertion helpers live in the orchestrator so the workspace has
+# one definition of how a test reports a failure.
+lepton-orchestrator = { path = "../orchestrator" }
+
+[lints]
+workspace = true

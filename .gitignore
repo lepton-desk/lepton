@@ -1,0 +1,18 @@
+# Build output
+/target/
+node_modules/
+.zig-cache/
+zig-out/
+/zig/lepton-*-check
+/packages/*/dist/
+# Staged by packages/cli/scripts/stage.mjs; published to npm, not kept in git
+/packages/cli-*/bin/
+# Copied into each package by tools/npm-preflight.sh
+/packages/*/LICENSE-*
+
+# Internal working files, kept locally
+/AGENTS*.md
+/CLAUDE.md
+/PRODUCT.md
+/docs/plans/
+/.impeccable/

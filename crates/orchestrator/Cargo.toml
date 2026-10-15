@@ -1,0 +1,15 @@
+[package]
+name = "lepton-orchestrator"
+description = "Runs the toolchain Lepton needs: the Zig core, the frontend dev server, and the build pipeline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ctrlc.workspace = true
+nix.workspace = true
+
+[lints]
+workspace = true

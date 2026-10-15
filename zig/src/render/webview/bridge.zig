@@ -1,0 +1,501 @@
+//! The core's side of the conversation with the page.
+//!
+//! ## Why a URI scheme and not a buffer
+//!
+//! The engine's window is the engine's: `wpe_view_wayland_get_wl_surface` publishes a
+//! surface this framework can read but not draw into, and there is no snapshot API and no
+//! buffer the engine will hand over. So a channel that ends in "the engine sends us its
+//! frames" cannot be built on this ABI, and pretending otherwise would be a design built on
+//! a door that was measured to be closed.
+//!
+//! What the engine does support is calling back. Registering a scheme makes the page's
+//! request land in this process, with the request object in hand, and lets this code
+//! answer with a stream built over memory it already owns. That inverts the direction of
+//! the zero-copy claim in the useful way: nothing is copied *out of* the engine, and the
+//! bytes the page receives are the core's own bytes, served where they lie.
+//!
+//! ## What this is not
+//!
+//! It is not a general RPC system and it does not pretend to be one. It answers requests,
+//! counts them, and hands back a body. A real bridge needs a message format, a request
+//! identifier and a way to stream a large body in pieces; all three belong to whoever first
+//! needs them, and inventing them now would be a protocol designed by imagination.
+//!
+//! ## Lifetime
+//!
+//! WebKit may call the callback at any time until the context is dropped, and it holds the
+//! user-data pointer for exactly as long as the registration. The body is therefore held
+//! here, in a context-level variable, rather than in a caller's stack frame: a response
+//! backed by a frame that has returned is a use-after-return that would show up as a
+//! truncated page rather than as a crash.
+
+const std = @import("std");
+const assets = @import("assets.zig");
+const transport = @import("transport.zig");
+const respond = @import("respond.zig");
+const invoke = @import("invoke.zig");
+const events = @import("events.zig");
+
+/// The engine functions this bridge uses.
+///
+/// Declared rather than imported: GLib's headers expand to `_Pragma`, which translate-c
+/// cannot read, and every signature below is transcribed from the installed header.
+const e_register_scheme = @extern(
+    *const fn (?*anyopaque, [*:0]const u8, SchemeCallback, ?*anyopaque, ?*anyopaque) callconv(.c) void,
+    .{ .name = "webkit_web_context_register_uri_scheme" },
+);
+const e_request_uri = @extern(
+    *const fn (?*anyopaque) callconv(.c) ?[*:0]const u8,
+    .{ .name = "webkit_uri_scheme_request_get_uri" },
+);
+const e_request_path = @extern(
+    *const fn (?*anyopaque) callconv(.c) ?[*:0]const u8,
+    .{ .name = "webkit_uri_scheme_request_get_path" },
+);
+
+const e_security_manager = @extern(
+    *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
+    .{ .name = "webkit_web_context_get_security_manager" },
+);
+const e_register_secure = @extern(
+    *const fn (?*anyopaque, [*:0]const u8) callconv(.c) void,
+    .{ .name = "webkit_security_manager_register_uri_scheme_as_secure" },
+);
+const e_register_cors_enabled = @extern(
+    *const fn (?*anyopaque, [*:0]const u8) callconv(.c) void,
+    .{ .name = "webkit_security_manager_register_uri_scheme_as_cors_enabled" },
+);
+
+// `invoke` reads the request body (WPE 2.40+; transfer full, nullable).
+const e_request_method = @extern(
+    *const fn (?*anyopaque) callconv(.c) ?[*:0]const u8,
+    .{ .name = "webkit_uri_scheme_request_get_http_method" },
+);
+const e_request_body = @extern(
+    *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
+    .{ .name = "webkit_uri_scheme_request_get_http_body" },
+);
+const e_stream_read_all = @extern(
+    *const fn (?*anyopaque, [*]u8, usize, *usize, ?*anyopaque, ?*?*anyopaque) callconv(.c) c_int,
+    .{ .name = "g_input_stream_read_all" },
+);
+const e_unref = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_object_unref" });
+const e_ref = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "g_object_ref" });
+const e_free_error = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_error_free" });
+
+const SchemeCallback = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) void;
+
+/// The scheme the page addresses the core on. Short on purpose: it appears in every
+/// request the page makes and in every string in the frontend that builds one.
+pub const scheme = "lepton";
+
+/// What the bridge has seen, for a caller to report rather than guess at.
+pub const Counters = struct {
+    /// Requests the engine delivered. The figure that proves the door is open: a bridge
+    /// with none of these answered every call with a body nobody asked for.
+    requests: u32 = 0,
+    /// Requests that could not be answered, usually because the stream could not be made.
+    refused: u32 = 0,
+    /// Bytes handed back, counted at answer time rather than at read time. What the page
+    /// received depends on how much of it it read; what was served does not.
+    bytes_served: u64 = 0,
+};
+
+/// The bridge the engine's callback reaches.
+///
+/// File scope, because the pointer is handed to the engine and used whenever a request
+/// arrives — not during the call that registered it.
+var registered: ?*Bridge = null;
+
+/// The path of the request the bridge last answered.
+///
+/// The page reports back through this: it has no other way to be heard, because the core
+/// cannot read the document. A check that wanted to know what the page concluded has to
+/// listen here rather than guess.
+pub fn lastPath() ?[]const u8 {
+    const bridge = registered orelse return null;
+    if (bridge.path_len == 0) return null;
+    return bridge.path[0..bridge.path_len];
+}
+
+/// The registered bridge.
+///
+/// One per web context. The body is copied in rather than pointed at, because the caller
+/// that produced it may well have returned by the time the page's request arrives.
+pub const Bridge = struct {
+    body: [8192]u8 = @splat(0),
+    body_len: usize = 0,
+    content_type: [64]u8 = @splat(0),
+    content_type_len: usize = 0,
+
+    /// The path of the most recent request.
+    ///
+    /// Read from the request rather than remembered from an earlier one: a bridge that
+    /// reported the last path it last *saw* would look busy while answering nothing.
+    path: [128]u8 = @splat(0),
+    path_len: usize = 0,
+    counters: Counters = .{},
+
+    /// The directory `lepton://localhost/` is served from; empty until `serveFrom`.
+    asset_root: [assets.max_path]u8 = @splat(0),
+    asset_root_len: usize = 0,
+
+    /// The ring the page snapshots at `/__lepton/region`; empty until `exposeRegion`.
+    region: []const u8 = &.{},
+    /// Set when the page asked at `/__lepton/close`; the owner's loop reads it.
+    close_requested: bool = false,
+    /// One request frame, plus one byte to tell "exactly the limit" from "more".
+    request_frame: [invoke.max_request + 1]u8 = @splat(0),
+    /// Requests answered through `invoke`.
+    invokes: u32 = 0,
+    /// The commands a page may call. Empty until the application sets it: nothing is
+    /// granted by default.
+    registry: invoke.Registry = .{},
+    /// The window the `window.*` commands act on; set by the view that owns it.
+    window: invoke.Window = .{},
+    /// Events for the page, and the one events request waiting for the next of them.
+    events: events.Log = .{},
+    held: ?*anyopaque = null,
+    held_after: u64 = 0,
+    /// The one origin answers may be read from cross-origin (the dev server's), or empty.
+    allowed_origin: [respond.max_origin]u8 = @splat(0),
+    allowed_origin_len: usize = 0,
+
+    /// Answers `/__lepton/region` with `bytes`, served in place from the mapping. The
+    /// mapping must outlive the view, which is the channel's lifetime in the template.
+    pub fn exposeRegion(self: *Bridge, bytes: []const u8) void {
+        self.region = bytes;
+    }
+
+    /// Lets the page at `url`'s origin read this bridge's answers — the dev server, whose
+    /// page fetches the ring from `lepton://localhost`. Refused (false) for anything that
+    /// is not an absolute URL: a malformed origin would allow nothing and hide why.
+    pub fn allowOriginOf(self: *Bridge, url: []const u8) bool {
+        const origin_text = respond.originOf(url, &self.allowed_origin) orelse return false;
+        self.allowed_origin_len = origin_text.len;
+        return true;
+    }
+
+    fn origin(self: *Bridge) [:0]const u8 {
+        return self.allowed_origin[0..self.allowed_origin_len :0];
+    }
+
+    /// Serves the bundled frontend at `lepton://localhost/` from `root` (absolute).
+    pub fn serveFrom(self: *Bridge, root: []const u8) void {
+        self.asset_root_len = @min(root.len, self.asset_root.len);
+        @memcpy(self.asset_root[0..self.asset_root_len], root[0..self.asset_root_len]);
+    }
+
+    /// Registers `lepton://` against `context`, for *this* bridge.
+    ///
+    /// Takes the pointer rather than returning a value, and that is the whole reason:
+    /// WebKit holds the user-data pointer until the context is dropped, so registering the
+    /// address of a local here and handing back a copy would leave the engine calling a
+    /// returned frame — which reads as a bridge that never receives anything, forever.
+    ///
+    /// `context` is the one the *view* uses rather than the default: a view carries its
+    /// own context, and a scheme registered only on the default would leave this view
+    /// unable to resolve it.
+    pub fn attach(self: *Bridge, context: ?*anyopaque) void {
+        e_register_scheme(context, scheme, &onRequest, self, null);
+        // A secure, CORS-enabled scheme is what lets a document *served* from it be a real
+        // origin: secure-context APIs, module scripts with `crossorigin`, and `fetch` back
+        // to the core. The earlier finding "no API makes a custom scheme local or secure"
+        // searched `web_context`/`web_view`/`website_data_manager` only; the API lives on
+        // `WebKitSecurityManager` (`WebKitSecurityManager.h`, WPE 2.54.1).
+        if (e_security_manager(context)) |manager| {
+            e_register_secure(manager, scheme);
+            e_register_cors_enabled(manager, scheme);
+        }
+    }
+
+    /// Sets what the next requests are answered with.
+    ///
+    /// Copied, not referenced. The caller owns its bytes and may return; a bridge that read
+    /// through a pointer it was given would answer the next page load from freed memory.
+    pub fn setBody(self: *Bridge, bytes: []const u8, kind: []const u8) void {
+        self.body_len = @min(bytes.len, self.body.len);
+        @memcpy(self.body[0..self.body_len], bytes[0..self.body_len]);
+
+        self.content_type_len = @min(kind.len, self.content_type.len);
+        @memcpy(self.content_type[0..self.content_type_len], kind[0..self.content_type_len]);
+    }
+
+    /// Answers a frontend request with the file it names, read whole into a buffer the
+    /// engine frees (libc `free`) when its stream is done.
+    fn serveAsset(self: *Bridge, request: ?*anyopaque) void {
+        const raw_path = if (e_request_path(request)) |raw| std.mem.span(raw) else "/";
+        var path_buffer: [assets.max_path]u8 = undefined;
+        const file = assets.resolve(self.asset_root[0..self.asset_root_len], raw_path, &path_buffer) catch {
+            self.counters.refused += 1;
+            refuse(request, "the path leaves the frontend directory");
+            return;
+        };
+        const loaded = assets.load(file) orelse {
+            self.counters.refused += 1;
+            refuse(request, "no such file in the frontend");
+            return;
+        };
+        if (!respond.bytes(request, loaded.bytes, loaded.len, std.c.free, assets.mimeFor(file), self.origin())) {
+            self.counters.refused += 1;
+            return;
+        }
+        self.counters.bytes_served += loaded.len;
+    }
+
+    /// Answers one request: a file for `lepton://localhost/`, the channel body otherwise.
+    /// Publishes an event to the page: appended to the log, and answered at once to a
+    /// request waiting for it.
+    pub fn emit(self: *Bridge, name: []const u8, data: []const u8) events.EmitError!u64 {
+        const number = try self.events.emit(name, data);
+        if (self.held) |waiting| {
+            self.held = null;
+            self.sendEvents(waiting, self.held_after);
+            e_unref(waiting);
+        }
+        return number;
+    }
+
+    /// `/__lepton/events?after=N`: answered now when there is something newer, otherwise
+    /// held until `emit`. A page has one such request open at a time, so a new one means
+    /// the previous was abandoned (the page aborts after `events.hold_ms`): it is answered
+    /// empty and released, never left referenced.
+    fn answerEvents(self: *Bridge, request: ?*anyopaque) void {
+        const uri = if (e_request_uri(request)) |raw| std.mem.span(raw) else "";
+        if (events.wantsLatest(uri)) {
+            const raw = std.c.malloc(8) orelse {
+                respond.refuse(request, "no memory for the answer");
+                return;
+            };
+            const out: *[8]u8 = @ptrCast(raw);
+            std.mem.writeInt(u64, out, self.events.latest, .little);
+            _ = respond.bytes(request, out, 8, std.c.free, "application/octet-stream", self.origin());
+            return;
+        }
+        const after = events.afterOf(uri);
+        if (self.held) |stale| {
+            self.held = null;
+            _ = respond.bytes(stale, "", 0, null, "application/octet-stream", self.origin());
+            e_unref(stale);
+        }
+        if (self.events.hasAfter(after)) {
+            self.sendEvents(request, after);
+            return;
+        }
+        self.held = e_ref(request);
+        self.held_after = after;
+    }
+
+    fn sendEvents(self: *Bridge, request: ?*anyopaque, after: u64) void {
+        const raw = std.c.malloc(events.max_response) orelse {
+            respond.refuse(request, "no memory for the events");
+            return;
+        };
+        const out: [*]u8 = @ptrCast(raw);
+        const bytes = self.events.writeSince(after, out[0..events.max_response]) catch {
+            std.c.free(raw);
+            respond.refuse(request, "the events do not fit");
+            return;
+        };
+        if (respond.bytes(request, out, bytes.len, std.c.free, "application/octet-stream", self.origin())) {
+            self.counters.bytes_served += bytes.len;
+        }
+    }
+
+    /// Reads the POSTed request frame, handles it, and answers with the reply frame.
+    ///
+    /// The reply is written into memory the engine frees when it has read it: a second
+    /// request may arrive before the first response is consumed, so a buffer kept here
+    /// could be overwritten under the engine.
+    fn answerInvoke(self: *Bridge, request: ?*anyopaque) void {
+        const method = if (e_request_method(request)) |raw| std.mem.span(raw) else "";
+        if (!std.mem.eql(u8, method, "POST")) {
+            self.counters.refused += 1;
+            respond.refuse(request, "invoke takes a POST");
+            return;
+        }
+        const stream = e_request_body(request) orelse {
+            self.counters.refused += 1;
+            respond.refuse(request, "invoke needs a request frame as its body");
+            return;
+        };
+        defer e_unref(stream);
+        var read: usize = 0;
+        var failure: ?*anyopaque = null;
+        if (e_stream_read_all(stream, &self.request_frame, self.request_frame.len, &read, null, &failure) == 0) {
+            if (failure) |owned| e_free_error(owned);
+            self.counters.refused += 1;
+            respond.refuse(request, "the request body could not be read");
+            return;
+        }
+        if (read > invoke.max_request) {
+            self.counters.refused += 1;
+            respond.refuse(request, "the request frame is larger than invoke accepts");
+            return;
+        }
+
+        const raw = std.c.malloc(invoke.max_reply) orelse {
+            self.counters.refused += 1;
+            respond.refuse(request, "no memory for the reply");
+            return;
+        };
+        const out: [*]u8 = @ptrCast(raw);
+        var effects: invoke.Effects = .{};
+        const frame = invoke.handle(self.request_frame[0..read], &self.registry, self.window, &effects, out[0..invoke.max_reply]) catch {
+            std.c.free(raw);
+            self.counters.refused += 1;
+            respond.refuse(request, "the reply does not fit");
+            return;
+        };
+        self.invokes += 1;
+        if (effects.close_requested) self.close_requested = true;
+        if (!respond.bytes(request, out, frame.len, std.c.free, "application/octet-stream", self.origin())) {
+            self.counters.refused += 1;
+            return;
+        }
+        self.counters.bytes_served += frame.len;
+    }
+
+    fn answer(self: *Bridge, request: ?*anyopaque) void {
+        self.counters.requests += 1;
+
+        // The transport's two paths come first, on any host: they are the core's, and a
+        // frontend file of the same name must not shadow them.
+        if (e_request_path(request)) |raw| {
+            const path = std.mem.span(raw);
+            if (std.mem.eql(u8, path, transport.region_path) and self.region.len != 0) {
+                // No destroy: the bytes are the live mapping, owned by the channel.
+                if (!respond.bytes(request, self.region.ptr, self.region.len, null, "application/octet-stream", self.origin())) {
+                    self.counters.refused += 1;
+                    return;
+                }
+                self.counters.bytes_served += self.region.len;
+                return;
+            }
+            if (std.mem.eql(u8, path, events.path)) {
+                self.answerEvents(request);
+                return;
+            }
+            if (std.mem.eql(u8, path, invoke.path)) {
+                self.answerInvoke(request);
+                return;
+            }
+            if (std.mem.eql(u8, path, transport.close_path)) {
+                self.close_requested = true;
+                const ok = "closing";
+                _ = respond.bytes(request, ok.ptr, ok.len, null, "text/plain", self.origin());
+                return;
+            }
+        }
+
+        if (self.asset_root_len != 0) {
+            if (e_request_uri(request)) |uri| {
+                if (std.mem.eql(u8, hostOf(std.mem.span(uri)), assets.host)) {
+                    self.serveAsset(request);
+                    return;
+                }
+            }
+        }
+
+        if (e_request_path(request)) |raw| {
+            const text = std.mem.span(raw);
+            self.path_len = @min(text.len, self.path.len);
+            @memcpy(self.path[0..self.path_len], text[0..self.path_len]);
+        }
+
+        // An empty body is a refusal dressed as a success: the page would receive a
+        // zero-length response and read it as an empty document. Refusing leaves the page
+        // with an error it can report, which is the difference between a bridge that is
+        // not ready and a bridge that is broken.
+        if (self.body_len == 0) {
+            self.counters.refused += 1;
+            respond.refuse(request, "the core has no response to give");
+            return;
+        }
+
+        // The content type has to be NUL-terminated on the C side and the buffer here is
+        // a fixed-size array that is not, so the terminator is written before the call
+        // rather than assumed.
+        self.content_type[self.content_type_len] = 0;
+        if (!respond.bytes(request, &self.body, self.body_len, null, @ptrCast(&self.content_type), self.origin())) {
+            self.counters.refused += 1;
+            return;
+        }
+        self.counters.bytes_served += self.body_len;
+    }
+};
+
+/// The host of a `scheme://host/path` URI, or "" when there is none.
+pub fn hostOf(uri: []const u8) []const u8 {
+    const start = (std.mem.indexOf(u8, uri, "://") orelse return "") + 3;
+    const rest = uri[start..];
+    const end = std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len;
+    return rest[0..end];
+}
+
+fn refuse(request: ?*anyopaque, message: [*:0]const u8) void {
+    respond.refuse(request, message);
+}
+
+fn onRequest(request: ?*anyopaque, user_data: ?*anyopaque) callconv(.c) void {
+    const bridge: *Bridge = @ptrCast(@alignCast(user_data.?));
+    registered = bridge;
+    bridge.answer(request);
+}
+
+test "every request path the bridge answers is compiled" {
+    // Zig analyses only what is referenced: `answerInvoke` once carried a field the
+    // struct did not have and every test still passed, because nothing reached it. The
+    // first real build of a project failed instead. This reference makes the test build
+    // compile the whole request path. Only where the engine is linked: a native build
+    // has no WebKit symbols to resolve these against.
+    if (comptime !@import("root.zig").is_available()) return error.SkipZigTest;
+    std.testing.refAllDecls(Bridge);
+    _ = &Bridge.answer;
+    _ = &Bridge.answerInvoke;
+    _ = &Bridge.answerEvents;
+    _ = &Bridge.emit;
+    _ = &onRequest;
+}
+
+test "a bridge answers the body it was given" {
+    var bridge = Bridge{};
+    bridge.setBody("lepton-core", "text/plain");
+
+    // The counters are the observable part that does not need the engine.
+    try std.testing.expectEqual(@as(usize, 11), bridge.body_len);
+    try std.testing.expectEqualStrings("lepton-core", bridge.body[0..bridge.body_len]);
+    try std.testing.expectEqualStrings("text/plain", bridge.content_type[0..bridge.content_type_len]);
+}
+
+test "a body larger than the buffer is truncated rather than overrunning it" {
+    var bridge = Bridge{};
+    const too_long = "x" ** 9000;
+    bridge.setBody(too_long, "text/plain");
+
+    // Truncated to the buffer, and the part that fit is exactly the front of the input —
+    // a copy that shortened without preserving its beginning would answer the page with a
+    // document that starts in the middle of nothing.
+    try std.testing.expectEqual(bridge.body.len, bridge.body_len);
+    try std.testing.expectEqualStrings("x" ** 64, bridge.body[0..64]);
+    try std.testing.expectEqualStrings("x" ** 64, bridge.body[bridge.body.len - 64 ..]);
+}
+
+test "a bridge starts with nothing to say" {
+    const bridge = Bridge{};
+    try std.testing.expectEqual(@as(usize, 0), bridge.body_len);
+    try std.testing.expectEqual(@as(u32, 0), bridge.counters.requests);
+    try std.testing.expectEqual(@as(u32, 0), bridge.counters.refused);
+}
+
+test "an empty body is refused rather than answered as an empty document" {
+    var bridge = Bridge{};
+    bridge.setBody("", "text/plain");
+    try std.testing.expectEqual(@as(usize, 0), bridge.body_len);
+}
+test "the frontend host is told apart from the channel" {
+    try std.testing.expectEqualStrings("localhost", hostOf("lepton://localhost/assets/a.js"));
+    try std.testing.expectEqualStrings("check", hostOf("lepton://check/storage/kept"));
+    try std.testing.expectEqualStrings("localhost", hostOf("lepton://localhost"));
+    try std.testing.expectEqualStrings("", hostOf("not a uri"));
+}
