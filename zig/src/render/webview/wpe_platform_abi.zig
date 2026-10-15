@@ -52,6 +52,20 @@ pub const g_object_new = @extern(
     .{ .name = "g_object_new" },
 );
 
+/// `g_object_new(GType, "network-session", session, NULL)`: the same variadic function,
+/// declared variadic so the property list reaches it as C passes one.
+pub const g_object_new_with = @extern(
+    *const fn (usize, ?[*:0]const u8, ...) callconv(.c) ?*anyopaque,
+    .{ .name = "g_object_new" },
+);
+
+/// `WebKitNetworkSession *webkit_network_session_new(const char *data_directory,
+/// const char *cache_directory)` — WebKitNetworkSession.h:45 (2.40).
+pub const webkit_network_session_new = @extern(
+    *const fn ([*:0]const u8, [*:0]const u8) callconv(.c) ?*anyopaque,
+    .{ .name = "webkit_network_session_new" },
+);
+
 /// `WPEView *webkit_web_view_get_wpe_view(WebKitWebView *)` — WebKitWebView.h:367.
 pub const webkit_web_view_get_wpe_view = @extern(
     *const fn (?*anyopaque) callconv(.c) ?*anyopaque,

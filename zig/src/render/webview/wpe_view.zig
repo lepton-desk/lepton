@@ -167,6 +167,36 @@ pub const setenv = @extern(
     .{ .name = "setenv" },
 );
 
+var data_directory: [std.fs.max_path_bytes:0]u8 = undefined;
+var cache_directory: [std.fs.max_path_bytes:0]u8 = undefined;
+var directories_set = false;
+
+/// Gives this application's web data its own directories: storage (localStorage,
+/// IndexedDB, cookies) under `$APPDATA` and caches under `$APPCACHE` — the same
+/// `~/.local/share/<identifier>` that `plugin-fs` calls `$APPDATA`. Call before `open`.
+///
+/// Measured before this existed: every Lepton application stored its data in one
+/// `~/lepton/wpe/storage` (the old code appended a fixed `lepton`, and without
+/// `XDG_DATA_HOME` put it straight into the home directory), and a second application
+/// read the first one's `localStorage` — all of them serve the page from the same
+/// origin, `lepton://localhost`. Returns false when the directories cannot be named
+/// (no `HOME`); the engine then uses its own default.
+pub fn useApplicationDirectories(identifier: []const u8) bool {
+    const paths = @import("../../platform/linux/paths.zig");
+    var scratch: [4096]u8 = undefined;
+    const data = paths.resolve(.app_data, identifier, data_directory[0 .. data_directory.len - 1], &scratch) catch return false;
+    data_directory[data.len] = 0;
+    const cache = paths.resolve(.app_cache, identifier, cache_directory[0 .. cache_directory.len - 1], &scratch) catch return false;
+    cache_directory[cache.len] = 0;
+    directories_set = true;
+    if (!comptime @import("build_options").wpe_platform_abi) {
+        // The legacy engine has no session object; its only handle is the environment.
+        paths.rememberDataHome();
+        _ = setenv("XDG_DATA_HOME", data_directory[0..data.len :0].ptr, 1);
+    }
+    return true;
+}
+
 pub fn setDataDirectory(path: [*:0]const u8) void {
     // After this the environment no longer says where the user's data lives; plugins
     // resolving `$APPDATA` need the value from before.
@@ -260,10 +290,13 @@ pub const View = struct {
     fn platformOpen() Error!View {
         // Both are opaque handles from the new ABI's declarations, and both are the same
         // C types the legacy path has always held — only the spelling differs.
-        const web_view: *abi.WebKitWebView = @ptrCast(
-            platform_abi.g_object_new(platform_abi.webkit_web_view_get_type(), null) orelse
-                return Error.NoView,
-        );
+        const created = if (directories_set) blk: {
+            const session = platform_abi.webkit_network_session_new(&data_directory, &cache_directory) orelse return Error.NoView;
+            // The view takes its own reference (construct-only, transfer none).
+            defer abi.g_object_unref(session);
+            break :blk platform_abi.g_object_new_with(platform_abi.webkit_web_view_get_type(), "network-session", session, @as(?*anyopaque, null));
+        } else platform_abi.g_object_new(platform_abi.webkit_web_view_get_type(), null);
+        const web_view: *abi.WebKitWebView = @ptrCast(created orelse return Error.NoView);
         const view: *abi.WPEView = @ptrCast(
             platform_abi.webkit_web_view_get_wpe_view(web_view) orelse return Error.NoView,
         );
@@ -454,4 +487,18 @@ test "the window commands and events path is compiled" {
     _ = &View.windowState;
     _ = &View.onToplevelState;
     _ = &View.onResized;
+}
+
+test "each application's web data is named after it, under the user's data directory" {
+    if (comptime !(@import("build_options").wpe_platform_abi and @import("root.zig").is_available())) return error.SkipZigTest;
+    _ = &View.platformOpen;
+    try std.testing.expect(useApplicationDirectories("style.lepton.directory-test"));
+    const data = std.mem.sliceTo(&data_directory, 0);
+    const cache = std.mem.sliceTo(&cache_directory, 0);
+    try std.testing.expect(std.mem.endsWith(u8, data, "/style.lepton.directory-test"));
+    try std.testing.expect(std.mem.endsWith(u8, cache, "/style.lepton.directory-test"));
+    try std.testing.expect(!std.mem.eql(u8, data, cache));
+    // Never the old shared place.
+    try std.testing.expect(std.mem.indexOf(u8, data, "/lepton/") == null);
+    directories_set = false;
 }

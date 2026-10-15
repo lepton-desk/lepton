@@ -57,6 +57,8 @@ pub const loaded_webview_backend = webview.loadedBackend;
 /// on `View`: it is read when the *context* is created, which happens before there is a
 /// view to ask.
 pub const set_webview_data_directory = webview.setDataDirectory;
+/// Each application's web storage in its own `$APPDATA`; call before opening the view.
+pub const use_application_directories = webview.useApplicationDirectories;
 
 /// What the installed engine allows, measured. `void` in a native build.
 pub const engine_caps = webview.caps;

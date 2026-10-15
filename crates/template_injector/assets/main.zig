@@ -114,12 +114,9 @@ pub fn main() !void {{
     // Before the engine: WebKitWPE reads its data directory when the context is created,
     // so this has to happen before `open` or the store stays where it was.
     //
-    // Pointed at this application's own directory rather than left at the machine default,
-    // because the default is `$XDG_DATA_HOME/wpe` — shared by every WPE application on the
-    // machine. Two apps using the same document origin would then read each other's
-    // storage. An app that wants a different directory sets it here; an app that does not
-    // still ends up with its own, which is the point.
-    try claimOwnDataDirectory(allocator);
+    // Pointed at this application's own directories rather than left at the engine's
+    // default, `$XDG_DATA_HOME/wpe`, which every WPE application on the machine shares.
+    claimOwnDataDirectory();
 
     var view = core.render.WebView.open() catch |err| {{
         std.debug.print("the engine refused to start: {{t}}\n", .{{err}});
@@ -535,43 +532,24 @@ fn openWindow(allocator: std.mem.Allocator, request: core.window.Request) !Opene
     }}
 }}
 
-/// Points the engine's web data at this application's own directory.
-///
-/// The engine has no setter for it — `get_base_data_directory` exists but faults when no
-/// data manager does — so `XDG_DATA_HOME` is the only handle, and it is set here rather
-/// than by the user because a library that quietly rewrote it would move every other
-/// program's data too.
-///
-/// Resolves against the user's own `XDG_DATA_HOME` when there is one, so the application
-/// still lands in the place the user expects to find their data, and only the final
-/// component is Lepton's.
-fn claimOwnDataDirectory(allocator: std.mem.Allocator) !void {{
+/// Gives this application's web data — localStorage, IndexedDB, cookies, caches — its
+/// own directories: `~/.local/share/{identifier}` and `~/.cache/{identifier}` (the XDG
+/// directories when set). Every Lepton page has the same origin, `lepton://localhost`, so
+/// a shared directory would let one application read another's storage — which is what
+/// happened before this, measured.
+fn claimOwnDataDirectory() void {{
+    if (core.render.use_application_directories("{identifier}")) return;
+
+    // No `HOME`: a service unit, a sandbox, a container. Beside the executable is the one
+    // place a self-contained bundle can rely on being able to write, and for a portable
+    // install it is also where the user's data belongs. `/proc/self/exe` rather than a
+    // std helper: Zig 0.16 exposes no self-executable path.
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
-
-    // Three sources, in order of how much the user chose it: their own data directory,
-    // their home, and finally the directory this executable is in.
-    //
-    // The third is not a nicety. A packaged application is routinely run with no
-    // environment at all — a service unit, a sandbox, a container — and there `HOME` is
-    // absent and the engine would fall back to a path under the system directories that
-    // the application may not be able to write at all. The executable's own directory is
-    // the one place a self-contained bundle can rely on being able to write, and for a
-    // portable install it is also where the user's data belongs.
-    if (core.display.processGetenv(null, "XDG_DATA_HOME")) |xdg| {{
-        if (try adoptBase(&buffer, std.mem.span(xdg))) return;
-    }}
-    if (core.display.processGetenv(null, "HOME")) |home| {{
-        if (try adoptBase(&buffer, std.mem.span(home))) return;
-    }}
-
-    // `/proc/self/exe` rather than a std helper: Zig 0.16 exposes no self-executable
-    // path, and the kernel's own answer is the one thing a self-contained bundle can rely
-    // on being able to read.
     const link = readSelfExe(buffer[0..]) catch return;
     const directory = std.fs.path.dirname(link) orelse return;
-    if (try adoptBase(&buffer, directory)) return;
-
-    _ = allocator;
+    var path: [std.fs.max_path_bytes]u8 = undefined;
+    const written = std.fmt.bufPrintZ(&path, "{{s}}/data", .{{directory}}) catch return;
+    core.render.set_webview_data_directory(written.ptr);
 }}
 
 /// Reads `/proc/self/exe` into `buffer`.
@@ -597,22 +575,3 @@ fn readSelfExe(buffer: []u8) ![]u8 {{
     if (written <= 0) return error.ExecutablePathUnavailable;
     return buffer[0..@intCast(written)];
 }}
-
-/// Writes `base/lepton` into `buffer` and points the engine at it.
-///
-/// Returns whether the caller should stop looking: a base that cannot hold the path is not
-/// a reason to try the next one, it is a reason to fall through to the next one, so the
-/// two failure modes are kept apart rather than collapsed into one boolean.
-fn adoptBase(buffer: *[std.fs.max_path_bytes]u8, base: []const u8) !bool {{
-    if (base.len == 0) return false;
-    if (base.len + "/lepton".len + 1 > buffer.len) return false;
-
-    const written = try std.fmt.bufPrintZ(buffer, "{{s}}/lepton", .{{base}});
-    // The engine creates the directory lazily, on the first thing it stores, so a
-    // missing one is not an error here — it is a silent loss later. Creating it up front
-    // needs an API this Zig version does not have (`makePath` is gone from `std.fs`),
-    // so it is left as a known gap rather than guessed at.
-
-    core.render.set_webview_data_directory(written.ptr);
-    return true;
-}

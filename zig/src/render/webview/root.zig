@@ -36,6 +36,8 @@ pub const wakeEvery = wpe_view.wakeEvery;
 /// compiles to nothing rather than failing at the call site — a template that asks for a
 /// data directory must not fail to build on the engine that has no use for one.
 pub const setDataDirectory = wpe_view.setDataDirectory;
+/// The application's own data and cache directories (`$APPDATA`, `$APPCACHE`).
+pub const useApplicationDirectories = wpe_view.useApplicationDirectories;
 
 /// The backend implementation the loader actually brought up, if any.
 ///
