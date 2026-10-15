@@ -6,8 +6,7 @@ Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cl
 ## 1. Sizin kararınız gerekenler (ön kontrol bunlarsız geçmez)
 - ~~Lisans metinleri~~ — eklendi: `LICENSE-MIT` (2026 Lepton Desk Contributors) ve
   `LICENSE-APACHE` (apache.org'dan). Ön kontrol bunları üç pakete kopyalar.
-- **Depo adresi:** `package.json`'lardaki `https://github.com/lepton-desk/lepton` npm
-  sayfasında görünür; depo yoksa adresi değiştirin.
+- ~~Depo adresi~~ — `https://github.com/lepton-desk/lepton` oluşturuldu (herkese açık, `main`).
 
 ## 2. Ön kontrol (hiçbir şey yayımlamaz)
 
