@@ -6,14 +6,14 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-packages=(cli-linux-x64 cli api)
+packages=(cli-linux-x64 cli api plugin-os)
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'preflight: %s\n' "$*" >&2; exit 1; }
 
 step "versions agree"
 version="$(sed -n '/^\[workspace.package\]/,/^\[/ s/^version = "\(.*\)"/\1/p' "$root/Cargo.toml")"
 [ -n "$version" ] || fail "no [workspace.package] version in Cargo.toml"
-for package in api cli; do
+for package in api cli plugin-os; do
   have="$(node -p "require('$root/packages/$package/package.json').version")"
   [ "$have" = "$version" ] || fail "packages/$package is $have, the CLI is $version"
 done
@@ -47,6 +47,9 @@ step "core tool the SDK tests talk to"
 
 step "@lepton-desk/api: install, build, check, test"
 (cd "$root/packages/api" && pnpm install --frozen-lockfile && pnpm run build && pnpm run check && pnpm test)
+
+step "@lepton-desk/plugin-os: install, build, check, test"
+(cd "$root/packages/plugin-os" && pnpm install --frozen-lockfile && pnpm run build && pnpm run check && pnpm test)
 
 step "@lepton-desk/cli: test, lint"
 (cd "$root/packages/cli" && node --test test/ && "$root/packages/api/node_modules/.bin/biome" check .)

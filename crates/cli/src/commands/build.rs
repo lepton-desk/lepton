@@ -107,6 +107,7 @@ impl Flags {
             &super::launch::binary_name(&manifest.product_name),
         );
         super::launch::grant_permissions(&mut steps, root)?;
+        super::plugins::pass_to_core(&mut steps, root)?;
         super::launch::hand_over_frontend(&mut steps, root);
         // A linked `@lepton-desk/*` checkout whose `dist/` predates its `src/` is built
         // first, so the bundle sees the package as it is (`linked.rs`).

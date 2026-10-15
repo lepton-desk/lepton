@@ -98,6 +98,36 @@ pub fn build(b: *std.Build) !void {
     });
     root.addOptions("build_options", options);
 
+    // Plugins: `-Dplugins=<module>=<absolute path of its plugin.zig>,…`, written by
+    // `lepton` from the `"lepton": { "plugin": … }` field of the project's npm
+    // dependencies. Each becomes a module that can import the core; `lepton_plugins.all`
+    // is the tuple `main.zig` hands to the registry. No plugins: an empty tuple.
+    const plugin_list = b.option([]const u8, "plugins", "Plugin modules, <module>=<path>, comma-separated") orelse "";
+    const plugins_source = b.addWriteFiles();
+    var plugin_imports: std.ArrayList(std.Build.Module.Import) = .empty;
+    var plugin_tuple: std.ArrayList(u8) = .empty;
+    plugin_tuple.appendSlice(b.allocator, "pub const all = .{") catch @panic("out of memory");
+    var plugin_entries = std.mem.tokenizeScalar(u8, plugin_list, ',');
+    while (plugin_entries.next()) |entry| {
+        const split = std.mem.indexOfScalar(u8, entry, '=') orelse
+            std.debug.panic("-Dplugins entry \"{s}\" is not <module>=<path>", .{entry});
+        const module_name = entry[0..split];
+        const plugin = b.createModule(.{
+            .root_source_file = .{ .cwd_relative = entry[split + 1 ..] },
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "lepton_core", .module = configured.module }},
+        });
+        plugin_imports.append(b.allocator, .{ .name = module_name, .module = plugin }) catch @panic("out of memory");
+        plugin_tuple.appendSlice(b.allocator, b.fmt(" @import(\"{s}\"),", .{module_name})) catch @panic("out of memory");
+    }
+    plugin_tuple.appendSlice(b.allocator, " };\n") catch @panic("out of memory");
+    const plugins_module = b.createModule(.{
+        .root_source_file = plugins_source.add("lepton_plugins.zig", plugin_tuple.items),
+        .imports = plugin_imports.items,
+    });
+    root.addImport("lepton_plugins", plugins_module);
+
     const exe = b.addExecutable(.{
         .name = name,
         .root_module = root,

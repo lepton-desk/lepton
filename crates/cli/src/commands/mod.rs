@@ -20,6 +20,7 @@ pub mod launch;
 pub mod linked;
 pub mod new;
 pub mod package;
+pub mod plugins;
 pub mod run;
 pub mod session;
 pub mod verify;

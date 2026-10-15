@@ -90,6 +90,7 @@ impl Flags {
         let binary = super::launch::binary_name(&manifest.product_name);
         super::launch::name_core(&mut steps, &binary);
         super::launch::grant_permissions(&mut steps, root)?;
+        super::plugins::pass_to_core(&mut steps, root)?;
         // Built before the dev server starts: it serves a linked package from its `dist/`.
         let rebuilds = if native {
             Vec::new()

@@ -106,6 +106,7 @@ pub const Registry = struct {
 /// Splits `-Dpermissions`' comma list at compile time.
 pub fn permissionList(comptime text: []const u8) []const []const u8 {
     comptime {
+        @setEvalBranchQuota(100_000);
         if (text.len == 0) return &.{};
         var names: []const []const u8 = &.{};
         var parts = std.mem.splitScalar(u8, text, ',');
@@ -120,29 +121,86 @@ pub fn checked(
     comptime app: []const Command(State),
     comptime allowed: []const []const u8,
 ) Registered(State) {
+    return checkedWith(State, app, &.{}, allowed);
+}
+
+/// A plugin's command: no application state, because a plugin is written before the
+/// application that uses it. What it needs it reads from the system or keeps itself.
+pub const PluginCommand = struct {
+    name: []const u8,
+    run: *const fn (argument: []const u8, out: []u8) HandlerError!usize,
+};
+
+/// Every plugin's `commands`, in the order the build lists the plugins. `plugins` is the
+/// tuple `lepton_plugins.all` the project's build generates (`.{}` without plugins).
+pub fn pluginCommands(comptime plugins: anytype) []const PluginCommand {
     comptime {
-        var erased: [app.len]AppCommand = undefined;
+        var list: []const PluginCommand = &.{};
+        for (plugins) |plugin| list = list ++ plugin.commands;
+        return list;
+    }
+}
+
+/// [`checked`] with plugin commands beside the application's. Plugin ids follow the
+/// application's; names follow the same rules, and a name may be registered only once
+/// across both.
+pub fn checkedWith(
+    comptime State: type,
+    comptime app: []const Command(State),
+    comptime plugins: []const PluginCommand,
+    comptime allowed: []const []const u8,
+) Registered(State) {
+    comptime {
+        // Every name against every earlier one, every permission against every name: with
+        // a plugin's seven commands this passed Zig's default 1000 branches and the
+        // application stopped compiling. Sized for hundreds of commands.
+        @setEvalBranchQuota(1_000_000);
+        var names: [app.len + plugins.len][]const u8 = undefined;
+        var erased: [app.len + plugins.len]AppCommand = undefined;
         for (app, 0..) |command, index| {
-            if (!validName(command.name)) @compileError("command name \"" ++ command.name ++ "\" is not `<group>.<name>` in lowercase");
-            if (isBuiltin(command.name)) @compileError("\"" ++ command.name ++ "\" is a built-in command; choose another name");
-            for (app[0..index]) |earlier| {
-                if (std.mem.eql(u8, earlier.name, command.name)) @compileError("command \"" ++ command.name ++ "\" is registered twice");
-            }
+            names[index] = command.name;
             erased[index] = .{ .name = command.name, .run = erase(State, command.run) };
+        }
+        for (plugins, app.len..) |command, index| {
+            names[index] = command.name;
+            erased[index] = .{ .name = command.name, .run = erasePlugin(command.run) };
+        }
+        for (names, 0..) |name, index| {
+            if (!validName(name)) @compileError("command name \"" ++ name ++ "\" is not `<group>.<name>` in lowercase");
+            if (isBuiltin(name)) @compileError("\"" ++ name ++ "\" is a built-in command; choose another name");
+            for (names[0..index]) |earlier| {
+                if (std.mem.eql(u8, earlier, name)) @compileError("command \"" ++ name ++ "\" is registered twice");
+            }
         }
         for (allowed, 0..) |name, index| {
             if (std.mem.indexOfScalar(u8, name, '*') != null) @compileError("permission \"" ++ name ++ "\": wildcards are not allowed; name each command");
-            if (!isBuiltin(name) and !isApp(State, app, name)) @compileError("permission \"" ++ name ++ "\" names no command this application has");
+            const known = isBuiltin(name) or for (names) |registered| {
+                if (std.mem.eql(u8, registered, name)) break true;
+            } else false;
+            if (!known) @compileError("permission \"" ++ name ++ "\" names no command this application has");
             for (allowed[0..index]) |earlier| {
                 if (std.mem.eql(u8, earlier, name)) @compileError("permission \"" ++ name ++ "\" is listed twice");
             }
         }
         const frozen = erased;
+        var entries: []const u8 = "";
+        for (names) |name| entries = entries ++ "    \"" ++ name ++ "\": true;\n";
         return .{
             .unbound = .{ .app = &frozen, .allowed = allowed },
-            .entries = entriesFor(State, app),
+            .entries = entries,
         };
     }
+}
+
+/// A plugin handler as the bridge stores it; the context is not its to use.
+fn erasePlugin(
+    comptime run: *const fn (argument: []const u8, out: []u8) HandlerError!usize,
+) Handler {
+    return &struct {
+        fn call(_: ?*anyopaque, argument: []const u8, out: []u8) HandlerError!usize {
+            return run(argument, out);
+        }
+    }.call;
 }
 
 /// Wraps a typed handler so the bridge can store it beside others of other states.
@@ -159,25 +217,9 @@ fn erase(
     }.call;
 }
 
-/// `    "name": true;` per command.
-fn entriesFor(comptime State: type, comptime app: []const Command(State)) []const u8 {
-    comptime {
-        var text: []const u8 = "";
-        for (app) |command| text = text ++ "    \"" ++ command.name ++ "\": true;\n";
-        return text;
-    }
-}
-
 fn isBuiltin(name: []const u8) bool {
     inline for (invoke.commands) |command| {
         if (std.mem.eql(u8, command.publicName(), name)) return true;
-    }
-    return false;
-}
-
-fn isApp(comptime State: type, app: []const Command(State), name: []const u8) bool {
-    for (app) |command| {
-        if (std.mem.eql(u8, command.name, name)) return true;
     }
     return false;
 }
@@ -251,6 +293,48 @@ test "command names follow <group>.<name> in lowercase" {
 test "an empty permission list allows nothing" {
     const registered = comptime checked(Counter, &.{}, permissionList(""));
     try std.testing.expect(!registered.unbound.allows("core.ping"));
+}
+
+fn lower(argument: []const u8, out: []u8) HandlerError!usize {
+    if (argument.len > out.len) return error.TooLarge;
+    for (argument, 0..) |ch, i| out[i] = std.ascii.toLower(ch);
+    return argument.len;
+}
+
+test "plugin commands follow the application's, with the same rules" {
+    const app = [_]Command(Counter){.{ .name = "text.upper", .run = &upper }};
+    const Plugin = struct {
+        pub const commands = [_]PluginCommand{.{ .name = "case.lower", .run = &lower }};
+    };
+    const plugins = comptime pluginCommands(.{Plugin});
+    var counter: Counter = .{};
+    const registry = (comptime checkedWith(Counter, &app, plugins, permissionList("case.lower"))).bind(&counter);
+    try std.testing.expectEqualStrings("case.lower", registry.nameOf(first_app_id + 1).?);
+    try std.testing.expect(registry.allows("case.lower"));
+    try std.testing.expect(!registry.allows("text.upper"));
+    var out: [8]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 2), try registry.app[1].run(registry.context, "OK", &out));
+    try std.testing.expectEqualStrings("ok", out[0..2]);
+}
+
+test "a registry of many commands and permissions compiles" {
+    // Sixty-four plugin commands, every one granted: far past the size that first broke
+    // the build (eight commands, seven permissions).
+    const many = comptime blk: {
+        @setEvalBranchQuota(1_000_000);
+        var list: [64]PluginCommand = undefined;
+        for (&list, 0..) |*command, index| command.* = .{ .name = std.fmt.comptimePrint("many.c{d}", .{index}), .run = &lower };
+        break :blk list;
+    };
+    const granted = comptime blk: {
+        @setEvalBranchQuota(1_000_000);
+        var text: []const u8 = "";
+        for (many, 0..) |command, index| text = text ++ (if (index == 0) "" else ",") ++ command.name;
+        break :blk text;
+    };
+    const registered = comptime checkedWith(Counter, &.{}, &many, permissionList(granted));
+    try std.testing.expect(registered.unbound.allows("many.c63"));
+    try std.testing.expectEqualStrings("many.c63", registered.unbound.nameOf(first_app_id + 63).?);
 }
 
 test "a handler gets the state it was bound to, and an unbound one fails" {

@@ -153,3 +153,16 @@ test("an application command keeps its bound state between requests", async () =
     new DataView(reply.result.buffer, reply.result.byteOffset).getUint32(0, true);
   assert.equal(read(second), read(first) + 1);
 });
+
+test("an InvokeError from another copy of the package is still an InvokeError", async () => {
+  // A second module instance, as a linked plugin with its own node_modules loads it.
+  // The query makes Node load the file again as a separate module.
+  const specifier: string = "../src/core.ts?second-copy";
+  const copy = (await import(specifier)) as typeof import("../src/core.ts");
+  assert.notEqual(copy.InvokeError, InvokeError, "two distinct classes");
+  const foreign = new copy.InvokeError("os.hostname", 4, "denied");
+  assert.ok(foreign instanceof InvokeError);
+  assert.ok(new InvokeError("core.ping", -1, "no_reply") instanceof copy.InvokeError);
+  assert.ok(!(new Error("plain") instanceof InvokeError));
+  assert.ok(!({ reason: "denied" } instanceof InvokeError));
+});

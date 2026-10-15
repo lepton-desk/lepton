@@ -87,13 +87,24 @@ export interface InvokeOptions {
   readonly signal?: AbortSignal;
 }
 
-/** A reply whose status was not success, or a request the core never answered. */
+/** Marks an `InvokeError` from any copy of this package (`Symbol.for` is global). */
+const invokeErrorBrand: unique symbol = Symbol.for("@lepton-desk/api:InvokeError") as never;
+
+/**
+ * A reply whose status was not success, or a request the core never answered.
+ *
+ * `instanceof InvokeError` holds for an error thrown by any copy of this package. A
+ * project with a linked plugin loads two copies (the plugin resolves its own), and a
+ * class-identity check then said "no" — measured: a page waiting for `denied` from a
+ * plugin's command never saw it. The check is a global brand instead.
+ */
 export class InvokeError extends Error {
   readonly command: string;
   /** The core's status number, or `-1` when no reply arrived. */
   readonly status: number;
   /** The status by name — `denied` when `permissions` does not list the command. */
   readonly reason: StatusName | "no_reply";
+  readonly [invokeErrorBrand] = true;
 
   constructor(command: string, status: number, reason: StatusName | "no_reply", detail = "") {
     super(`${command}: ${reason}${detail === "" ? "" : ` (${detail})`}`);
@@ -101,6 +112,10 @@ export class InvokeError extends Error {
     this.command = command;
     this.status = status;
     this.reason = reason;
+  }
+
+  static [Symbol.hasInstance](value: unknown): boolean {
+    return typeof value === "object" && value !== null && invokeErrorBrand in value;
   }
 }
 

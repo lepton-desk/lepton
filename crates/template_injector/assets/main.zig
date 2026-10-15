@@ -46,9 +46,17 @@ const AppState = struct {
 /// From the page: `await invoke("app.name")` (`@lepton-desk/api/core`) resolves with the
 /// bytes the handler wrote. Their names reach TypeScript as `src/lepton-commands.d.ts`,
 /// regenerated from this list on every build.
-pub const commands = core.webviewRegistry.checked(AppState, &.{{
-    .{{ .name = "app.name", .run = &appName }},
-}}, core.webviewRegistry.permissionList(@import("build_options").permissions));
+///
+/// Plugins (`@lepton-desk/plugin-*` in `package.json`) add their commands after yours;
+/// they too run only when listed under `permissions`.
+pub const commands = core.webviewRegistry.checkedWith(
+    AppState,
+    &.{{
+        .{{ .name = "app.name", .run = &appName }},
+    }},
+    core.webviewRegistry.pluginCommands(@import("lepton_plugins").all),
+    core.webviewRegistry.permissionList(@import("build_options").permissions),
+);
 
 /// Your events: what the core may send the page beyond its own (`window.state`,
 /// `window.resized`). Declare a name here, then emit it from Zig —
