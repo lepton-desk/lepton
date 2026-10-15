@@ -188,6 +188,10 @@ pub fn useApplicationDirectories(identifier: []const u8) bool {
     data_directory[data.len] = 0;
     const cache = paths.resolve(.app_cache, identifier, cache_directory[0 .. cache_directory.len - 1], &scratch) catch return false;
     cache_directory[cache.len] = 0;
+    // Made here, 0700, before the engine makes them 0755 (measured: it does). Web storage
+    // and cookies are the user's private data.
+    if (!paths.makePrivate(data_directory[0..data.len :0])) return false;
+    if (!paths.makePrivate(cache_directory[0..cache.len :0])) return false;
     directories_set = true;
     if (!comptime @import("build_options").wpe_platform_abi) {
         // The legacy engine has no session object; its only handle is the environment.
@@ -501,4 +505,11 @@ test "each application's web data is named after it, under the user's data direc
     // Never the old shared place.
     try std.testing.expect(std.mem.indexOf(u8, data, "/lepton/") == null);
     directories_set = false;
+    // Made for real (0700) in the user's own directories; empty, so removed again.
+    const linux = std.os.linux;
+    var info: linux.Statx = undefined;
+    _ = linux.statx(linux.AT.FDCWD, &data_directory, 0, .{ .MODE = true }, &info);
+    try std.testing.expectEqual(@as(u16, 0o700), info.mode & 0o777);
+    _ = linux.unlinkat(linux.AT.FDCWD, &data_directory, linux.AT.REMOVEDIR);
+    _ = linux.unlinkat(linux.AT.FDCWD, &cache_directory, linux.AT.REMOVEDIR);
 }

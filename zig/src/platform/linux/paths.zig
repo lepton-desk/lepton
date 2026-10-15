@@ -173,6 +173,29 @@ fn xdgHome(value: ?[]const u8, home: ?[]const u8, fallback: []const u8, out: []u
     return join(out, at.len, fallback);
 }
 
+/// Creates `path` and any missing parents with mode 0700, as the XDG Base Directory
+/// specification asks for directories it creates. Existing directories keep the mode
+/// they have — the user may have chosen it. Returns false when one cannot be made.
+pub fn makePrivate(path: [:0]const u8) bool {
+    if (path.len == 0 or path[0] != '/') return false;
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    if (path.len + 1 > buffer.len) return false;
+    @memcpy(buffer[0 .. path.len + 1], path[0 .. path.len + 1]);
+    var at: usize = 1;
+    while (at <= path.len) : (at += 1) {
+        if (at != path.len and buffer[at] != '/') continue;
+        const saved = buffer[at];
+        buffer[at] = 0;
+        const made = linux.mkdirat(linux.AT.FDCWD, buffer[0..at :0], 0o700);
+        buffer[at] = saved;
+        switch (linux.errno(made)) {
+            .SUCCESS, .EXIST => {},
+            else => return false,
+        }
+    }
+    return true;
+}
+
 /// The value of `KEY="..."` in a `user-dirs.dirs` text; `#` lines are comments.
 pub fn userDir(text: []const u8, key: []const u8) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, text, '\n');
@@ -273,4 +296,26 @@ test "this machine's own directories resolve" {
     try std.testing.expect(home.len > 1 and home[0] == '/');
     const data = try resolve(.app_data, "style.lepton.test", &out, &scratch);
     try std.testing.expect(std.mem.endsWith(u8, data, "/style.lepton.test"));
+}
+
+test "missing directories are made 0700, existing ones keep their mode" {
+    var name: [96]u8 = undefined;
+    const base = try std.fmt.bufPrintZ(&name, "/tmp/lepton-paths-test-{d}", .{linux.getpid()});
+    var deep: [160]u8 = undefined;
+    const target = try std.fmt.bufPrintZ(&deep, "{s}/a/b", .{base});
+    try std.testing.expect(makePrivate(target));
+    var info: linux.Statx = undefined;
+    for ([_][:0]const u8{ base, target }) |path| {
+        _ = linux.statx(linux.AT.FDCWD, path, 0, .{ .MODE = true }, &info);
+        try std.testing.expectEqual(@as(u16, 0o700), info.mode & 0o777);
+    }
+    _ = linux.fchmodat(linux.AT.FDCWD, target, 0o755);
+    try std.testing.expect(makePrivate(target));
+    _ = linux.statx(linux.AT.FDCWD, target, 0, .{ .MODE = true }, &info);
+    try std.testing.expectEqual(@as(u16, 0o755), info.mode & 0o777);
+    try std.testing.expect(!makePrivate("relative/path"));
+    var middle: [128]u8 = undefined;
+    _ = linux.unlinkat(linux.AT.FDCWD, target, linux.AT.REMOVEDIR);
+    _ = linux.unlinkat(linux.AT.FDCWD, try std.fmt.bufPrintZ(&middle, "{s}/a", .{base}), linux.AT.REMOVEDIR);
+    _ = linux.unlinkat(linux.AT.FDCWD, base, linux.AT.REMOVEDIR);
 }
