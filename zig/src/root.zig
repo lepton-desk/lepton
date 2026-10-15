@@ -68,6 +68,8 @@ pub const webviewRegistry = @import("render/webview/registry.zig");
 pub const webviewEvents = @import("render/webview/events.zig");
 /// `src/lepton-commands.d.ts` for an application's commands and events.
 pub const webviewDeclarations = @import("render/webview/declarations.zig");
+/// The system clipboard as text, for `@lepton-desk/plugin-clipboard`; `Failed` without WPE.
+pub const webviewClipboard = @import("render/webview/clipboard.zig");
 pub const webviewTransport = @import("render/webview/transport.zig");
 pub const x11Window = @import("window/linux/x11_window.zig");
 

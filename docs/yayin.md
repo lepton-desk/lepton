@@ -1,11 +1,12 @@
 # npm yayını: `@lepton-desk/*`
 
 Şu anki sürüm: **0.1.1** (0.1.0 yayımlandı). Sürüm artırımı: `Cargo.toml`
-`[workspace.package] version`, `packages/api` ve `packages/cli` `package.json` (cli'nin
-`optionalDependencies`'i dahil); platform paketini `stage.mjs` yazar.
+`[workspace.package] version`, `packages/api`, `packages/cli` ve `packages/plugin-*`
+`package.json` (cli'nin `optionalDependencies`'i ve eklentilerin `peerDependencies`'i dahil);
+platform paketini `stage.mjs` yazar.
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
-`@lepton-desk/api`. Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
+`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`; `api`'ye eş bağımlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
 
 ## 1. Sizin kararınız gerekenler (ön kontrol bunlarsız geçmez)
 - ~~Lisans metinleri~~ — eklendi: `LICENSE-MIT` (2026 Lepton Desk Contributors) ve
@@ -44,6 +45,14 @@ cd packages/cli && npm publish
 
 ```bash
 cd packages/api && npm publish
+```
+
+```bash
+cd packages/plugin-os && npm publish
+```
+
+```bash
+cd packages/plugin-clipboard && npm publish
 ```
 
 `publishConfig.access: public` her pakette var; `--access public` gerekmez.

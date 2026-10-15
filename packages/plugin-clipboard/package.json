@@ -1,0 +1,46 @@
+{
+  "name": "@lepton-desk/plugin-clipboard",
+  "version": "0.1.1",
+  "description": "Lepton plugin: read and write the system clipboard as text.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lepton-desk/lepton",
+    "directory": "packages/plugin-clipboard"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "zig",
+    "LICENSE*"
+  ],
+  "lepton": {
+    "plugin": "zig/plugin.zig"
+  },
+  "peerDependencies": {
+    "@lepton-desk/api": "^0.1.1"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "biome check . && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --test test/",
+    "prepublishOnly": "pnpm run build && pnpm run check && pnpm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@lepton-desk/api": "link:../api",
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
