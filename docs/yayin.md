@@ -1,4 +1,8 @@
-# npm yayını: `@lepton-desk/*` 0.1.0
+# npm yayını: `@lepton-desk/*`
+
+Şu anki sürüm: **0.1.1** (0.1.0 yayımlandı). Sürüm artırımı: `Cargo.toml`
+`[workspace.package] version`, `packages/api` ve `packages/cli` `package.json` (cli'nin
+`optionalDependencies`'i dahil); platform paketini `stage.mjs` yazar.
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
 `@lepton-desk/api`. Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
@@ -16,7 +20,7 @@ tools/npm-preflight.sh
 
 Sürüm eşitliği, npm'de o sürümün boş olması, lisanslar, Rust test/clippy, ikilinin
 `cli-linux-x64`'e konması, `@lepton-desk/api` derleme/denetim/test, `cli` testleri ve her
-tarball'ın içeriği. Sonu `preflight: ready to publish 0.1.0` olmalı.
+tarball'ın içeriği. Sonu `preflight: ready to publish <sürüm>` olmalı.
 
 ## 3. Giriş
 
@@ -52,17 +56,17 @@ npm view @lepton-desk/cli version
 ```
 
 ```bash
-npx @lepton-desk/cli@0.1.0 --version
+npx @lepton-desk/cli@0.1.1 --version
 ```
 
-Beklenen: `lepton 0.1.0`.
+Beklenen: `lepton 0.1.1`.
 
 ## 6. Geri alma
-- 72 saat içinde: `npm unpublish @lepton-desk/<paket>@0.1.0` (aynı sürüm bir daha kullanılamaz).
-- Sonrası: `npm deprecate @lepton-desk/<paket>@0.1.0 "<neden>"`.
+- 72 saat içinde: `npm unpublish @lepton-desk/<paket>@<sürüm>` (aynı sürüm bir daha kullanılamaz).
+- Sonrası: `npm deprecate @lepton-desk/<paket>@<sürüm> "<neden>"`.
 
 ## Yayından sonra (benim işim)
-- Şablonlar yerel `src/lepton.ts` yerine `@lepton-desk/api`'ye bağlanır; `lepton new` ile
-  yeni proje `pnpm install` + `lepton run` ile doğrulanır.
+- Yeni sürüm kayıt defterinde görünür olunca (ilk yayında ~5 dk sürdü) `npx` ve yeni bir
+  proje `pnpm install` + `lepton run` ile doğrulanır.
 - Diğer platformlar: kendi makinelerinde/CI'da `cargo build --release` + `stage.mjs`, sonra
   `cli`'nin `optionalDependencies`'ine eklenip `cli` yeni sürümle yeniden yayımlanır.
