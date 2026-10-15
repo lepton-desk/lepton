@@ -30,6 +30,8 @@ pub const display = @import("platform/linux/display.zig");
 pub const paths = @import("platform/linux/paths.zig");
 /// A plugin's settings from `lepton.config.json`'s `plugins`, read at compile time.
 pub const pluginConfig = @import("plugin_config.zig");
+/// The desktop's file dialogs (xdg-desktop-portal), for `@lepton-desk/plugin-dialog`.
+pub const portal = @import("platform/linux/portal.zig");
 pub const window = @import("window/window.zig");
 
 /// The frame the render layer draws into, and the render paths that fill it.

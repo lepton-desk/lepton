@@ -122,6 +122,14 @@ pub fn lastPath() ?[]const u8 {
 ///
 /// One per web context. The body is copied in rather than pointed at, because the caller
 /// that produced it may well have returned by the time the page's request arrives.
+/// How many `invoke` requests may wait for a later answer at once — open file dialogs.
+pub const max_later = 8;
+
+const Later = struct {
+    request: ?*anyopaque = null,
+    generation: u32 = 0,
+};
+
 pub const Bridge = struct {
     body: [8192]u8 = @splat(0),
     body_len: usize = 0,
@@ -157,6 +165,9 @@ pub const Bridge = struct {
     events: events.Log = .{},
     held: ?*anyopaque = null,
     held_after: u64 = 0,
+    /// `invoke` requests a command answers later (`invoke.takeLater`): referenced until
+    /// `finishLater`. The generation tells a stale `Later` from the slot's next owner.
+    later: [max_later]Later = @splat(.{}),
     /// The one origin answers may be read from cross-origin (the dev server's), or empty.
     allowed_origin: [respond.max_origin]u8 = @splat(0),
     allowed_origin_len: usize = 0,
@@ -341,7 +352,23 @@ pub const Bridge = struct {
         };
         const out: [*]u8 = @ptrCast(raw);
         var effects: invoke.Effects = .{};
-        const frame = invoke.handle(self.request_frame[0..read], &self.registry, self.window, &effects, out[0..invoke.max_reply]) catch {
+        const free_slot: ?u16 = for (self.later, 0..) |slot, index| {
+            if (slot.request == null) break @intCast(index);
+        } else null;
+        if (free_slot) |index| {
+            effects.later = .{
+                .context = self,
+                .finish_fn = &finishLater,
+                .slot = index,
+                .generation = self.later[index].generation,
+            };
+            // Held before the command runs: one that fails at once calls `finish` while
+            // it is still running, and that answer must find the request already here.
+            self.later[index].request = e_ref(request);
+        }
+        const answered = invoke.handle(self.request_frame[0..read], &self.registry, self.window, &effects, out[0..invoke.max_reply]);
+        if (!effects.deferred) if (free_slot) |index| self.release(index);
+        const frame = answered catch {
             std.c.free(raw);
             self.counters.refused += 1;
             respond.refuse(request, "the reply does not fit");
@@ -349,11 +376,50 @@ pub const Bridge = struct {
         };
         self.invokes += 1;
         if (effects.close_requested) self.close_requested = true;
+        if (effects.deferred) {
+            // Held until the command calls `finish` — which may already have happened.
+            std.c.free(raw);
+            return;
+        }
         if (!respond.bytes(request, out, frame.len, std.c.free, "application/octet-stream", self.origin())) {
             self.counters.refused += 1;
             return;
         }
         self.counters.bytes_served += frame.len;
+    }
+
+    /// Drops a slot's hold on a request no command took.
+    fn release(self: *Bridge, index: u16) void {
+        const held = &self.later[index];
+        if (held.request) |request| e_unref(request);
+        held.request = null;
+        held.generation +%= 1;
+    }
+
+    /// `invoke.Later.finish`: answers the held request with a reply frame, once.
+    fn finishLater(context: ?*anyopaque, slot: u16, generation: u32, sequence: u64, status: invoke.Status, result: []const u8) void {
+        const self: *Bridge = @ptrCast(@alignCast(context orelse return));
+        if (slot >= self.later.len) return;
+        const held = &self.later[slot];
+        if (held.generation != generation) return;
+        const request = held.request orelse return;
+        held.request = null;
+        held.generation +%= 1;
+        defer e_unref(request);
+        const raw = std.c.malloc(invoke.max_reply) orelse {
+            respond.refuse(request, "no memory for the reply");
+            return;
+        };
+        const out: [*]u8 = @ptrCast(raw);
+        const frame = invoke.reply(out[0..invoke.max_reply], sequence, status, result) catch
+            invoke.reply(out[0..invoke.max_reply], sequence, .too_large, &.{}) catch {
+            std.c.free(raw);
+            respond.refuse(request, "the reply does not fit");
+            return;
+        };
+        if (respond.bytes(request, out, frame.len, std.c.free, "application/octet-stream", self.origin())) {
+            self.counters.bytes_served += frame.len;
+        }
     }
 
     fn answer(self: *Bridge, request: ?*anyopaque) void {
@@ -453,6 +519,7 @@ test "every request path the bridge answers is compiled" {
     std.testing.refAllDecls(Bridge);
     _ = &Bridge.answer;
     _ = &Bridge.answerInvoke;
+    _ = &Bridge.finishLater;
     _ = &Bridge.answerEvents;
     _ = &Bridge.emit;
     _ = &onRequest;

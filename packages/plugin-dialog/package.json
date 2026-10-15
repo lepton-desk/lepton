@@ -1,0 +1,46 @@
+{
+  "name": "@lepton-desk/plugin-dialog",
+  "version": "0.1.2",
+  "description": "Lepton plugin: the desktop's own file dialogs, through xdg-desktop-portal.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lepton-desk/lepton",
+    "directory": "packages/plugin-dialog"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "zig",
+    "LICENSE*"
+  ],
+  "lepton": {
+    "plugin": "zig/plugin.zig"
+  },
+  "peerDependencies": {
+    "@lepton-desk/api": "^0.1.2"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "biome check . && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --test test/",
+    "prepublishOnly": "pnpm run build && pnpm run check && pnpm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@lepton-desk/api": "link:../api",
+    "@types/node": "26.6.5",
+    "typescript": "7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

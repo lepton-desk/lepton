@@ -6,7 +6,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-plugins=(plugin-os plugin-clipboard plugin-fs)
+plugins=(plugin-os plugin-clipboard plugin-fs plugin-dialog)
 packages=(cli-linux-x64 cli api "${plugins[@]}")
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'preflight: %s\n' "$*" >&2; exit 1; }

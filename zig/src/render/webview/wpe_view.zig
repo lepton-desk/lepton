@@ -430,6 +430,8 @@ pub const View = struct {
     /// be collected, and unrefing anything else would be releasing a reference the
     /// loader still holds.
     pub fn close(self: *View) void {
+        // Dialogs the page opened would otherwise stay on screen after the window.
+        @import("../../platform/linux/portal.zig").closeAll();
         abi.g_object_unref(self.web_view);
         self.* = undefined;
     }

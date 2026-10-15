@@ -103,7 +103,45 @@ pub const Status = enum(u32) {
 /// What a request asked the application to do beyond its reply.
 pub const Effects = struct {
     close_requested: bool = false,
+    /// Set by the bridge when it can hold this request open: a command that answers
+    /// later takes it (`takeLater`) instead of replying now.
+    later: ?Later = null,
+    /// The command took `later`: no reply now; the bridge keeps the request until
+    /// `Later.finish`.
+    deferred: bool = false,
 };
+
+/// A reply owed to a held request — what a command that answers later (a file dialog,
+/// which waits for the user) keeps until it has the answer. Exactly one `finish` per
+/// `Later`; a second, or one after the page went away, is ignored by the bridge.
+pub const Later = struct {
+    context: ?*anyopaque,
+    finish_fn: *const fn (context: ?*anyopaque, slot: u16, generation: u32, sequence: u64, status: Status, result: []const u8) void,
+    slot: u16,
+    generation: u32,
+    sequence: u64 = 0,
+
+    /// Answers the held request: `ok` with `result`, or a failure status with nothing.
+    pub fn finish(later: Later, status: Status, result: []const u8) void {
+        later.finish_fn(later.context, later.slot, later.generation, later.sequence, status, result);
+    }
+};
+
+/// The request being handled, while an application or plugin command runs. One at a
+/// time: requests are handled on the engine's main loop, never concurrently.
+var running: ?*Effects = null;
+
+/// For a command that will answer later: takes the request's `Later` and tells the
+/// bridge to hold the request. Null when the bridge has no room to hold another (eight
+/// at once) or outside a command — the command should then answer `failed`. Whatever the
+/// command returns after taking it is ignored.
+pub fn takeLater() ?Later {
+    const effects = running orelse return null;
+    const later = effects.later orelse return null;
+    effects.deferred = true;
+    effects.later = null;
+    return later;
+}
 
 /// Handles one request frame and writes the reply frame into `out`.
 ///
@@ -129,7 +167,12 @@ pub fn handle(frame: []const u8, registry: *const Registry, window: Window, effe
     if (registry.appCommand(asked.command)) |command| {
         const result_at = wire.header_bytes + @sizeOf(wire.Reply);
         if (out.len < result_at) return error.NoSpaceLeft;
-        const written = command.run(registry.context, argument, out[result_at..]) catch |err| return switch (err) {
+        if (effects.later) |*later| later.sequence = sequence;
+        running = effects;
+        defer running = null;
+        const result = command.run(registry.context, argument, out[result_at..]);
+        if (effects.deferred) return out[0..0];
+        const written = result catch |err| return switch (err) {
             error.Failed => reply(out, sequence, .failed, &.{}),
             error.TooLarge => reply(out, sequence, .too_large, &.{}),
             error.Denied => reply(out, sequence, .denied, &.{}),
@@ -394,4 +437,55 @@ test "window commands reach the window, and answer failed without one" {
 
     const headless = try decodeReply(try handle(try request(&in, 3, @intFromEnum(Command.window_minimize), ""), &everything, .{}, &effects, &out));
     try std.testing.expectEqual(@intFromEnum(Status.failed), headless.reply.status);
+}
+
+var kept: ?Later = null;
+
+fn answersLater(_: *NoState, _: []const u8, _: []u8) registry_mod.HandlerError!usize {
+    kept = takeLater() orelse return error.Failed;
+    return 0;
+}
+
+const Finished = struct {
+    var count: u32 = 0;
+    var sequence: u64 = 0;
+    var slot: u16 = 0;
+    var status: Status = .ok;
+    var result: [16]u8 = undefined;
+    var result_len: usize = 0;
+
+    fn finish(_: ?*anyopaque, held: u16, _: u32, owed: u64, answered: Status, bytes: []const u8) void {
+        count += 1;
+        sequence = owed;
+        slot = held;
+        status = answered;
+        @memcpy(result[0..bytes.len], bytes);
+        result_len = bytes.len;
+    }
+};
+
+test "a command can answer later: no reply now, the request's own sequence when it does" {
+    const app = [_]registry_mod.Command(NoState){.{ .name = "dialog.wait", .run = &answersLater }};
+    var state: NoState = .{};
+    const granted = (comptime registry_mod.checked(NoState, &app, registry_mod.permissionList("dialog.wait"))).bind(&state);
+    var in: [256]u8 = undefined;
+    var out: [256]u8 = undefined;
+
+    var effects: Effects = .{ .later = .{ .context = null, .finish_fn = &Finished.finish, .slot = 3, .generation = 0 } };
+    const now = try handle(try request(&in, 42, registry_mod.first_app_id, ""), &granted, .{}, &effects, &out);
+    try std.testing.expectEqual(@as(usize, 0), now.len);
+    try std.testing.expect(effects.deferred);
+    try std.testing.expect(takeLater() == null); // only while the command runs
+
+    kept.?.finish(.ok, "picked");
+    try std.testing.expectEqual(@as(u32, 1), Finished.count);
+    try std.testing.expectEqual(@as(u64, 42), Finished.sequence);
+    try std.testing.expectEqual(@as(u16, 3), Finished.slot);
+    try std.testing.expectEqualStrings("picked", Finished.result[0..Finished.result_len]);
+
+    // With no room to hold the request the command cannot take it and answers now.
+    var full: Effects = .{};
+    const refused = try decodeReply(try handle(try request(&in, 43, registry_mod.first_app_id, ""), &granted, .{}, &full, &out));
+    try std.testing.expectEqual(@intFromEnum(Status.failed), refused.reply.status);
+    try std.testing.expect(!full.deferred);
 }

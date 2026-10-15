@@ -6,7 +6,7 @@
 platform paketini `stage.mjs` yazar.
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
-`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`; `api`'ye eş bağımlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
+`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
 
 ## 1. Sizin kararınız gerekenler (ön kontrol bunlarsız geçmez)
 - ~~Lisans metinleri~~ — eklendi: `LICENSE-MIT` (2026 Lepton Desk Contributors) ve
@@ -57,6 +57,10 @@ cd packages/plugin-clipboard && npm publish
 
 ```bash
 cd packages/plugin-fs && npm publish
+```
+
+```bash
+cd packages/plugin-dialog && npm publish
 ```
 
 `publishConfig.access: public` her pakette var; `--access public` gerekmez.
