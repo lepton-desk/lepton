@@ -116,6 +116,10 @@ pub fn build(b: *std.Build) !void {
     // installed as `zig-out/lepton-commands.d.ts` (outside `bin/` and `share/`, so it is
     // never packaged); `lepton` copies it into `src/`. Run on the build machine, so only
     // when that is the target: a cross build has no binary here to run.
+    // `zig build commands` writes only that file: `lepton` runs it before the frontend
+    // is type-checked, so a page calling a command added in `main.zig` compiles on the
+    // first build, not the second. Always defined; a no-op on a cross build.
+    const commands_step = b.step("commands", "Write zig-out/lepton-commands.d.ts only");
     const host = b.graph.host.result;
     if (host.cpu.arch == target.result.cpu.arch and host.os.tag == target.result.os.tag) {
         const command_types = b.addExecutable(.{
@@ -134,7 +138,9 @@ pub fn build(b: *std.Build) !void {
         if (configured.protocol_step) |generated| command_types.step.dependOn(generated);
         const print_types = b.addRunArtifact(command_types);
         const types_file = print_types.captureStdOut(.{});
-        b.getInstallStep().dependOn(&b.addInstallFile(types_file, "lepton-commands.d.ts").step);
+        const install_types = b.addInstallFile(types_file, "lepton-commands.d.ts");
+        b.getInstallStep().dependOn(&install_types.step);
+        commands_step.dependOn(&install_types.step);
     }
 
     // The bundled frontend, installed beside the binary in the layout a system install

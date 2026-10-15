@@ -345,8 +345,22 @@ fn the_package_manifest_pins_the_biome_the_configuration_was_checked_against() -
     let planned = planned_for(&Manifest::new("Ledger"))?;
     let package = contents_of(&planned, "package.json")?;
 
-    assert_contains!(package, crate::assets::BIOME_VERSION);
-    assert_absent!(package, "^");
+    assert_contains!(
+        package,
+        &format!("\"@biomejs/biome\": \"{}\"", crate::assets::BIOME_VERSION)
+    );
+    Ok(())
+}
+
+#[test]
+fn a_new_project_depends_on_the_sdk_and_cli_of_this_version() -> Result<(), Failure> {
+    // The generated declarations and the core's frame layout are this CLI's; an SDK
+    // older than it would read neither.
+    let planned = planned_for(&Manifest::new("Ledger"))?;
+    let package = contents_of(&planned, "package.json")?;
+    let version = env!("CARGO_PKG_VERSION");
+    assert_contains!(package, &format!("\"@lepton-desk/api\": \"^{version}\""));
+    assert_contains!(package, &format!("\"@lepton-desk/cli\": \"^{version}\""));
     Ok(())
 }
 
@@ -450,10 +464,10 @@ fn a_merge_keeps_the_scaffolders_scripts() -> Result<(), Failure> {
     // And Lepton's own additions arrived alongside them.
     assert_contains!(&merged, "biome");
     assert_contains!(&merged, "lepton:dev");
-    // `@lepton-desk/api` is deliberately absent: it is not published, and a
-    // dependency that cannot resolve would make the first thing a new project
-    // does fail.
-    assert_absent!(&merged, "@lepton-desk/api");
+    // The SDK and the CLI, published on npm since 0.1.0, join the scaffolder's
+    // dependencies rather than replacing them.
+    assert_contains!(&merged, "@lepton-desk/api");
+    assert_contains!(&merged, "@lepton-desk/cli");
     Ok(())
 }
 

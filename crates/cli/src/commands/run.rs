@@ -64,6 +64,9 @@ impl Flags {
             && (self.native
                 || manifest.render_path == lepton_template_injector::RenderPath::Native);
         let mut steps = self.plan(root, &chain, native);
+        if !native {
+            super::command_types::types_first(&mut steps, root);
+        }
         let binary = super::launch::binary_name(&manifest.product_name);
         super::launch::name_core(&mut steps, &binary);
         super::launch::grant_permissions(&mut steps, root)?;
@@ -83,8 +86,12 @@ impl Flags {
 
         for step in &steps {
             run_streaming(step).map_err(CliError::from)?;
+            // After every core build, the declarations step included: the frontend step
+            // that follows type-checks against them.
+            if super::launch::is_core_build(step) {
+                super::command_types::sync_and_report(root);
+            }
         }
-        super::command_types::sync_and_report(root);
 
         super::desktop_entry::announce(
             &manifest.identifier,

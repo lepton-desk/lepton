@@ -99,6 +99,9 @@ impl Flags {
                 || manifest.render_path == lepton_template_injector::RenderPath::Native);
 
         let mut steps = self.plan(root, &chain, native, platform);
+        if !native {
+            super::command_types::types_first(&mut steps, root);
+        }
         super::launch::name_core(
             &mut steps,
             &super::launch::binary_name(&manifest.product_name),
@@ -123,8 +126,12 @@ impl Flags {
 
         for step in &steps {
             run_streaming(step).map_err(CliError::from)?;
+            // After every core build, the declarations step included: the frontend step
+            // that follows type-checks against them.
+            if super::launch::is_core_build(step) {
+                super::command_types::sync_and_report(root);
+            }
         }
-        super::command_types::sync_and_report(root);
 
         // "it built" is the least useful sentence in a build log. Where the artifact
         // is, is the sentence a developer acts on — and it is the one thing this

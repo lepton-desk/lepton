@@ -88,7 +88,7 @@ pub fn grant_permissions(steps: &mut [Step], root: &Path) -> Result<(), CliError
     Ok(())
 }
 
-fn is_core_build(step: &Step) -> bool {
+pub(super) fn is_core_build(step: &Step) -> bool {
     step.args.first().is_some_and(|arg| arg == "build")
         && step
             .cwd

@@ -117,10 +117,11 @@ pub const BIOME_VERSION: &str = "2.5.15";
 /// `crate::merge`, which is the one place that knows how to add a key without
 /// deleting the ones already there.
 ///
-/// Note what is absent. `@lepton-desk/api` is not listed, because it is not
-/// published: a dependency that fails to resolve turns `pnpm install` into the first
-/// thing a new project does, and it will fail. The project's own `src/lepton.ts`
-/// holds the binding, and it becomes the package when there is a package to point at.
+/// `@lepton-desk/api` is the page's SDK (`invoke`, `listen`, the window); `@lepton-desk/cli`
+/// is a dev dependency so `pnpm lepton:dev` runs the CLI from `node_modules` on a machine
+/// without a global install. Both are pinned to a range that starts at this CLI's own
+/// version: the generated `lepton-commands.d.ts` and the core's frame layout are this
+/// version's, and an older SDK would read neither.
 pub fn package_manifest() -> String {
     format!(
         concat!(
@@ -131,12 +132,17 @@ pub fn package_manifest() -> String {
             "    \"check\": \"biome check .\",\n",
             "    \"format\": \"biome format --write .\"\n",
             "  }},\n",
+            "  \"dependencies\": {{\n",
+            "    \"@lepton-desk/api\": \"^{version}\"\n",
+            "  }},\n",
             "  \"devDependencies\": {{\n",
-            "    \"@biomejs/biome\": \"{}\"\n",
+            "    \"@biomejs/biome\": \"{biome}\",\n",
+            "    \"@lepton-desk/cli\": \"^{version}\"\n",
             "  }}\n",
             "}}\n"
         ),
-        BIOME_VERSION
+        biome = BIOME_VERSION,
+        version = env!("CARGO_PKG_VERSION"),
     )
 }
 

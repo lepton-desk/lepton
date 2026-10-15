@@ -55,6 +55,34 @@ pub fn sync(root: &Path, core_dir: &Path) -> Result<Synced, CliError> {
     Ok(Synced::Written)
 }
 
+/// Puts `zig build commands` — the core build's own step with its flags, asked only for
+/// the declarations — at the front of `steps`, so the frontend's type check sees the
+/// commands `main.zig` registers on the very first build. Measured without it: a new
+/// project whose page called `app.name` failed `vue-tsc` with TS2345 on its first
+/// `lepton run`, because the file was written only by the core build that came after.
+///
+/// Only for a project whose core has the generator (`lepton-commands.zig`); call before
+/// `name_core`/`grant_permissions` so the step gets the same `-D` options as the build.
+pub fn types_first(steps: &mut Vec<lepton_orchestrator::Step>, root: &Path) {
+    if !root
+        .join(super::build::CORE_DIR)
+        .join("lepton-commands.zig")
+        .is_file()
+    {
+        return;
+    }
+    let Some(core) = steps
+        .iter()
+        .find(|step| super::launch::is_core_build(step))
+        .cloned()
+    else {
+        return;
+    };
+    let mut types = core;
+    types.args.insert(1, String::from("commands"));
+    steps.insert(0, types);
+}
+
 /// [`sync`], reporting what a developer needs to know and never failing the build over it.
 pub fn sync_and_report(root: &Path) {
     let core_dir = root.join(super::build::CORE_DIR);
@@ -70,7 +98,7 @@ pub fn sync_and_report(root: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{GENERATED, HEADER, Synced, TARGET, sync};
+    use super::{GENERATED, HEADER, Synced, TARGET, sync, types_first};
     use lepton_orchestrator::testing::{Failure, Scratch};
     use lepton_orchestrator::{assert_eq, assert_ok};
 
@@ -106,6 +134,47 @@ mod tests {
             Synced::Written
         );
         assert_eq!(scratch.read(TARGET)?, generated("\"notes.save\": true;\n"));
+        Ok(())
+    }
+
+    #[test]
+    fn the_declarations_step_comes_first_and_copies_the_core_builds_flags() -> Result<(), Failure> {
+        let scratch = Scratch::new("command-types-first")?;
+        scratch.write("src-lepton/lepton-commands.zig", "// generator\n")?;
+        let core_dir = scratch.path().join(super::super::build::CORE_DIR);
+        let mut steps = vec![
+            lepton_orchestrator::Step::new("lepton", "pnpm")
+                .args(["run", "build"])
+                .in_dir(scratch.path().to_path_buf()),
+            lepton_orchestrator::Step::new("lepton", "zig")
+                .args(["build", "--release=safe", "-Doptimize=ReleaseSmall"])
+                .in_dir(core_dir),
+        ];
+        types_first(&mut steps, scratch.path());
+        assert_eq!(steps.len(), 3);
+        assert_eq!(
+            steps[0].args,
+            vec![
+                "build",
+                "commands",
+                "--release=safe",
+                "-Doptimize=ReleaseSmall"
+            ]
+        );
+        assert_eq!(steps[1].args, vec!["run", "build"]);
+        Ok(())
+    }
+
+    #[test]
+    fn an_older_core_without_the_generator_gets_no_step() -> Result<(), Failure> {
+        let scratch = Scratch::new("command-types-old")?;
+        let mut steps = vec![
+            lepton_orchestrator::Step::new("lepton", "zig")
+                .arg("build")
+                .in_dir(scratch.path().join(super::super::build::CORE_DIR)),
+        ];
+        types_first(&mut steps, scratch.path());
+        assert_eq!(steps.len(), 1);
         Ok(())
     }
 
