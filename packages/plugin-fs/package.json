@@ -1,6 +1,6 @@
 {
   "name": "@lepton-desk/plugin-fs",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Lepton plugin: files inside the directories the application allows.",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -27,7 +27,7 @@
     "settings": "fs"
   },
   "peerDependencies": {
-    "@lepton-desk/api": "^0.1.3"
+    "@lepton-desk/api": "^0.1.4"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
