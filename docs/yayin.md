@@ -1,6 +1,6 @@
 # npm yayını: `@lepton-desk/*`
 
-Şu anki sürüm: **0.1.1** (0.1.0 yayımlandı). Sürüm artırımı: `Cargo.toml`
+Şu anki sürüm: **0.1.2** (0.1.0 ve 0.1.1 yayımlandı; eklentiler ilk kez 0.1.2 ile çıkar). Sürüm artırımı: `Cargo.toml`
 `[workspace.package] version`, `packages/api`, `packages/cli` ve `packages/plugin-*`
 `package.json` (cli'nin `optionalDependencies`'i ve eklentilerin `peerDependencies`'i dahil);
 platform paketini `stage.mjs` yazar.
@@ -65,10 +65,10 @@ npm view @lepton-desk/cli version
 ```
 
 ```bash
-npx @lepton-desk/cli@0.1.1 --version
+npx @lepton-desk/cli@0.1.2 --version
 ```
 
-Beklenen: `lepton 0.1.1`.
+Beklenen: `lepton 0.1.2`.
 
 ## 6. Geri alma
 - 72 saat içinde: `npm unpublish @lepton-desk/<paket>@<sürüm>` (aynı sürüm bir daha kullanılamaz).
