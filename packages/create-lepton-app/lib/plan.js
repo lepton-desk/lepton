@@ -44,16 +44,31 @@ export function parse(argv) {
 }
 
 /**
- * The arguments for the native `lepton`.
+ * The arguments for the native `lepton`. Without a name `lepton new` asks for one itself,
+ * after its header and in the same style as its other questions.
  *
- * @param {string} name
+ * @param {string | undefined} name
  * @param {{ install: boolean, rest: readonly string[] }} parsed
  * @returns {string[]}
  */
 export function newArguments(name, parsed) {
-  const args = ["new", name, ...parsed.rest];
+  const args = name === undefined ? ["new", ...parsed.rest] : ["new", name, ...parsed.rest];
   if (parsed.install && !parsed.rest.includes("--install")) args.push("--install");
   return args;
+}
+
+/**
+ * Whether to colour this package's own lines: the rules `lepton` follows (`NO_COLOR`,
+ * `FORCE_COLOR`, a terminal, not `TERM=dumb`).
+ *
+ * @param {Record<string, string | undefined>} env
+ * @param {boolean} terminal
+ */
+export function coloured(env, terminal) {
+  if ((env.NO_COLOR ?? "") !== "") return false;
+  const force = (env.FORCE_COLOR ?? "") !== "" && env.FORCE_COLOR !== "0";
+  if (force) return true;
+  return terminal && env.TERM !== "dumb";
 }
 
 /**

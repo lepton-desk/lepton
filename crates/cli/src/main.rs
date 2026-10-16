@@ -10,6 +10,7 @@
 //! developer with a backtrace and no idea which step failed.
 
 mod commands;
+mod style;
 
 use std::process::ExitCode;
 
@@ -199,9 +200,13 @@ mod tests {
 
     #[test]
     fn a_missing_required_argument_is_refused() -> Result<(), Failure> {
+        // `new` without a name is accepted — the wizard asks for one, and
+        // `--non-interactive` refuses it when the command runs — but a flag without its
+        // value is still a usage error.
+        ensure!(parse(&["new"]).is_ok(), "`new` alone opens the wizard");
         ensure!(
-            parse(&["new"]).is_err(),
-            "`new` without a name must be refused"
+            parse(&["new", "Notes", "--template"]).is_err(),
+            "`--template` without a value must be refused"
         );
         Ok(())
     }

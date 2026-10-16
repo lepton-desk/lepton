@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { manager, missing, newArguments, parse } from "../lib/plan.js";
+import { coloured, manager, missing, newArguments, parse } from "../lib/plan.js";
 
 test("the first bare word is the name; flag values are not", () => {
   const parsed = parse(["--template", "vue-ts", "Notes", "--plugins", "os,fs", "--no-install"]);
@@ -73,4 +73,21 @@ test("the flags passed through are the ones lepton new accepts", () => {
   const source = readFileSync(fileURLToPath(new URL("../lib/plan.js", import.meta.url)), "utf8");
   const listed = /const valued = new Set\(\[([^\]]*)\]/s.exec(source)?.[1] ?? "";
   for (const flag of listed.matchAll(/"(--[a-z-]+)"/g)) assert.match(help, new RegExp(flag[1]));
+});
+
+test("without a name, lepton new is left to ask", () => {
+  assert.deepEqual(newArguments(undefined, parse(["--template", "vue-ts"])), [
+    "new",
+    "--template",
+    "vue-ts",
+    "--install",
+  ]);
+});
+
+test("colour follows NO_COLOR, FORCE_COLOR and the terminal", () => {
+  assert.equal(coloured({ NO_COLOR: "1", FORCE_COLOR: "1" }, true), false);
+  assert.equal(coloured({ FORCE_COLOR: "1" }, false), true);
+  assert.equal(coloured({ TERM: "xterm-kitty" }, true), true);
+  assert.equal(coloured({ TERM: "dumb" }, true), false);
+  assert.equal(coloured({}, false), false);
 });

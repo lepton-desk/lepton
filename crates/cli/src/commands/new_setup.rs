@@ -9,6 +9,7 @@ use lepton_template_injector::plugin_catalog::{self, CATALOG};
 
 use super::CliError;
 use super::package_manager::PackageManager;
+use crate::style::Painter;
 
 /// `--plugins os,fs`, checked against the catalog.
 pub fn plugins_from_flag(list: Option<&str>) -> Result<Vec<&'static str>, CliError> {
@@ -24,7 +25,20 @@ pub fn ask_plugins() -> Result<Vec<&'static str>, CliError> {
         .iter()
         .map(|plugin| format!("{:<10} {}", plugin.name, plugin.summary))
         .collect();
-    let picked = inquire::MultiSelect::new("Plugins (space to choose, enter to go on)", choices)
+    let picked = inquire::MultiSelect::new(&super::new_view::question("Plugins"), choices)
+        .with_help_message("space to pick, enter to go on — none is fine")
+        // The answer line names the plugins, not their descriptions.
+        .with_formatter(&|options| {
+            let names: Vec<&str> = options
+                .iter()
+                .filter_map(|option| option.value.split_whitespace().next())
+                .collect();
+            if names.is_empty() {
+                "none".to_owned()
+            } else {
+                names.join(", ")
+            }
+        })
         .prompt()
         .map_err(|failure| {
             CliError::Invalid(format!("could not read the plugin choice: {failure}"))
@@ -65,30 +79,50 @@ pub fn prepare_for(root: &Path, manager: PackageManager) -> Result<(), CliError>
     Ok(())
 }
 
-/// Runs the manager's install in the new project. Returns whether it ran.
-pub fn install(root: &Path, manager: PackageManager) -> Result<bool, CliError> {
+/// Runs the manager's install in the new project, quietly: its output is shown only when
+/// it fails (npm's funding and audit lines buried the next steps). Returns whether it ran.
+pub fn install(root: &Path, manager: PackageManager, paint: Painter) -> Result<bool, CliError> {
     if !Toolchain::probe_program(manager.program()).is_usable() {
         println!(
-            "\n{} is not installed; skipping the install",
-            manager.program()
+            "{}",
+            paint.failed(&format!(
+                "{} is not installed; skipped the install",
+                manager.program()
+            ))
         );
         return Ok(false);
     }
-    println!("\ninstalling with {}", manager.install_command());
+    let what = format!("Installed dependencies with {}", manager.program());
+    println!(
+        "{}",
+        paint.working(&format!(
+            "Installing dependencies with {}",
+            manager.program()
+        ))
+    );
+    let started = std::time::Instant::now();
     let step = Step::new("new", manager.program())
         .arg("install")
         .in_dir(root.to_path_buf());
-    lepton_orchestrator::run_streaming(&step).map_err(CliError::from)?;
-    Ok(true)
-}
-
-/// What to type next, in the project's own manager.
-pub fn next_steps(root: &Path, manager: PackageManager, installed: bool) {
-    println!("\nnext: cd {}", root.display());
-    if !installed {
-        println!("      {}", manager.install_command());
+    match lepton_orchestrator::run(&step) {
+        Ok(_) => {
+            let seconds = started.elapsed().as_secs_f32();
+            println!(
+                "{}{}",
+                paint.replace_line(),
+                paint.done(&what, &format!("{seconds:.1} s"))
+            );
+            Ok(true)
+        }
+        Err(error) => {
+            println!(
+                "{}{}",
+                paint.replace_line(),
+                paint.failed(&format!("{} install failed", manager.program()))
+            );
+            Err(CliError::from(error))
+        }
     }
-    println!("      {}", manager.run_command("lepton:dev"));
 }
 
 #[cfg(test)]

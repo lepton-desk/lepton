@@ -23,7 +23,8 @@ use super::{CliError, Outcome};
 #[derive(Debug, Clone, clap::Args)]
 pub struct Flags {
     /// The project's name, as a developer would say it: `Ledger`, not `ledger-app`.
-    pub name: String,
+    /// Omitted: the wizard asks (`lepton-app` by default).
+    pub name: Option<String>,
 
     /// Which frontend to scaffold, as `<framework>-<language>`.
     ///
@@ -59,6 +60,10 @@ pub struct Flags {
     #[arg(long)]
     pub install: bool,
 
+    /// Lists every file written, and the channel name.
+    #[arg(long)]
+    pub verbose: bool,
+
     /// Never asks anything; fails instead.
     ///
     /// For scripts and for continuous integration, where a prompt is a hang rather than
@@ -85,7 +90,7 @@ pub struct Flags {
 
 impl Flags {
     /// Creates the project.
-    pub fn run(self) -> Outcome {
+    pub fn run(mut self) -> Outcome {
         let chain = Toolchain::detect();
         require(&chain, ToolRequirement::Scaffold)?;
 
@@ -93,13 +98,33 @@ impl Flags {
         // command line that already says everything never opens a prompt, which is what
         // makes `lepton new Ledger --template vanilla-ts --target native` usable in a
         // script on a machine with no terminal at all.
+        let paint = crate::style::Painter::detect();
+        inquire::set_global_render_config(paint.prompt_theme());
+        println!("{}", paint.header("create an app"));
+        match &self.name {
+            Some(name) => println!("{}", paint.answered("Project", name)),
+            None if self.non_interactive => {
+                return Err(CliError::Invalid(
+                    "--non-interactive needs the project's name".to_owned(),
+                ));
+            }
+            None => {
+                let name = inquire::Text::new(&super::new_view::question("Project"))
+                    .with_default("lepton-app")
+                    .prompt()
+                    .map_err(|failure| {
+                        CliError::Invalid(format!("could not read the name: {failure}"))
+                    })?;
+                self.name = Some(name);
+            }
+        }
         let resolved = match self.template.clone() {
             Some(_) => Resolved {
                 template: self.template.clone().unwrap_or_default(),
                 target: self.target.unwrap_or(RenderMode::Native),
                 plugins: super::new_setup::plugins_from_flag(self.plugins.as_deref())?,
                 identifier: self.identifier.clone().unwrap_or_else(|| {
-                    lepton_template_injector::manifest::identifier_for(&self.name)
+                    lepton_template_injector::manifest::identifier_for(self.name())
                 }),
             },
             None if self.non_interactive => {
@@ -108,8 +133,17 @@ impl Flags {
                         .to_owned(),
                 ));
             }
-            None => wizard(&self)?,
+            None => wizard(&self, paint)?,
         };
+        if self.template.is_some() {
+            super::new_view::answered_by_flags(
+                paint,
+                &resolved.template,
+                resolved.target,
+                &resolved.plugins,
+                &resolved.identifier,
+            );
+        }
 
         let manager = super::new_setup::choose_manager(self.package_manager.as_deref(), &chain)?;
         let manifest = self.manifest_for(&resolved)?;
@@ -137,7 +171,7 @@ impl Flags {
         };
 
         let bindings = lepton_template_injector::Bindings {
-            project_name: kebab(&self.name),
+            project_name: kebab(self.name()),
             app_id: resolved.identifier.clone(),
             render_mode: resolved.target.as_str().to_owned(),
         };
@@ -160,15 +194,38 @@ impl Flags {
         staging.commit(&root)?;
         super::new_setup::prepare_for(&root, manager)?;
 
-        report(&root, &manifest, &vendored, &base_files, &written);
-        let installed = self.install && super::new_setup::install(&root, manager)?;
-        super::new_setup::next_steps(&root, manager, installed);
+        super::new_view::steps(
+            paint,
+            &resolved.template,
+            &root,
+            &manifest,
+            &super::new_view::Written {
+                vendored: &vendored,
+                base: &base_files,
+                files: &written,
+            },
+            self.verbose,
+        );
+        let installed = self.install && super::new_setup::install(&root, manager, paint)?;
+        super::new_view::next_steps(
+            paint,
+            &resolved.template,
+            &root,
+            manager,
+            installed,
+            &manifest,
+        );
         Ok(())
+    }
+
+    /// The project's name, once asked for when the command line did not give it.
+    fn name(&self) -> &str {
+        self.name.as_deref().unwrap_or("lepton-app")
     }
 
     /// The manifest these flags describe.
     fn manifest_for(&self, resolved: &Resolved) -> Result<Manifest, CliError> {
-        let mut manifest = Manifest::new(&self.name);
+        let mut manifest = Manifest::new(self.name());
 
         manifest.target = target_of(&resolved.template)?;
         manifest.language = language_of(&resolved.template)?;
@@ -198,7 +255,7 @@ impl Flags {
             // The directory is named after the identifier, not the product name: a
             // name may contain spaces and capital letters, and a path is neither.
             None => Ok(PathBuf::from(
-                lepton_template_injector::manifest::identifier_for(&self.name),
+                lepton_template_injector::manifest::identifier_for(self.name()),
             )),
         }
     }
@@ -346,7 +403,8 @@ fn scaffold(
 /// Two steps, in the order that decides the least: what to build the interface with, then
 /// what draws it. Every answer is defaulted, so pressing enter repeatedly produces the
 /// same project a script would.
-fn wizard(flags: &Flags) -> Result<Resolved, CliError> {
+fn wizard(flags: &Flags, paint: crate::style::Painter) -> Result<Resolved, CliError> {
+    use super::new_view::{plugins_label, question, render_label, template_label};
     let available = lepton_template_injector::base::available();
 
     let template = match flags.template.clone() {
@@ -357,24 +415,37 @@ fn wizard(flags: &Flags) -> Result<Resolved, CliError> {
                     available.join(", ")
                 )));
             }
+            println!("{}", paint.answered("Frontend", &template_label(&name)));
             name
         }
-        None => inquire::Select::new("Frontend", available.clone())
-            .with_help_message("TypeScript and JavaScript, per framework")
-            .prompt()
-            .map_err(|failure| {
-                CliError::Invalid(format!("could not read the frontend choice: {failure}"))
-            })?,
+        None => {
+            let ordered = super::new_view::wizard_order(&available);
+            let labels: Vec<String> = ordered.iter().map(|name| template_label(name)).collect();
+            let picked = inquire::Select::new(&question("Frontend"), labels.clone())
+                .with_help_message("↑↓ to move, enter to choose")
+                .prompt()
+                .map_err(|failure| {
+                    CliError::Invalid(format!("could not read the frontend choice: {failure}"))
+                })?;
+            let index = labels
+                .iter()
+                .position(|label| label == &picked)
+                .unwrap_or(0);
+            ordered.get(index).cloned().unwrap_or_default()
+        }
     };
 
     let target = match flags.target {
-        Some(target) => target,
+        Some(target) => {
+            println!("{}", paint.answered("Render", render_label(target)));
+            target
+        }
         None => {
             let choices = vec![
-                "webview — your Vite frontend in WPE WebKit",
-                "native — drawn by the core, no web engine",
+                render_label(RenderMode::Webview),
+                render_label(RenderMode::Native),
             ];
-            let picked = inquire::Select::new("Render", choices)
+            let picked = inquire::Select::new(&question("Render"), choices)
                 .prompt()
                 .map_err(|failure| {
                     CliError::Invalid(format!("could not read the render choice: {failure}"))
@@ -387,13 +458,17 @@ fn wizard(flags: &Flags) -> Result<Resolved, CliError> {
         }
     };
     let plugins = match flags.plugins.as_deref() {
-        Some(list) => super::new_setup::plugins_from_flag(Some(list))?,
+        Some(list) => {
+            let chosen = super::new_setup::plugins_from_flag(Some(list))?;
+            println!("{}", paint.answered("Plugins", &plugins_label(&chosen)));
+            chosen
+        }
         None if target == RenderMode::Webview => super::new_setup::ask_plugins()?,
         None => Vec::new(),
     };
 
-    let default_identifier = lepton_template_injector::manifest::identifier_for(&flags.name);
-    let identifier = inquire::Text::new("App identifier")
+    let default_identifier = lepton_template_injector::manifest::identifier_for(flags.name());
+    let identifier = inquire::Text::new(&question("Identifier"))
         .with_default(&default_identifier)
         .prompt()
         .map_err(|failure| {
@@ -477,55 +552,6 @@ fn language_of(template: &str) -> Result<lepton_template_injector::Language, Cli
         _ => Err(CliError::Invalid(format!(
             "`{template}` does not end in a language: expected `-ts` or `-js`"
         ))),
-    }
-}
-
-/// What was created, printed as a list the developer can act on.
-fn report(
-    root: &Path,
-    manifest: &Manifest,
-    vendored: &[PathBuf],
-    base: &[String],
-    written: &[PathBuf],
-) {
-    println!("created {} in {}", manifest.product_name, root.display());
-    println!("  render path  {}", manifest.render_path.describe());
-    // Framework and language are printed separately because they are separate choices.
-    // The framework's own name still carries a language in it — `vanilla-ts` is the
-    // variant name — so it is stripped rather than shown, because a JavaScript project
-    // reporting "vanilla-ts" is the kind of small lie that costs an hour later.
-    let framework = manifest
-        .target
-        .as_str()
-        .rsplit_once('-')
-        .map(|(head, _)| head)
-        .unwrap_or(manifest.target.as_str());
-    println!(
-        "  framework    {} ({})",
-        framework,
-        manifest.language.as_str()
-    );
-    println!("  channel      {}", manifest.channel_name);
-
-    // The core's own files are counted rather than listed: there are twenty-odd of
-    // them, they are Lepton's, and a summary that scrolls past its own contents is a
-    // summary nobody reads to the end.
-    println!(
-        "  core         {} files under {}/{}",
-        vendored.len(),
-        super::build::CORE_DIR,
-        lepton_core_vendoring::VENDORED_CORE
-    );
-    // The base frontend is counted separately from the injection because they are
-    // different things: one is what the developer would recognise from any Vite project,
-    // the other is what makes it a Lepton project.
-    println!("  base         {} files", base.len());
-    println!("  wrote {} files:", written.len());
-    for path in written {
-        // Relative to the project root, because an absolute path in a summary is
-        // noise: the developer is standing in the directory and knows where they are.
-        let relative = path.strip_prefix(root).unwrap_or(path);
-        println!("    {}", relative.display());
     }
 }
 

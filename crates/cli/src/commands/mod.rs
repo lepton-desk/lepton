@@ -20,6 +20,7 @@ pub mod launch;
 pub mod linked;
 pub mod new;
 pub mod new_setup;
+pub mod new_view;
 pub mod package;
 pub mod package_manager;
 pub mod plugins;
