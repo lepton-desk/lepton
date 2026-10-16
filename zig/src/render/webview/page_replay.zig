@@ -55,7 +55,8 @@ pub const Decision = union(enum) {
 
 fn isWindowCommand(command: u32) bool {
     return switch (@as(invoke.Command, @enumFromInt(command))) {
-        .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state => true,
+        // A permission answer settles a request the live engine raised in this run.
+        .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond => true,
         else => false,
     };
 }

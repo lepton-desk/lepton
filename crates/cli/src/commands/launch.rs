@@ -66,11 +66,39 @@ pub fn grant_permissions(steps: &mut [Step], root: &Path) -> Result<(), CliError
     let Some(names) = lepton_template_injector::parse_permissions(&text)
         .map_err(|error| CliError::Invalid(error.reason))?
     else {
-        return Ok(());
+        return grant_web_permissions(steps, root, &text);
     };
     for step in steps.iter_mut() {
         if is_core_build(step) {
             step.args.push(format!("-Dpermissions={}", names.join(",")));
+        }
+    }
+    grant_web_permissions(steps, root, &text)
+}
+
+/// `webPermissions` as `-Dweb-permissions=kind=policy,…`; nothing when the field is absent.
+fn grant_web_permissions(steps: &mut [Step], root: &Path, config: &str) -> Result<(), CliError> {
+    let Some(pairs) = lepton_template_injector::parse_web_permissions(config)
+        .map_err(|error| CliError::Invalid(error.reason))?
+    else {
+        return Ok(());
+    };
+    // A project from before this has a build that rejects an unknown option.
+    let build = std::fs::read_to_string(root.join(super::build::CORE_DIR).join("build.zig"))
+        .unwrap_or_default();
+    if !build.contains("\"web-permissions\"") {
+        return Err(CliError::Invalid(
+            "lepton.config.json has \"webPermissions\", but this project's src-lepton/build.zig predates them; recreate it with a current `lepton new`".to_owned(),
+        ));
+    }
+    let joined: Vec<String> = pairs
+        .iter()
+        .map(|(kind, policy)| format!("{kind}={policy}"))
+        .collect();
+    for step in steps.iter_mut() {
+        if is_core_build(step) {
+            step.args
+                .push(format!("-Dweb-permissions={}", joined.join(",")));
         }
     }
     Ok(())
@@ -388,6 +416,43 @@ mod naming_tests {
             "wildcard"
         );
         lepton_orchestrator::assert_contains!(&error.to_string(), "wildcards are not allowed");
+        Ok(())
+    }
+
+    #[test]
+    fn web_permissions_reach_a_current_core_and_stop_an_old_one() -> Result<(), Failure> {
+        let scratch = lepton_orchestrator::testing::Scratch::new("web-permissions")?;
+        scratch.write(
+            "lepton.config.json",
+            r#"{"productName":"Notes","webPermissions":{"notifications":"allow","camera":"deny"}}"#,
+        )?;
+        scratch.write("src-lepton/build.zig", "const x = \"permissions\";\n")?;
+        let mut steps = bundle_then_core(scratch.path());
+        let error = lepton_orchestrator::assert_err!(
+            grant_permissions(&mut steps, scratch.path()),
+            "an old build.zig"
+        );
+        lepton_orchestrator::assert_contains!(&error.to_string(), "predates them");
+
+        scratch.write(
+            "src-lepton/build.zig",
+            "b.option([]const u8, \"web-permissions\", \"\")\n",
+        )?;
+        let mut steps = bundle_then_core(scratch.path());
+        lepton_orchestrator::assert_ok!(grant_permissions(&mut steps, scratch.path()), "current");
+        ensure!(
+            steps[1]
+                .args
+                .iter()
+                .any(|arg| arg == "-Dweb-permissions=camera=deny,notifications=allow"),
+            "core args: {:?}",
+            steps[1].args
+        );
+        ensure!(
+            !steps[0].args.iter().any(|arg| arg.starts_with("-Dweb-")),
+            "bundler got web permissions: {:?}",
+            steps[0].args
+        );
         Ok(())
     }
 

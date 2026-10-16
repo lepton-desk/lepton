@@ -162,6 +162,84 @@ pub fn readFile(root_fd: i32, relative: [:0]const u8, out: []u8) Error!usize {
     }
 }
 
+/// Up to `out.len` bytes of the file from `offset`; fewer only at its end. A file larger
+/// than one `invoke` reply is read in such pieces.
+pub fn readRange(root_fd: i32, relative: [:0]const u8, offset: u64, out: []u8) Error!usize {
+    const fd = try beneath(root_fd, relative, .{ .CLOEXEC = true }, 0);
+    defer _ = linux.close(fd);
+    var len: usize = 0;
+    while (len < out.len) {
+        const got = try check(linux.pread(fd, out[len..].ptr, out.len - len, @intCast(offset + len)));
+        if (got == 0) break;
+        len += got;
+    }
+    return len;
+}
+
+/// Renames `from` to `to`, both below the same root; replaces an existing file at `to`
+/// in one step, which is how a file written in pieces under a temporary name is saved.
+pub fn rename(root_fd: i32, from: [:0]const u8, to: [:0]const u8) Error!void {
+    if (from.len == 0 or to.len == 0) return error.Denied;
+    var from_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var to_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const source = try parentOf(root_fd, from, &from_buffer);
+    defer _ = linux.close(source.fd);
+    const target = try parentOf(root_fd, to, &to_buffer);
+    defer _ = linux.close(target.fd);
+    _ = try check(linux.renameat(source.fd, source.name.ptr, target.fd, target.name.ptr));
+}
+
+/// How deep `removeTree` goes before refusing: a note vault is not that deep, and a
+/// bound keeps a malicious tree from exhausting the stack.
+const max_depth = 32;
+
+/// Removes `relative` and, for a directory, everything in it. A symbolic link is removed
+/// as a link: nothing it points to is touched, inside the root or out.
+pub fn removeTree(root_fd: i32, relative: [:0]const u8) Error!void {
+    if (relative.len == 0) return error.Denied;
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const parent = try parentOf(root_fd, relative, &buffer);
+    defer _ = linux.close(parent.fd);
+    try removeIn(parent.fd, parent.name, 0);
+}
+
+fn removeIn(dir_fd: i32, name: [:0]const u8, depth: usize) Error!void {
+    const unlinked = linux.unlinkat(dir_fd, name.ptr, 0);
+    if (linux.errno(unlinked) != .ISDIR) {
+        _ = try check(unlinked);
+        return;
+    }
+    if (depth == max_depth) return error.TooLarge;
+    // `NOFOLLOW`: `unlinkat` said a directory, and a link swapped in since must not be
+    // followed out of the root.
+    const fd = try check(linux.openat(dir_fd, name.ptr, .{ .DIRECTORY = true, .NOFOLLOW = true, .CLOEXEC = true }, 0));
+    defer _ = linux.close(@intCast(fd));
+    var records: [8192]u8 align(@alignOf(linux.dirent64)) = undefined;
+    // Passes over the directory until one removes nothing: `.` and `..` are always
+    // listed, so an empty directory never reads as zero bytes after a rewind.
+    var removed_any = true;
+    while (removed_any) {
+        removed_any = false;
+        const got = try check(linux.getdents64(@intCast(fd), &records, records.len));
+        if (got == 0) break;
+        var at: usize = 0;
+        while (at < got) {
+            const entry: *align(1) const linux.dirent64 = @ptrCast(&records[at]);
+            at += entry.reclen;
+            const child = std.mem.span(@as([*:0]const u8, @ptrCast(&entry.name)));
+            if (std.mem.eql(u8, child, ".") or std.mem.eql(u8, child, "..")) continue;
+            var child_buffer: [256]u8 = undefined;
+            @memcpy(child_buffer[0..child.len], child);
+            child_buffer[child.len] = 0;
+            try removeIn(@intCast(fd), child_buffer[0..child.len :0], depth + 1);
+            removed_any = true;
+        }
+        // Entries were removed while reading: start over until the directory is empty.
+        _ = linux.lseek(@intCast(fd), 0, linux.SEEK.SET);
+    }
+    _ = try check(linux.unlinkat(dir_fd, name.ptr, linux.AT.REMOVEDIR));
+}
+
 /// Writes `data` to the file, creating it; replaces its contents unless `append`.
 pub fn writeFile(root_fd: i32, relative: [:0]const u8, data: []const u8, append: bool) Error!void {
     if (relative.len == 0) return error.Failed;
@@ -422,4 +500,56 @@ test "write, read, append, list, stat, make and remove inside a root" {
     try remove(root_fd, "notes.txt");
     try std.testing.expect(!try exists(root_fd, "notes.txt"));
     try std.testing.expectError(error.Denied, remove(root_fd, ""));
+}
+
+test "large files are read in ranges, saved by renaming, and trees removed without following links" {
+    const tree = try Tree.make();
+    defer tree.remove();
+    var root_buffer: [256]u8 = undefined;
+    const root_fd = try openRoot(try tree.root(&root_buffer, "root", false));
+    defer _ = linux.close(root_fd);
+
+    // 200 000 bytes, three times what one reply carries: written in pieces under a
+    // temporary name, then renamed over the old file in one step.
+    var piece: [65_536]u8 = undefined;
+    for (&piece, 0..) |*byte, index| byte.* = @intCast('a' + index % 26);
+    try writeFile(root_fd, "big.md", "old", false);
+    var written: usize = 0;
+    while (written < 200_000) {
+        const size = @min(piece.len, 200_000 - written);
+        try writeFile(root_fd, "big.md.lepton-save", piece[0..size], written != 0);
+        written += size;
+    }
+    try rename(root_fd, "big.md.lepton-save", "big.md");
+    try std.testing.expect(!try exists(root_fd, "big.md.lepton-save"));
+    var out: [65_536]u8 = undefined;
+    var total: usize = 0;
+    while (true) {
+        const got = try readRange(root_fd, "big.md", total, &out);
+        if (got == 0) break;
+        // Each piece was written from its own start, so the pattern restarts every piece.
+        try std.testing.expectEqual(@as(u8, @intCast('a' + (total % piece.len) % 26)), out[0]);
+        total += got;
+        if (got < out.len) break;
+    }
+    try std.testing.expectEqual(@as(usize, 200_000), total);
+
+    // Renaming out of the root, or through a link that leaves it, is refused.
+    try std.testing.expectError(error.Denied, rename(root_fd, "big.md", "escape/taken.md"));
+    try std.testing.expectError(error.Denied, rename(root_fd, "../outside/secret.txt", "stolen.txt"));
+
+    // A folder of notes with a link out of the root inside it: the folder goes, the
+    // link goes, what it pointed to stays.
+    try makeDirectory(root_fd, "vault/daily/2026", true);
+    try writeFile(root_fd, "vault/daily/2026/10-16.md", "bugün", false);
+    try writeFile(root_fd, "vault/index.md", "# Kasa", false);
+    try tree.shell("ln -s ../../outside {0s}/root/vault/out");
+    try removeTree(root_fd, "vault");
+    try std.testing.expect(!try exists(root_fd, "vault"));
+    var check_buffer: [256]u8 = undefined;
+    const outside_fd = try openRoot(try tree.root(&check_buffer, "outside", false));
+    defer _ = linux.close(outside_fd);
+    try std.testing.expect(try exists(outside_fd, "secret.txt"));
+    try std.testing.expectError(error.Denied, removeTree(root_fd, ""));
+    try std.testing.expectError(error.Denied, removeTree(root_fd, "escape/secret.txt"));
 }

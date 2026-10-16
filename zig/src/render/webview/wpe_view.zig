@@ -122,6 +122,8 @@ const e_view_get_height = @extern(*const fn (?*anyopaque) callconv(.c) c_int, .{
 const e_toplevel_minimize = @extern(*const fn (?*anyopaque) callconv(.c) c_int, .{ .name = "wpe_toplevel_minimize" });
 const e_toplevel_maximize = @extern(*const fn (?*anyopaque) callconv(.c) c_int, .{ .name = "wpe_toplevel_maximize" });
 const e_toplevel_unmaximize = @extern(*const fn (?*anyopaque) callconv(.c) c_int, .{ .name = "wpe_toplevel_unmaximize" });
+const e_toplevel_set_title = @extern(*const fn (?*anyopaque, [*:0]const u8) callconv(.c) void, .{ .name = "wpe_toplevel_set_title" });
+const e_web_view_get_title = @extern(*const fn (?*anyopaque) callconv(.c) ?[*:0]const u8, .{ .name = "webkit_web_view_get_title" });
 
 /// `void g_main_context_wakeup(GMainContext *)` — glib/gmain.h.
 const e_context_wakeup = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_main_context_wakeup" });
@@ -240,6 +242,11 @@ pub const View = struct {
     /// (`window.close()` → `WebKitWebView::close`). The owner's loop reads it and ends.
     closed: bool = false,
 
+    /// The application's title, shown while the page has none of its own (`setTitle`).
+    title: [256]u8 = @splat(0),
+    title_len: usize = 0,
+    title_watched: bool = false,
+
     /// Opens a view on whichever engine ABI this build detected.
     ///
     /// Both are kept because both exist in the wild and neither can be assumed. The
@@ -305,6 +312,7 @@ pub const View = struct {
             platform_abi.webkit_web_view_get_wpe_view(web_view) orelse return Error.NoView,
         );
 
+        @import("features.zig").apply(web_view);
         const opened = View{ .web_view = web_view, .view = view };
         // Registered against the view's *own* context, not the process default: a view
         // carries a context of its own and a scheme registered only on the default would
@@ -329,9 +337,11 @@ pub const View = struct {
         // `LEPTON_RECORD=<file>`: `lepton record`, or anyone reproducing a bug.
         self.bridge.recorder = @import("record.zig").Recorder.fromEnvironment();
         self.bridge.page_replay = @import("page_replay.zig").fromEnvironment();
+        @import("downloads.zig").watch(self.web_view, &self.bridge);
+        @import("permissions.zig").watch(self.web_view, &self.bridge);
         // The window the page's `window.*` commands act on, and the two changes it is
         // told about as events. `self` is the pointer GLib keeps, as in `watchClose`.
-        self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState };
+        self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState, .permission = &@import("permissions.zig").answer };
         _ = e_signal_connect(@ptrCast(self.view), "toplevel-state-changed", @ptrCast(&onToplevelState), self, null, 0);
         _ = e_signal_connect(@ptrCast(self.view), "resized", @ptrCast(&onResized), self, null, 0);
         // The default context only when it is a different object: a view built on the
@@ -374,6 +384,38 @@ pub const View = struct {
         std.mem.writeInt(u32, bytes[0..4], @intCast(@max(e_view_get_width(view), 0)), .little);
         std.mem.writeInt(u32, bytes[4..8], @intCast(@max(e_view_get_height(view), 0)), .little);
         _ = self.bridge.emit(events.window_resized, &bytes) catch {};
+    }
+
+    /// Titles the window `title` — the application's name, which docks, window switchers
+    /// and task managers show — and from then on follows the page's `document.title`,
+    /// falling back to `title` whenever the page has none. Takes `self` by pointer: GLib
+    /// keeps it for the signal's lifetime.
+    pub fn setTitle(self: *View, title: []const u8) void {
+        const kept = fitTitle(title, self.title.len - 1);
+        @memcpy(self.title[0..kept.len], kept);
+        self.title[kept.len] = 0;
+        self.title_len = kept.len;
+        if (!comptime @import("build_options").wpe_platform_abi) return;
+        if (!self.title_watched) {
+            self.title_watched = true;
+            _ = e_signal_connect(@ptrCast(self.web_view), "notify::title", @ptrCast(&onTitle), self, null, 0);
+        }
+        self.showTitle();
+    }
+
+    fn showTitle(self: *View) void {
+        const toplevel = e_view_get_toplevel(@ptrCast(self.view)) orelse return;
+        const page = if (e_web_view_get_title(@ptrCast(self.web_view))) |raw| std.mem.span(raw) else "";
+        if (page.len != 0) {
+            e_toplevel_set_title(toplevel, e_web_view_get_title(@ptrCast(self.web_view)).?);
+        } else {
+            e_toplevel_set_title(toplevel, self.title[0..self.title_len :0]);
+        }
+    }
+
+    fn onTitle(_: ?*anyopaque, _: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
+        const self: *View = @ptrCast(@alignCast(data orelse return));
+        self.showTitle();
     }
 
     /// Watches for the window going away, so the owner's loop can end.
@@ -491,6 +533,7 @@ test "the window commands and events path is compiled" {
     // Zig never analyses can be wrong while every test passes (see `bridge.zig`).
     if (comptime !(@import("build_options").wpe_platform_abi and @import("root.zig").is_available())) return error.SkipZigTest;
     _ = &View.startBridge;
+    _ = &View.setTitle;
     _ = &View.windowAct;
     _ = &View.windowState;
     _ = &View.onToplevelState;
@@ -516,4 +559,20 @@ test "each application's web data is named after it, under the user's data direc
     try std.testing.expectEqual(@as(u16, 0o700), info.mode & 0o777);
     _ = linux.unlinkat(linux.AT.FDCWD, &data_directory, linux.AT.REMOVEDIR);
     _ = linux.unlinkat(linux.AT.FDCWD, &cache_directory, linux.AT.REMOVEDIR);
+}
+
+/// The longest prefix of `title` that fits `limit` bytes without splitting a UTF-8
+/// character: a title cut mid-character is not valid UTF-8, which GLib rejects.
+fn fitTitle(title: []const u8, limit: usize) []const u8 {
+    if (title.len <= limit) return title;
+    var end = limit;
+    while (end > 0 and (title[end] & 0xC0) == 0x80) end -= 1;
+    return title[0..end];
+}
+
+test "a long title is cut on a character boundary" {
+    try std.testing.expectEqualStrings("Notlar", fitTitle("Notlar", 255));
+    // "ş" is two bytes: a limit landing inside it keeps the character out.
+    try std.testing.expectEqualStrings("Ba", fitTitle("Baş", 3));
+    try std.testing.expectEqualStrings("Baş", fitTitle("Baş", 4));
 }

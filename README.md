@@ -29,7 +29,15 @@ npm create lepton-app@latest
 
 `pnpm create lepton-app`, `yarn create lepton-app` and `bun create lepton-app` work the
 same. The project uses the package manager you created it with, and so do `lepton dev`,
-`lepton build` and `lepton run`: they read the lockfile. From a checkout:
+`lepton build` and `lepton run`: they read the lockfile.
+
+A project has one script, `"lepton": "lepton"`, so every command runs through it:
+`pnpm lepton dev`, `yarn lepton build`, `bun lepton record`, `npm run lepton dev`.
+**With npm, put `--` before any flag**: `npm run lepton -- build --release`. npm keeps
+flags for itself — an unknown one stops it ("Unknown cli flag"), and one it knows, like
+`--json`, it takes silently, so `lepton` never sees it. pnpm, Yarn and Bun pass flags on.
+
+From a checkout:
 
 ```bash
 cargo build --release --bin lepton

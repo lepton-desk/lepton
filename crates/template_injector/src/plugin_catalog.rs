@@ -49,6 +49,7 @@ pub const CATALOG: [Plugin; 4] = [
             "fs.remove",
             "fs.stat",
             "fs.exists",
+            "fs.rename",
         ],
     },
     Plugin {

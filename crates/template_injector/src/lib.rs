@@ -36,7 +36,9 @@ pub use bundle::{Bundle, BundleTarget, parse_bundle};
 pub use manifest::{
     Language, Manifest, ManifestError, RenderPath, Target, render_manifest, validate,
 };
-pub use permissions::parse_permissions;
+pub use permissions::{
+    PERMISSION_ANSWER, WEB_PERMISSION_KINDS, parse_permissions, parse_web_permissions,
+};
 pub use plan::{Injection, InjectionError, Mode, Plan, apply, plan};
 pub use read::parse_config;
 

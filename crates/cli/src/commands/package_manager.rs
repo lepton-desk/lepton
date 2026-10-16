@@ -100,11 +100,19 @@ impl PackageManager {
         }
     }
 
-    /// The command that runs a script from `package.json`.
-    pub fn run_command(self, script: &str) -> String {
+    /// The command that runs `lepton <words>` through the project's `"lepton"` script.
+    ///
+    /// npm passes plain words on but takes every flag for its own and stops at one it
+    /// does not know (measured, npm 12.2: `npm run lepton build --release` → "Unknown cli
+    /// flag"), so with a flag npm gets `--` first; pnpm, Yarn and Bun pass everything.
+    pub fn lepton_command(self, words: &[&str]) -> String {
+        let joined = words.join(" ");
         match self {
-            Self::Npm => format!("npm run {script}"),
-            other => format!("{} {script}", other.program()),
+            Self::Npm if words.iter().any(|word| word.starts_with('-')) => {
+                format!("npm run lepton -- {joined}")
+            }
+            Self::Npm => format!("npm run lepton {joined}"),
+            other => format!("{} lepton {joined}", other.program()),
         }
     }
 }
@@ -263,12 +271,20 @@ mod tests {
         );
         ensure!(PackageManager::from_user_agent("").is_none(), "empty");
         assert_eq!(
-            PackageManager::Yarn.run_command("lepton:dev"),
-            "yarn lepton:dev"
+            PackageManager::Yarn.lepton_command(&["dev"]),
+            "yarn lepton dev"
         );
         assert_eq!(
-            PackageManager::Npm.run_command("lepton:dev"),
-            "npm run lepton:dev"
+            PackageManager::Pnpm.lepton_command(&["build", "--release"]),
+            "pnpm lepton build --release"
+        );
+        assert_eq!(
+            PackageManager::Npm.lepton_command(&["dev"]),
+            "npm run lepton dev"
+        );
+        assert_eq!(
+            PackageManager::Npm.lepton_command(&["build", "--release"]),
+            "npm run lepton -- build --release"
         );
         assert_eq!(PackageManager::Bun.install_command(), "bun install");
         Ok(())

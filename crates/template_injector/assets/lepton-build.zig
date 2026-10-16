@@ -63,6 +63,9 @@ pub fn build(b: *std.Build) !void {
     // `lepton.config.json`'s `permissions`, handed over by the CLI: the commands the page
     // may call. Checked against the registered commands when `main.zig` compiles.
     const permissions = b.option([]const u8, "permissions", "Commands the page may call, comma-separated") orelse "";
+    // `webPermissions`: what the page may ask the engine for (camera, notifications, …),
+    // `kind=allow|deny|ask` comma-separated. Absent kinds are denied.
+    const web_permissions = b.option([]const u8, "web-permissions", "Engine permissions, kind=policy comma-separated") orelse "";
 
     // The vendored location, named once. `configureCore` needs it because
     // `std.Build` resolves paths against the root of the build that called it, and
@@ -84,6 +87,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption([]const u8, "dev_server", dev_server);
     options.addOption(u16, "dev_port", dev_port);
     options.addOption([]const u8, "permissions", permissions);
+    options.addOption([]const u8, "web_permissions", web_permissions);
 
     const root = b.createModule(.{
         .root_source_file = b.path("main.zig"),

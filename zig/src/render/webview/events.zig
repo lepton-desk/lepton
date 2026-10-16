@@ -18,7 +18,12 @@ const registry = @import("registry.zig");
 /// emits these constants and the SDK's `BuiltinEvents` type is generated from this list.
 pub const window_state = "window.state";
 pub const window_resized = "window.resized";
-pub const builtin = [_][]const u8{ window_state, window_resized };
+pub const download_started = "download.started";
+pub const download_progress = "download.progress";
+pub const download_finished = "download.finished";
+pub const download_failed = "download.failed";
+pub const permission_request = "permission.request";
+pub const builtin = [_][]const u8{ window_state, window_resized, download_started, download_progress, download_finished, download_failed, permission_request };
 
 /// The events an application emits, declared once in its `main.zig`:
 ///

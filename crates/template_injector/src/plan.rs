@@ -125,7 +125,11 @@ pub fn plan(manifest: &Manifest) -> Result<Plan, InjectionError> {
         },
         Injection {
             path: "index.html".to_owned(),
-            contents: crate::assets::index_html(manifest.target, manifest.language),
+            contents: crate::assets::index_html(
+                manifest.target,
+                manifest.language,
+                &manifest.window_title,
+            ),
             mode: Mode::Write,
         },
         Injection {

@@ -71,6 +71,37 @@ await toggleMaximize();
 `close`, `minimize`, `maximize`, `unmaximize`, `toggleMaximize`, `state()`,
 `onStateChanged`, `onResized`.
 
+## `@lepton-desk/api/download`
+
+```ts
+import { onDownload } from "@lepton-desk/api/download";
+await onDownload((d) => {
+  if (d.kind === "finished") console.log("saved to", d.path);
+});
+```
+
+A download goes to the user's download directory under the server's file name, made
+safe and unique (`report (1).pdf`). Events: `started` (name), `progress` (received,
+expected; at most four a second), `finished` (path), `failed` (message).
+
+## `@lepton-desk/api/permission`
+
+```json
+"permissions": ["permission.respond"],
+"webPermissions": { "notifications": "ask", "camera": "deny", "geolocation": "allow" }
+```
+
+```ts
+import { onPermissionRequest } from "@lepton-desk/api/permission";
+await onPermissionRequest(async ({ kinds }) => askInYourOwnDialog(kinds));
+```
+
+`webPermissions` decides what a page may ask the engine for: `allow`, `deny`, or `ask`,
+which hands the request to `onPermissionRequest`. A kind not listed is denied, and a
+request nobody answers is denied after a minute. Allowed notifications are shown by the
+desktop. WebKit asks again on each request: remember an answer in the page if you want
+to.
+
 ## How it travels
 
 `fetch("lepton://localhost/__lepton/invoke", { method: "POST", body: frame })`, answered

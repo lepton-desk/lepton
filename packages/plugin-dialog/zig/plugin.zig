@@ -5,6 +5,7 @@
 //! (`core.webviewInvoke.takeLater`). In a native application, or with eight dialogs
 //! already open, it answers `failed` at once.
 
+const std = @import("std");
 const core = @import("lepton_core");
 const request = @import("request.zig");
 
@@ -33,7 +34,7 @@ fn ask(mode: core.portal.Mode, argument: []const u8) Registry.HandlerError!usize
     var filters: [request.max_filters]core.portal.Filter = undefined;
     for (asked.filters, 0..) |filter, index| filters[index] = .{ .name = filter.name, .patterns = filter.patterns };
     const later = core.webviewInvoke.takeLater() orelse return error.Failed;
-    core.portal.choose(.{
+    var options: core.portal.Options = .{
         .mode = mode,
         .title = asked.title,
         .accept_label = asked.accept_label,
@@ -42,6 +43,14 @@ fn ask(mode: core.portal.Mode, argument: []const u8) Registry.HandlerError!usize
         .current_name = asked.current_name,
         .current_folder = asked.current_folder,
         .filters = filters[0..asked.filters.len],
-    }, later);
+    };
+    // `"plugins": { "fs": { "chosen": true } }`: what the user picks joins plugin-fs's
+    // scope. Nothing is recorded otherwise. (A core from before grants has no such field.)
+    if (comptime chosen and @hasField(core.portal.Options, "grant_to")) options.grant_to = identifier;
+    core.portal.choose(options, later);
     return 0;
 }
+
+const config = @import("lepton_plugin_config").text;
+const chosen = std.mem.eql(u8, core.pluginConfig.value(config, "fs.chosen") orelse "false", "true");
+const identifier: []const u8 = core.pluginConfig.value(config, "app.identifier") orelse "";

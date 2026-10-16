@@ -263,10 +263,13 @@ pub fn run_streaming(step: &Step) -> Result<()> {
 
     // Registered for as long as it runs, so a SIGTERM to `lepton` reaches it too.
     crate::supervise::track(child.id());
-    let pumped = pump(&mut child, step.cwd.clone());
+    let readers = start_pumps(&mut child);
+    // The child first, then its output: a process the child started may keep the pipes
+    // open long after the child is gone (a browser an application launched did, and the
+    // application stayed an unreaped zombie behind a read that never ended).
     let waited = child.wait();
     crate::supervise::untrack(child.id());
-    pumped?;
+    finish_pumps(readers, DRAIN_AFTER_EXIT, step.cwd.clone())?;
 
     let status = waited.map_err(|error| OrchestratorError::Spawn {
         tool: step.tool,
@@ -283,29 +286,56 @@ pub fn run_streaming(step: &Step) -> Result<()> {
     Ok(())
 }
 
-/// Copies both of a child's streams to this process's, then waits for it.
+/// How long the output of a process that has exited may still arrive: what it wrote just
+/// before it ended is in the pipe, and reading it takes far less than this.
+const DRAIN_AFTER_EXIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The threads copying a child's streams, and the channel each reports its end on.
+struct Readers {
+    threads: Vec<std::thread::JoinHandle<()>>,
+    ended: std::sync::mpsc::Receiver<()>,
+}
+
+/// Starts copying both of a child's streams to this process's.
 ///
 /// Two reader threads, one per stream, because a tool that fills one pipe while
 /// nobody drains it blocks forever — the classic deadlock of a build that hangs
 /// with no output.
-fn pump(child: &mut Child, directory: Option<std::path::PathBuf>) -> Result<()> {
-    let mut failures = Vec::new();
-
+fn start_pumps(child: &mut Child) -> Readers {
+    let (sender, ended) = std::sync::mpsc::channel();
+    let mut threads = Vec::new();
     if let Some(stdout) = child.stdout.take() {
-        failures.push(pump_one(stdout, |line| {
+        threads.push(pump_one(stdout, sender.clone(), |line| {
             let _ = writeln!(io::stdout(), "{line}");
         }));
     }
     if let Some(stderr) = child.stderr.take() {
-        failures.push(pump_one(stderr, |line| {
+        threads.push(pump_one(stderr, sender, |line| {
             let _ = writeln!(io::stderr(), "{line}");
         }));
     }
+    Readers { threads, ended }
+}
 
-    // Both threads must finish before the child is waited on, or a line still in
-    // flight could be lost when the process exits.
-    for failure in failures {
-        if failure.join().is_err() {
+/// After the child exited: waits up to `drain` for the readers to reach the end of the
+/// streams. A reader still blocked then is reading a pipe some other process holds; it
+/// is left behind rather than waited on, since what the child wrote has been read.
+fn finish_pumps(
+    readers: Readers,
+    drain: std::time::Duration,
+    directory: Option<std::path::PathBuf>,
+) -> Result<()> {
+    let deadline = std::time::Instant::now() + drain;
+    let mut finished = 0;
+    while finished < readers.threads.len() {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match readers.ended.recv_timeout(left) {
+            Ok(()) => finished += 1,
+            Err(_) => return Ok(()),
+        }
+    }
+    for thread in readers.threads {
+        if thread.join().is_err() {
             // The thread's own panic payload is deliberately not forwarded: it is a
             // `Box<dyn Any>` with no `Display`, and rendering it would either need a
             // downcast that can fail or print a debug representation a developer
@@ -327,9 +357,18 @@ fn pump(child: &mut Child, directory: Option<std::path::PathBuf>) -> Result<()> 
 /// most worth reading.
 fn pump_one<R: Read + Send + 'static>(
     reader: R,
+    ended: std::sync::mpsc::Sender<()>,
     emit: impl Fn(&str) + Send + 'static,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
+        // Reports the end however the thread ends, a panic included.
+        struct Ended(std::sync::mpsc::Sender<()>);
+        impl Drop for Ended {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+        let _ended = Ended(ended);
         let mut reader = BufReader::new(reader);
         let mut line = String::new();
         loop {
@@ -454,6 +493,22 @@ mod tests {
         assert_eq!(
             super::display(&step),
             "LEPTON_STEP_TEST='a b' sh -c 'printf %s \"$LEPTON_STEP_TEST\"'"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_step_ends_when_its_process_does_even_if_a_child_keeps_the_pipes() -> Result<(), Failure> {
+        // A launched browser kept an application's stdout open, and `lepton run` waited on
+        // the pipe forever with the application a zombie. The background `sleep` here holds
+        // the pipe the same way, for five seconds.
+        let step = Step::new("sh", "sh").args(["-c", "sleep 5 & echo started"]);
+        let began = std::time::Instant::now();
+        assert_ok!(crate::run_streaming(&step), "the step should succeed");
+        let took = began.elapsed();
+        ensure!(
+            took < std::time::Duration::from_secs(3),
+            "run_streaming waited {took:?} for a pipe its process no longer held"
         );
         Ok(())
     }

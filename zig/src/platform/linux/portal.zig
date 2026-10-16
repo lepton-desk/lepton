@@ -42,6 +42,9 @@ pub const Options = struct {
     /// The folder the dialog starts in, absolute; empty for the desktop's choice.
     current_folder: []const u8 = "",
     filters: []const Filter = &.{},
+    /// An application identifier: what the user picks is granted to it and remembered
+    /// (`grants.zig`) — set only when the application opted in (`fs` `chosen`).
+    grant_to: []const u8 = "",
 };
 
 /// The first byte of the reply; then the chosen paths, each ended by a NUL.
@@ -73,6 +76,7 @@ const g = struct {
     const lookup = @extern(*const fn (?*GVariant, [*:0]const u8, ?[*:0]const u8) callconv(.c) ?*GVariant, .{ .name = "g_variant_lookup_value" });
     const strv = @extern(*const fn (?*GVariant, ?*usize) callconv(.c) ?[*]?[*:0]const u8, .{ .name = "g_variant_get_strv" });
     const unref = @extern(*const fn (?*GVariant) callconv(.c) void, .{ .name = "g_variant_unref" });
+    const new_int32 = @extern(*const fn (i32) callconv(.c) ?*GVariant, .{ .name = "g_variant_new_int32" });
     const filename_from_uri = @extern(*const fn ([*:0]const u8, ?*?[*:0]u8, ?*?*anyopaque) callconv(.c) ?[*:0]u8, .{ .name = "g_filename_from_uri" });
     const free = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_free" });
     const error_free = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_error_free" });
@@ -90,6 +94,10 @@ const Pending = struct {
     /// The request object, for `Request.Close` when the application ends first.
     path: [256]u8 = undefined,
     path_len: usize = 0,
+    grant_to: [256]u8 = undefined,
+    grant_to_len: usize = 0,
+    /// Folders were asked for: what comes back is granted as folders.
+    directories: bool = false,
 };
 
 var pending: [8]Pending = @splat(.{});
@@ -128,6 +136,10 @@ fn start(options: Options, later: invoke.Later) error{Unavailable}!void {
     slot.later = later;
     @memcpy(slot.path[0 .. request_path.len + 1], request_path.ptr[0 .. request_path.len + 1]);
     slot.path_len = request_path.len;
+    const grant_len = @min(options.grant_to.len, slot.grant_to.len);
+    @memcpy(slot.grant_to[0..grant_len], options.grant_to[0..grant_len]);
+    slot.grant_to_len = grant_len;
+    slot.directories = options.directory;
     slot.subscription = g.subscribe(bus, portal_name, "org.freedesktop.portal.Request", "Response", request_path.ptr, null, 0, &onResponse, slot, null);
 
     var z: Strings = .{};
@@ -143,6 +155,71 @@ fn start(options: Options, later: invoke.Later) error{Unavailable}!void {
 /// Closes every dialog still open. The portal does not do it when the application goes
 /// away — measured on COSMIC: a dialog outlived its killed application and stayed on
 /// screen with nobody to answer — so the view calls this as it closes.
+/// Opens `uri` in the desktop's handler for it (the browser, the mail client) through
+/// the `OpenURI` portal. Not `g_app_info_launch_default_for_uri`: that starts the browser
+/// as this process's child with this process's stdout and stderr, and a browser that
+/// stays open then holds `lepton run`'s pipes — measured: Helium's helper `cat`s kept
+/// them, `lepton run` never saw the application end, the application stayed a zombie and
+/// its channel read as held. The portal starts it outside this process.
+pub fn openUri(uri: [*:0]const u8) bool {
+    if (comptime !available) return false;
+    const bus = connection orelse blk: {
+        var failure: ?*anyopaque = null;
+        const opened = g.bus_get_sync(bus_session, null, &failure) orelse {
+            if (failure) |owned| g.error_free(owned);
+            return false;
+        };
+        connection = opened;
+        break :blk opened;
+    };
+    const no_options = [_]?*GVariant{};
+    const arguments = [_]?*GVariant{
+        g.new_string(""),
+        g.new_string(uri),
+        g.new_array("{sv}", &no_options, 0),
+    };
+    // Asynchronous: the answer is only a request handle, and the portal reports a failure
+    // to the user itself.
+    g.call(bus, portal_name, portal_path, "org.freedesktop.portal.OpenURI", "OpenURI", g.new_tuple(&arguments, arguments.len), null, 0, -1, null, &openUriDone, null);
+    return true;
+}
+
+fn openUriDone(source: ?*anyopaque, result: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+    var failure: ?*anyopaque = null;
+    if (g.call_finish(source, result, &failure)) |reply| g.unref(reply);
+    if (failure) |owned| g.error_free(owned);
+}
+
+/// Shows a desktop notification (`org.freedesktop.Notifications.Notify`, the
+/// notification server every Linux desktop runs). `desktop_entry` lets the desktop show
+/// the application's own name and icon.
+pub fn notify(app_name: [*:0]const u8, desktop_entry: [*:0]const u8, summary: [*:0]const u8, body: [*:0]const u8) bool {
+    if (comptime !available) return false;
+    const bus = connection orelse blk: {
+        var failure: ?*anyopaque = null;
+        const opened = g.bus_get_sync(bus_session, null, &failure) orelse {
+            if (failure) |owned| g.error_free(owned);
+            return false;
+        };
+        connection = opened;
+        break :blk opened;
+    };
+    const no_actions = [_]?*GVariant{};
+    const hints = [_]?*GVariant{g.new_dict_entry(g.new_string("desktop-entry"), g.new_variant(g.new_string(desktop_entry)))};
+    const arguments = [_]?*GVariant{
+        g.new_string(app_name),
+        g.new_uint32(0),
+        g.new_string(""),
+        g.new_string(summary),
+        g.new_string(body),
+        g.new_array("s", &no_actions, 0),
+        g.new_array("{sv}", &hints, hints.len),
+        g.new_int32(-1),
+    };
+    g.call(bus, "org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications", "Notify", g.new_tuple(&arguments, arguments.len), null, 0, -1, null, &openUriDone, null);
+    return true;
+}
+
 pub fn closeAll() void {
     if (comptime !available) return;
     const bus = connection orelse return;
@@ -289,6 +366,9 @@ fn onResponse(_: ?*anyopaque, _: ?[*:0]const u8, _: ?[*:0]const u8, _: ?[*:0]con
 fn settle(slot: *Pending, outcome: Outcome, results: ?*GVariant) void {
     const later = slot.later orelse return;
     if (connection) |bus| g.unsubscribe(bus, slot.subscription);
+    const grant_to_buffer = slot.grant_to;
+    const grant_to = grant_to_buffer[0..slot.grant_to_len];
+    const kind: @import("grants.zig").Kind = if (slot.directories) .directory else .file;
     slot.* = .{};
 
     var reply: [invoke.max_reply - 64]u8 = undefined;
@@ -305,6 +385,9 @@ fn settle(slot: *Pending, outcome: Outcome, results: ?*GVariant) void {
                 const path = g.filename_from_uri(uri, null, null) orelse continue;
                 defer g.free(path);
                 const bytes = std.mem.span(path);
+                // The user chose it in the desktop's own dialog: granted now, before the page
+                // hears of it, so its first read of the path already succeeds.
+                if (grant_to.len != 0) @import("grants.zig").add(grant_to, kind, bytes);
                 if (len + bytes.len + 1 > reply.len) return later.finish(.too_large, &.{});
                 @memcpy(reply[len..][0..bytes.len], bytes);
                 reply[len + bytes.len] = 0;

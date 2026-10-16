@@ -216,10 +216,16 @@ pub fn settings_text(config: &Value, plugins: &[Plugin]) -> Result<String, CliEr
                 other => vec![other],
             };
             for item in items {
-                let Value::String(text) = item else {
-                    return Err(invalid(format!(
-                        "\"plugins.{name}.{field}\" must be a string or an array of strings"
-                    )));
+                // A switch (`"chosen": true`) reaches the plugin as the word.
+                let text = match item {
+                    Value::String(text) => text.as_str(),
+                    Value::Bool(true) => "true",
+                    Value::Bool(false) => "false",
+                    _ => {
+                        return Err(invalid(format!(
+                            "\"plugins.{name}.{field}\" must be a string, a boolean or an array of strings"
+                        )));
+                    }
                 };
                 if text.contains('\n') || text.contains('\0') {
                     return Err(invalid(format!(
@@ -433,7 +439,7 @@ mod tests {
         for (config, expected) in [
             (
                 r#"{"plugins":{"fs":{"scope":[1]}}}"#,
-                "must be a string or an array of strings",
+                "must be a string, a boolean or an array of strings",
             ),
             (r#"{"plugins":{"fs":{"scope":["a\nb"]}}}"#, "line break"),
             (
@@ -453,6 +459,14 @@ mod tests {
         assert_eq!(
             assert_ok!(settings_text(&single, &fs), "single"),
             "fs.mode=strict"
+        );
+        let switch: serde_json::Value = assert_ok!(
+            serde_json::from_str(r#"{"plugins":{"fs":{"chosen":true}}}"#),
+            "json"
+        );
+        assert_eq!(
+            assert_ok!(settings_text(&switch, &fs), "switch"),
+            "fs.chosen=true"
         );
         Ok(())
     }

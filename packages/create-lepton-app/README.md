@@ -36,6 +36,14 @@ lockfile, so a Yarn project is never built with pnpm. A Yarn project gets
 `nodeLinker: node-modules` in `.yarnrc.yml`, because plugins carry Zig sources that the
 core compiles from `node_modules`.
 
+## Running it
+
+A project has one script, `"lepton": "lepton"`, so every command runs through it:
+`pnpm lepton dev`, `yarn lepton build`, `bun lepton record`, `npm run lepton dev`.
+**With npm, put `--` before any flag**: `npm run lepton -- build --release`. npm keeps
+flags for itself — an unknown one stops it ("Unknown cli flag"), and one it knows, like
+`--json`, it takes silently, so `lepton` never sees it. pnpm, Yarn and Bun pass flags on.
+
 ## Without questions
 
 ```bash

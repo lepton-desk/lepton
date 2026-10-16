@@ -45,6 +45,7 @@ fn keptBecause(request: record.Record) ?[]const u8 {
     const command = record.commandOf(request.frame) orelse return null;
     return switch (@as(invoke.Command, @enumFromInt(command))) {
         .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state => "needs the window",
+        .permission_respond => "answers a live permission request",
         else => null,
     };
 }

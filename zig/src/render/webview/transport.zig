@@ -284,7 +284,13 @@ test "the generated types name every built-in command and status" {
         try std.testing.expect(std.mem.indexOf(u8, command_types, line) != null);
     }
     try std.testing.expect(std.mem.indexOf(u8, command_types, "\"denied\",") != null);
-    try std.testing.expect(std.mem.indexOf(u8, command_types, "export interface BuiltinEvents {\n  \"window.state\": true;\n  \"window.resized\": true;\n}") != null);
+    const expected = comptime blk: {
+        var text: []const u8 = "export interface BuiltinEvents {\n";
+        for (events.builtin) |name| text = text ++ "  \"" ++ name ++ "\": true;\n";
+        break :blk text ++ "}";
+    };
+    try std.testing.expect(std.mem.indexOf(u8, command_types, expected) != null);
+    try std.testing.expect(std.mem.indexOf(u8, command_types, "\"download.finished\": true;") != null);
 }
 
 test "the layout the page reads is the layout the core writes" {

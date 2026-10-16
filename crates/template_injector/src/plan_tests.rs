@@ -463,7 +463,7 @@ fn a_merge_keeps_the_scaffolders_scripts() -> Result<(), Failure> {
     assert_contains!(&merged, "\"vite\"");
     // And Lepton's own additions arrived alongside them.
     assert_contains!(&merged, "biome");
-    assert_contains!(&merged, "lepton:dev");
+    assert_contains!(&merged, "\"lepton\": \"lepton\"");
     // The SDK and the CLI, published on npm since 0.1.0, join the scaffolder's
     // dependencies rather than replacing them.
     assert_contains!(&merged, "@lepton-desk/api");

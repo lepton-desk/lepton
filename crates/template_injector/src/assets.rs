@@ -51,13 +51,19 @@ pub const JS_REACT_ENTRY: &str = include_str!("../assets/js/react/main.jsx");
 /// than a build error.
 const INDEX_HTML_TEMPLATE: &str = include_str!("../assets/index.html");
 
-/// The document for a project, naming the host element and entry its framework expects.
+/// The document for a project, naming the host element and entry its framework expects,
+/// titled `title` — the window shows the page's title, so a fixed "Lepton" here named
+/// every application's window "Lepton" (measured).
 ///
 /// Both follow the framework rather than the language. React mounts into `#root` and
 /// everyone else into `#app`, and React's entry carries JSX so it is `.tsx` or `.jsx`
 /// rather than `.ts` or `.js`. Getting either wrong does not fail the build — it opens a
 /// window with nothing in it — so it is decided here once rather than per template.
-pub fn index_html(target: crate::manifest::Target, language: crate::manifest::Language) -> String {
+pub fn index_html(
+    target: crate::manifest::Target,
+    language: crate::manifest::Language,
+    title: &str,
+) -> String {
     let (host, extension) = match target {
         crate::manifest::Target::React | crate::manifest::Target::Solid => (
             "root",
@@ -69,9 +75,14 @@ pub fn index_html(target: crate::manifest::Target, language: crate::manifest::La
         _ => ("app", language.extension()),
     };
 
+    let escaped = title
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
     INDEX_HTML_TEMPLATE
         .replace("/src/main.ts", &format!("/src/main.{extension}"))
         .replace("id=\"app\"", &format!("id=\"{host}\""))
+        .replace("{title}", &escaped)
 }
 
 /// The linter and formatter, pre-configured.
@@ -140,8 +151,9 @@ pub fn package_manifest(plugins: &[&str]) -> String {
         concat!(
             "{{\n",
             "  \"scripts\": {{\n",
-            "    \"lepton:dev\": \"lepton dev\",\n",
-            "    \"lepton:build\": \"lepton build\",\n",
+            // One script, as Tauri's `"tauri": "tauri"`: `npm run lepton dev`,
+            // `pnpm lepton build`, `yarn lepton record`, … — every command, not two.
+            "    \"lepton\": \"lepton\",\n",
             "    \"check\": \"biome check .\",\n",
             "    \"format\": \"biome format --write .\"\n",
             "  }},\n",
@@ -356,10 +368,21 @@ mod tests {
                 "/src/main.jsx",
             ),
         ] {
-            let document = index_html(target, language);
+            let document = index_html(target, language, "Notes");
             assert_contains!(&document, host);
             assert_contains!(&document, entry);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn the_document_is_titled_with_the_window_title() -> Result<(), Failure> {
+        // The window follows the page's title: a fixed one renamed every window.
+        use crate::manifest::{Language, Target};
+
+        let document = index_html(Target::VanillaTs, Language::TypeScript, "Rec <Notes> & Co");
+        assert_contains!(&document, "<title>Rec &lt;Notes&gt; &amp; Co</title>");
+        assert_absent!(&document, "Lepton</title>");
         Ok(())
     }
 
@@ -369,7 +392,7 @@ mod tests {
         // given `/src/main.ts` builds, runs and mounts nothing.
         use crate::manifest::{Language, Target};
 
-        let document = index_html(Target::React, Language::TypeScript);
+        let document = index_html(Target::React, Language::TypeScript, "Notes");
         // Compared as the whole attribute, not as a substring: `/src/main.ts` is a
         // prefix of `/src/main.tsx`, so the loose form would fail on a correct document.
         assert_absent!(&document, "src=\"/src/main.ts\"");

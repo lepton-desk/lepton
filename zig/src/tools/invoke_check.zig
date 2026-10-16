@@ -73,6 +73,29 @@ pub fn main(init: std.process.Init.Minimal) !void {
         try writeAll(try log.writeSince(0, &out));
         return;
     }
+    if (std.mem.eql(u8, mode, "download-events")) {
+        // A download's four events, with the core's own payloads.
+        const downloads = core.webviewDownloads;
+        var log: core.webviewEvents.Log = .{};
+        var text: [core.webviewEvents.max_data]u8 = undefined;
+        _ = try log.emit("download.started", downloads.textPayload(7, "rapor şubat.pdf", &text));
+        const bytes = downloads.progressPayload(7, 1024, 4096);
+        _ = try log.emit("download.progress", &bytes);
+        _ = try log.emit("download.finished", downloads.textPayload(7, "/home/u/İndirilenler/rapor şubat.pdf", &text));
+        _ = try log.emit("download.failed", downloads.textPayload(8, "Connection refused", &text));
+        var out: [2048]u8 = undefined;
+        try writeAll(try log.writeSince(0, &out));
+        return;
+    }
+    if (std.mem.eql(u8, mode, "permission-events")) {
+        // A camera-and-microphone request as the page is asked it.
+        var log: core.webviewEvents.Log = .{};
+        var payload: [core.webviewEvents.max_data]u8 = undefined;
+        _ = try log.emit("permission.request", core.webviewPermissions.requestPayload(5, &.{ .camera, .microphone }, &payload));
+        var out: [512]u8 = undefined;
+        try writeAll(try log.writeSince(0, &out));
+        return;
+    }
     if (!std.mem.eql(u8, mode, "serve")) return usage();
 
     var request: [invoke.max_request]u8 = undefined;
@@ -94,7 +117,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 }
 
 fn usage() error{Usage}!void {
-    std.debug.print("usage: lepton-invoke-check layout | app-commands | types | app-types | events | serve\n", .{});
+    std.debug.print("usage: lepton-invoke-check layout | app-commands | types | app-types | events | download-events | permission-events | serve\n", .{});
     return error.Usage;
 }
 

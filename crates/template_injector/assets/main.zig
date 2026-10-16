@@ -28,7 +28,7 @@ const core = @import("lepton_core");
 ///
 /// Loaded from disk rather than from a development server: this binary is what ships,
 /// and a shipped binary that silently depended on `localhost:5173` would be a binary
-/// that only worked on the machine that built it. Run `lepton dev` (`npm run lepton:dev`, `pnpm lepton:dev`, …) for the
+/// that only worked on the machine that built it. Run `lepton dev` (`npm run lepton dev`, `pnpm lepton dev`, …) for the
 /// server-driven loop.
 /// The bundler's output directory, relative to the project and to `share/<name>/`.
 const frontend = "dist";
@@ -127,6 +127,15 @@ pub fn main() !void {{
     // Pointed at this application's own directories rather than left at the engine's
     // default, `$XDG_DATA_HOME/wpe`, which every WPE application on the machine shares.
     claimOwnDataDirectory();
+    // `lepton.config.json`'s `webPermissions`: what the page may ask the engine for.
+    core.webviewPermissions.setPolicies(@import("build_options").web_permissions);
+    core.webviewPermissions.setApplication("{identifier}", "{product}");
+
+    // Before the engine too: WebKit's processes inherit the cgroup they are forked in, so
+    // the application moves into its own `app-{identifier}-<pid>.scope` first and a task
+    // manager shows the core and every WebKit process as {product} — not as part of the
+    // terminal or editor that started it. Left where it is without systemd.
+    std.debug.print("scope        {{t}}\n", .{{core.scope.enter("{identifier}", "{product}")}});
 
     var view = core.render.WebView.open() catch |err| {{
         std.debug.print("the engine refused to start: {{t}}\n", .{{err}});
@@ -137,6 +146,8 @@ pub fn main() !void {{
     const size: core.window.Size = .{{ .width = {width}, .height = {height} }};
     view.resized(@intCast(size.width), @intCast(size.height));
     view.map();
+    // The window's name until the page sets `document.title`, and whenever it clears it.
+    view.setTitle("{title}");
 
     // The core's scheme, registered on the view that lives here for the whole run. It is
     // both the IPC channel and, for a bundled frontend, the server: a `file://` document

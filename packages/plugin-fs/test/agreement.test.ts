@@ -52,7 +52,8 @@ test("entry kinds and flags match the Zig side", () => {
   const plugin = readFileSync(here("../zig/plugin.zig"), "utf8");
   assert.match(plugin, /pub const append: u8 = 1;/);
   assert.match(plugin, /pub const recursive: u8 = 1;/);
-  assert.match(source, /const flag = \{ append: 1, recursive: 1 \} as const;/);
+  assert.match(plugin, /pub const ranged: u8 = 2;/);
+  assert.match(source, /const flag = \{ append: 1, recursive: 1, ranged: 2 \} as const;/);
 });
 
 test("the Zig file operations pass their own tests, escapes included", () => {

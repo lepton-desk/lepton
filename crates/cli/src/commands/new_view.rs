@@ -179,14 +179,14 @@ pub fn next_steps(
     println!(
         "{}",
         paint.command(
-            &manager.run_command("lepton:dev"),
+            &manager.lepton_command(&["dev"]),
             "open the window, with hot reload"
         )
     );
     println!(
         "{}",
         paint.command(
-            &manager.run_command("lepton:build"),
+            &manager.lepton_command(&["build"]),
             "build a release binary"
         )
     );

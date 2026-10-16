@@ -26,18 +26,31 @@ pub const commands = [_]Registry.PluginCommand{
     .{ .name = "fs.remove", .run = &remove },
     .{ .name = "fs.stat", .run = &stat },
     .{ .name = "fs.exists", .run = &exists },
+    .{ .name = "fs.rename", .run = &rename },
 };
 
 /// Paths and file contents are the user's own: a recording keeps their sizes, not their bytes.
-pub const private = .{ "fs.read_file", "fs.write_file", "fs.read_dir", "fs.mkdir", "fs.remove", "fs.stat", "fs.exists" };
+pub const private = .{ "fs.read_file", "fs.write_file", "fs.read_dir", "fs.mkdir", "fs.remove", "fs.stat", "fs.exists", "fs.rename" };
 
 /// `flags` bits.
 pub const Flag = struct {
     /// `fs.write_file`: add to the end instead of replacing.
     pub const append: u8 = 1;
-    /// `fs.mkdir`: make missing parents; an existing directory is fine.
+    /// `fs.mkdir`: make missing parents; an existing directory is fine. `fs.remove`: a
+    /// directory with everything in it.
     pub const recursive: u8 = 1;
+    /// `fs.read_file`: the body is a `u64` offset (LE); the reply is as much of the file
+    /// from there as fits one reply — how a file larger than that is read.
+    pub const ranged: u8 = 2;
 };
+
+/// `"plugins": { "fs": { "chosen": true } }`: what the user picks in a file dialog
+/// (`@lepton-desk/plugin-dialog`) joins the scope and is remembered (`core.grants`).
+const chosen = std.mem.eql(u8, core.pluginConfig.value(config, "fs.chosen") orelse "false", "true");
+
+comptime {
+    if (chosen and !@hasDecl(core, "grants")) @compileError("fs chosen: this project's core predates chosen paths; recreate it with a current `lepton new`");
+}
 
 const Entry = struct { base: Base, below: []const u8 };
 
@@ -137,6 +150,19 @@ fn open(request: Request, target: *Target) Registry.HandlerError!void {
             } else |_| {}
         } else |_| {}
     }
+    if (comptime chosen) {
+        const grant = core.grants.covering(identifier, absolute) orelse return error.Denied;
+        // A chosen file: its folder is the root, and only the file itself is reachable.
+        const root_path = switch (grant.kind) {
+            .directory => grant.path,
+            .file => std.fs.path.dirname(grant.path) orelse return error.Denied,
+        };
+        const located = fs.locate(&.{.{ .path = root_path }}, absolute, &target.relative_buffer) catch |err| return mapFs(err);
+        if (grant.kind == .file and !std.mem.eql(u8, located.relative, std.fs.path.basename(grant.path))) return error.Denied;
+        target.relative = located.relative;
+        target.root_fd = fs.openRoot(located.root) catch |err| return mapFs(err);
+        return;
+    }
     return error.Denied;
 }
 
@@ -150,9 +176,15 @@ fn rootOf(comptime entry: Entry, buffer: []u8, scratch: []u8) core.paths.Error!f
 }
 
 fn readFile(argument: []const u8, out: []u8) Registry.HandlerError!usize {
+    const request = try parse(argument);
     var target: Target = undefined;
-    try open(try parse(argument), &target);
+    try open(request, &target);
     defer target.close();
+    if (request.flags & Flag.ranged != 0) {
+        if (request.body.len != 8) return error.Failed;
+        const offset = std.mem.readInt(u64, request.body[0..8], .little);
+        return fs.readRange(target.root_fd, target.relative, offset, out) catch |err| mapFs(err);
+    }
     return fs.readFile(target.root_fd, target.relative, out) catch |err| mapFs(err);
 }
 
@@ -182,11 +214,42 @@ fn mkdir(argument: []const u8, _: []u8) Registry.HandlerError!usize {
 }
 
 fn remove(argument: []const u8, _: []u8) Registry.HandlerError!usize {
+    const request = try parse(argument);
     var target: Target = undefined;
-    try open(try parse(argument), &target);
+    try open(request, &target);
     defer target.close();
-    fs.remove(target.root_fd, target.relative) catch |err| return mapFs(err);
+    if (request.flags & Flag.recursive != 0) {
+        fs.removeTree(target.root_fd, target.relative) catch |err| return mapFs(err);
+    } else {
+        fs.remove(target.root_fd, target.relative) catch |err| return mapFs(err);
+    }
     return 0;
+}
+
+/// `fs.rename`: the body is the new path, with the same base. Both must be in one scope
+/// directory: a move between two is a copy and a removal, which the page can do itself.
+fn rename(argument: []const u8, _: []u8) Registry.HandlerError!usize {
+    const request = try parse(argument);
+    if (request.body.len == 0 or std.mem.indexOfScalar(u8, request.body, 0) != null) return error.Failed;
+    var from: Target = undefined;
+    try open(request, &from);
+    defer from.close();
+    var to: Target = undefined;
+    try open(.{ .base = request.base, .flags = 0, .path = request.body, .body = &.{} }, &to);
+    defer to.close();
+    // Same root: the same directory opened twice compares equal by device and inode.
+    if (!sameDirectory(from.root_fd, to.root_fd)) return error.Denied;
+    fs.rename(from.root_fd, from.relative, to.relative) catch |err| return mapFs(err);
+    return 0;
+}
+
+fn sameDirectory(a: i32, b: i32) bool {
+    const linux = std.os.linux;
+    var first: linux.Statx = undefined;
+    var second: linux.Statx = undefined;
+    if (linux.statx(a, "", linux.AT.EMPTY_PATH, .{ .INO = true }, &first) != 0) return false;
+    if (linux.statx(b, "", linux.AT.EMPTY_PATH, .{ .INO = true }, &second) != 0) return false;
+    return first.ino == second.ino and first.dev_major == second.dev_major and first.dev_minor == second.dev_minor;
 }
 
 fn stat(argument: []const u8, out: []u8) Registry.HandlerError!usize {

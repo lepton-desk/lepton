@@ -237,13 +237,12 @@ impl Flags {
         manifest.window_width = self.width;
         manifest.window_height = self.height;
 
-        if self.identifier.is_none() {
-            manifest.identifier = resolved.identifier.clone();
-            // The channel name is namespaced by the identifier, so overriding one
-            // without the other would leave the core publishing to a name no front end
-            // is looking for.
-            manifest.channel_name = format!("/lepton-{}", resolved.identifier);
-        }
+        // Always the resolved one — the flag's, the wizard's or the name's. This was once
+        // applied only when no flag was given, so `--identifier` was accepted and dropped.
+        manifest.identifier = resolved.identifier.clone();
+        // The channel name is namespaced by the identifier, so overriding one without the
+        // other would leave the core publishing to a name no front end is looking for.
+        manifest.channel_name = format!("/lepton-{}", resolved.identifier);
 
         Ok(manifest)
     }
@@ -578,5 +577,65 @@ impl RenderMode {
             Self::Native => "native",
             Self::Webview => "webview",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RenderMode, Resolved};
+    use lepton_orchestrator::assert_eq;
+    use lepton_orchestrator::testing::Failure;
+
+    fn flags(arguments: &[&str]) -> Result<super::Flags, Failure> {
+        use clap::Parser as _;
+        let mut line = vec!["lepton", "new"];
+        line.extend_from_slice(arguments);
+        match crate::Cli::try_parse_from(line) {
+            Ok(crate::Cli {
+                command: crate::commands::Command::New(flags),
+                ..
+            }) => Ok(flags),
+            other => Err(Failure {
+                claim: "`lepton new` should parse".to_owned(),
+                actual: format!("{other:?}"),
+            }),
+        }
+    }
+
+    fn resolved(identifier: &str) -> Resolved {
+        Resolved {
+            template: "vanilla-ts".to_owned(),
+            target: RenderMode::Webview,
+            identifier: identifier.to_owned(),
+            plugins: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_given_identifier_reaches_the_configuration_and_the_channel() -> Result<(), Failure> {
+        let given = flags(&["Rec Notes", "--identifier", "com.example.rec-notes"])?;
+        let manifest = given
+            .manifest_for(&resolved("com.example.rec-notes"))
+            .map_err(|error| Failure {
+                claim: "a manifest".to_owned(),
+                actual: error.to_string(),
+            })?;
+        assert_eq!(manifest.identifier, "com.example.rec-notes");
+        assert_eq!(manifest.channel_name, "/lepton-com.example.rec-notes");
+        assert_eq!(manifest.product_name, "Rec Notes");
+        Ok(())
+    }
+
+    #[test]
+    fn without_the_flag_the_identifier_comes_from_the_name() -> Result<(), Failure> {
+        let derived = lepton_template_injector::manifest::identifier_for("Rec Notes");
+        let manifest = flags(&["Rec Notes"])?
+            .manifest_for(&resolved(&derived))
+            .map_err(|error| Failure {
+                claim: "a manifest".to_owned(),
+                actual: error.to_string(),
+            })?;
+        assert_eq!(manifest.identifier, derived);
+        Ok(())
     }
 }

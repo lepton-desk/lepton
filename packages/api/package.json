@@ -23,6 +23,14 @@
       "types": "./dist/window.d.ts",
       "default": "./dist/window.js"
     },
+    "./download": {
+      "types": "./dist/download.d.ts",
+      "default": "./dist/download.js"
+    },
+    "./permission": {
+      "types": "./dist/permission.d.ts",
+      "default": "./dist/permission.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

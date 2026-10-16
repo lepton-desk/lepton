@@ -32,6 +32,11 @@ pub const paths = @import("platform/linux/paths.zig");
 pub const pluginConfig = @import("plugin_config.zig");
 /// The desktop's file dialogs (xdg-desktop-portal), for `@lepton-desk/plugin-dialog`.
 pub const portal = @import("platform/linux/portal.zig");
+/// The application's own systemd scope (`app-<identifier>-<pid>.scope`), entered before
+/// the engine starts so its processes are one application in a task manager.
+pub const scope = @import("platform/linux/scope.zig");
+/// Paths the user chose in a dialog, granted at run time and remembered (`plugin-fs` `chosen`).
+pub const grants = @import("platform/linux/grants.zig");
 pub const window = @import("window/window.zig");
 
 /// The frame the render layer draws into, and the render paths that fill it.
@@ -82,6 +87,12 @@ pub const webviewDeclarations = @import("render/webview/declarations.zig");
 /// The system clipboard as text, for `@lepton-desk/plugin-clipboard`; `Failed` without WPE.
 pub const webviewClipboard = @import("render/webview/clipboard.zig");
 pub const webviewTransport = @import("render/webview/transport.zig");
+/// Developer tools, permission requests, new windows and media settings of a view.
+pub const webviewFeatures = @import("render/webview/features.zig");
+/// Downloads into the user's download directory, reported as `download.*` events.
+pub const webviewDownloads = @import("render/webview/downloads.zig");
+/// `webPermissions`: what a page may ask the engine for, and the page's answers.
+pub const webviewPermissions = @import("render/webview/permissions.zig");
 pub const x11Window = @import("window/linux/x11_window.zig");
 
 /// The `std` this core was built against.

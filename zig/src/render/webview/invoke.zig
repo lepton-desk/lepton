@@ -39,6 +39,9 @@ pub const Command = enum(u32) {
     window_unmaximize = 6,
     /// Returns the window's state bits (`WindowState`) as a little-endian `u32`.
     window_state = 7,
+    /// The page's answer to a `permission.request` event: `u32` id (LE), then one byte,
+    /// 1 to allow. `failed` when that id is not waiting (`permissions.zig`).
+    permission_respond = 8,
     _,
 
     /// The name the page uses: `<group>.<name>`.
@@ -51,13 +54,14 @@ pub const Command = enum(u32) {
             .window_maximize => "window.maximize",
             .window_unmaximize => "window.unmaximize",
             .window_state => "window.state",
+            .permission_respond => "permission.respond",
             _ => @compileError("a command without a public name cannot reach the page"),
         };
     }
 };
 
 /// The named commands, for code generated from them.
-pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state };
+pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond };
 
 /// What the window commands ask the platform to do.
 pub const WindowAction = enum { minimize, maximize, unmaximize };
@@ -77,6 +81,8 @@ pub const Window = struct {
     /// Returns whether the platform accepted the action.
     act: ?*const fn (context: ?*anyopaque, action: WindowAction) bool = null,
     state: ?*const fn (context: ?*anyopaque) ?u32 = null,
+    /// Settles a permission request the page was asked about.
+    permission: ?*const fn (id: u32, allow: bool) bool = null,
 
     fn perform(self: Window, action: WindowAction) bool {
         const act = self.act orelse return false;
@@ -201,6 +207,12 @@ pub fn handle(frame: []const u8, registry: *const Registry, window: Window, effe
             var bytes: [4]u8 = undefined;
             std.mem.writeInt(u32, &bytes, bits, .little);
             break :blk reply(out, sequence, .ok, &bytes);
+        },
+        .permission_respond => blk: {
+            if (argument.len != 5) break :blk reply(out, sequence, .malformed, &.{});
+            const settle = window.permission orelse break :blk reply(out, sequence, .failed, &.{});
+            const id = std.mem.readInt(u32, argument[0..4], .little);
+            break :blk reply(out, sequence, if (settle(id, argument[4] == 1)) .ok else .failed, &.{});
         },
         _ => reply(out, sequence, .unknown_command, &.{}),
     };
@@ -488,4 +500,34 @@ test "a command can answer later: no reply now, the request's own sequence when 
     const refused = try decodeReply(try handle(try request(&in, 43, registry_mod.first_app_id, ""), &granted, .{}, &full, &out));
     try std.testing.expectEqual(@intFromEnum(Status.failed), refused.reply.status);
     try std.testing.expect(!full.deferred);
+}
+
+var settled_for_test: ?struct { id: u32, allow: bool } = null;
+fn settleForTest(id: u32, allow: bool) bool {
+    settled_for_test = .{ .id = id, .allow = allow };
+    return id == 9;
+}
+
+test "permission.respond hands the page's answer to the window's owner" {
+    const registry: Registry = .{ .allowed = &.{"permission.respond"} };
+    const window: Window = .{ .permission = &settleForTest };
+    var request_buffer: [64]u8 = undefined;
+    var out: [128]u8 = undefined;
+    var effects: Effects = .{};
+    var argument: [5]u8 = undefined;
+    std.mem.writeInt(u32, argument[0..4], 9, .little);
+    argument[4] = 1;
+    const asked = try request(&request_buffer, 1, @intFromEnum(Command.permission_respond), &argument);
+    const ok = try handle(asked, &registry, window, &effects, &out);
+    const ok_reply = try wire.readPayload(wire.Reply, ok[wire.header_bytes..]);
+    try std.testing.expectEqual(@as(u32, @intFromEnum(Status.ok)), ok_reply.status);
+    try std.testing.expectEqual(@as(u32, 9), settled_for_test.?.id);
+    try std.testing.expect(settled_for_test.?.allow);
+
+    // An id that is not waiting is `failed`; a short argument is `malformed`.
+    std.mem.writeInt(u32, argument[0..4], 4, .little);
+    const stale = try handle(try request(&request_buffer, 2, @intFromEnum(Command.permission_respond), &argument), &registry, window, &effects, &out);
+    try std.testing.expectEqual(@as(u32, @intFromEnum(Status.failed)), (try wire.readPayload(wire.Reply, stale[wire.header_bytes..])).status);
+    const short = try handle(try request(&request_buffer, 3, @intFromEnum(Command.permission_respond), argument[0..4]), &registry, window, &effects, &out);
+    try std.testing.expectEqual(@as(u32, @intFromEnum(Status.malformed)), (try wire.readPayload(wire.Reply, short[wire.header_bytes..])).status);
 }

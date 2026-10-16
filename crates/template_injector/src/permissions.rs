@@ -63,6 +63,70 @@ fn invalid(reason: &str) -> ManifestError {
     }
 }
 
+/// What a page may ask the engine for, by the name `webPermissions` uses — the requests
+/// WebKit 2.54 (WPE) raises. Anything not listed is denied. (The missing-media-plugins
+/// request is not in this build's library, so it is not offered.) The core's
+/// `permissions.zig` lists the same names.
+pub const WEB_PERMISSION_KINDS: [&str; 9] = [
+    "notifications",
+    "camera",
+    "microphone",
+    "geolocation",
+    "pointer-lock",
+    "device-info",
+    "media-keys",
+    "storage-access",
+    "xr",
+];
+
+/// The command a page answers an `ask` with.
+pub const PERMISSION_ANSWER: &str = "permission.respond";
+
+/// `webPermissions`: `{ "notifications": "ask", "camera": "deny", … }` as `(kind,
+/// policy)` pairs, or `None` when the field is absent (everything denied, as before).
+/// An `ask` needs `permission.respond` in `permissions`, or the page could never answer.
+pub fn parse_web_permissions(text: &str) -> Result<Option<Vec<(String, String)>>, ManifestError> {
+    let root: Value = serde_json::from_str(text).map_err(|error| ManifestError {
+        reason: format!("{SOURCE} is not valid JSON: {error}"),
+    })?;
+    let Some(value) = root.get("webPermissions") else {
+        return Ok(None);
+    };
+    let Value::Object(entries) = value else {
+        return Err(invalid(
+            "\"webPermissions\" must be an object: { \"notifications\": \"ask\", … }",
+        ));
+    };
+    let mut pairs = Vec::with_capacity(entries.len());
+    for (kind, policy) in entries {
+        if !WEB_PERMISSION_KINDS.contains(&kind.as_str()) {
+            return Err(invalid(&format!(
+                "\"webPermissions\" has {kind:?}; the engine asks for {}",
+                WEB_PERMISSION_KINDS.join(", ")
+            )));
+        }
+        let Some(policy) = policy
+            .as_str()
+            .filter(|p| matches!(*p, "allow" | "deny" | "ask"))
+        else {
+            return Err(invalid(&format!(
+                "\"webPermissions\".{kind} must be \"allow\", \"deny\" or \"ask\""
+            )));
+        };
+        pairs.push((kind.clone(), policy.to_owned()));
+    }
+    let asks = pairs.iter().any(|(_, policy)| policy == "ask");
+    if asks {
+        let granted = parse_permissions(text)?.unwrap_or_default();
+        if !granted.iter().any(|name| name == PERMISSION_ANSWER) {
+            return Err(invalid(&format!(
+                "\"webPermissions\" asks the page, so \"permissions\" must list \"{PERMISSION_ANSWER}\" for it to answer"
+            )));
+        }
+    }
+    Ok(Some(pairs))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{parse_permissions, valid_name};
@@ -129,6 +193,57 @@ mod tests {
         assert_eq!(valid_name("notes"), false);
         assert_eq!(valid_name("notes..save"), false);
         assert_eq!(valid_name("2d.draw"), false);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod web_tests {
+    use super::parse_web_permissions;
+    use lepton_orchestrator::testing::Failure;
+    use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok};
+
+    #[test]
+    fn web_permissions_are_kinds_with_a_policy() -> Result<(), Failure> {
+        let absent: Option<Vec<(String, String)>> = None;
+        assert_eq!(assert_ok!(parse_web_permissions("{}"), "absent"), absent);
+        let pairs = assert_ok!(
+            parse_web_permissions(
+                r#"{"permissions":["permission.respond"],"webPermissions":{"notifications":"ask","camera":"deny","geolocation":"allow"}}"#
+            ),
+            "valid"
+        );
+        assert_eq!(
+            pairs,
+            // In the order `serde_json` keeps an object: by name. The order means nothing.
+            Some(vec![
+                ("camera".to_owned(), "deny".to_owned()),
+                ("geolocation".to_owned(), "allow".to_owned()),
+                ("notifications".to_owned(), "ask".to_owned()),
+            ])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_kinds_policies_and_unanswerable_asks_are_refused() -> Result<(), Failure> {
+        let unknown = assert_err!(
+            parse_web_permissions(r#"{"webPermissions":{"usb":"allow"}}"#),
+            "kind"
+        );
+        assert_contains!(&unknown.reason, "usb");
+        let policy = assert_err!(
+            parse_web_permissions(r#"{"webPermissions":{"camera":"yes"}}"#),
+            "policy"
+        );
+        assert_contains!(&policy.reason, "\"allow\", \"deny\" or \"ask\"");
+        let unanswerable = assert_err!(
+            parse_web_permissions(
+                r#"{"permissions":["app.name"],"webPermissions":{"camera":"ask"}}"#
+            ),
+            "ask without permission.respond"
+        );
+        assert_contains!(&unanswerable.reason, "permission.respond");
         Ok(())
     }
 }
