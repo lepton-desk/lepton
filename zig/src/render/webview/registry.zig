@@ -42,6 +42,9 @@ pub fn Command(comptime State: type) type {
         /// `<group>.<name>`, lowercase: what the page passes to `invoke`.
         name: []const u8,
         run: *const fn (state: *State, argument: []const u8, out: []u8) HandlerError!usize,
+        /// Its argument and result are the user's own (a file, the clipboard): a recording
+        /// keeps their sizes, not their bytes, unless asked for them (`record.zig`).
+        private: bool = false,
     };
 }
 
@@ -52,6 +55,7 @@ pub const Handler = *const fn (context: ?*anyopaque, argument: []const u8, out: 
 pub const AppCommand = struct {
     name: []const u8,
     run: Handler,
+    private: bool = false,
 };
 
 /// The commands of one application, checked, waiting for their state.
@@ -98,6 +102,12 @@ pub const Registry = struct {
         return self.app[index].name;
     }
 
+    /// Whether a recording leaves out `id`'s argument and result bytes.
+    pub fn isPrivate(self: *const Registry, id: u32) bool {
+        const command = self.appCommand(id) orelse return false;
+        return command.private;
+    }
+
     /// The application command with `id`, if `id` is one.
     pub fn appCommand(self: *const Registry, id: u32) ?AppCommand {
         if (id < first_app_id) return null;
@@ -133,14 +143,39 @@ pub fn checked(
 pub const PluginCommand = struct {
     name: []const u8,
     run: *const fn (argument: []const u8, out: []u8) HandlerError!usize,
+    /// As [`Command`]'s `private`.
+    private: bool = false,
 };
 
 /// Every plugin's `commands`, in the order the build lists the plugins. `plugins` is the
 /// tuple `lepton_plugins.all` the project's build generates (`.{}` without plugins).
+///
+/// A plugin names its private commands in `pub const private = .{ "fs.read_file", ... }`
+/// rather than with the field: a core from before recordings ignores a declaration it
+/// does not read, where an unknown field would stop the plugin compiling.
 pub fn pluginCommands(comptime plugins: anytype) []const PluginCommand {
     comptime {
+        @setEvalBranchQuota(100_000);
         var list: []const PluginCommand = &.{};
-        for (plugins) |plugin| list = list ++ plugin.commands;
+        for (plugins) |plugin| {
+            for (plugin.commands) |command| {
+                var marked = command;
+                if (@hasDecl(plugin, "private")) {
+                    for (plugin.private) |name| {
+                        if (std.mem.eql(u8, name, command.name)) marked.private = true;
+                    }
+                }
+                list = list ++ .{marked};
+            }
+            if (@hasDecl(plugin, "private")) {
+                for (plugin.private) |name| {
+                    const known = for (plugin.commands) |command| {
+                        if (std.mem.eql(u8, command.name, name)) break true;
+                    } else false;
+                    if (!known) @compileError("private \"" ++ name ++ "\" names no command of its plugin");
+                }
+            }
+        }
         return list;
     }
 }
@@ -163,11 +198,11 @@ pub fn checkedWith(
         var erased: [app.len + plugins.len]AppCommand = undefined;
         for (app, 0..) |command, index| {
             names[index] = command.name;
-            erased[index] = .{ .name = command.name, .run = erase(State, command.run) };
+            erased[index] = .{ .name = command.name, .run = erase(State, command.run), .private = command.private };
         }
         for (plugins, app.len..) |command, index| {
             names[index] = command.name;
-            erased[index] = .{ .name = command.name, .run = erasePlugin(command.run) };
+            erased[index] = .{ .name = command.name, .run = erasePlugin(command.run), .private = command.private };
         }
         for (names, 0..) |name, index| {
             if (!validName(name)) @compileError("command name \"" ++ name ++ "\" is not `<group>.<name>` in lowercase");
@@ -309,10 +344,14 @@ test "plugin commands follow the application's, with the same rules" {
     const app = [_]Command(Counter){.{ .name = "text.upper", .run = &upper }};
     const Plugin = struct {
         pub const commands = [_]PluginCommand{.{ .name = "case.lower", .run = &lower }};
+        pub const private = .{"case.lower"};
     };
     const plugins = comptime pluginCommands(.{Plugin});
     var counter: Counter = .{};
     const registry = (comptime checkedWith(Counter, &app, plugins, permissionList("case.lower"))).bind(&counter);
+    try std.testing.expect(registry.isPrivate(first_app_id + 1));
+    try std.testing.expect(!registry.isPrivate(first_app_id));
+    try std.testing.expect(!registry.isPrivate(1));
     try std.testing.expectEqualStrings("case.lower", registry.nameOf(first_app_id + 1).?);
     try std.testing.expect(registry.allows("case.lower"));
     try std.testing.expect(!registry.allows("text.upper"));

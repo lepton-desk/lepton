@@ -20,6 +20,14 @@ use super::{CliError, Outcome};
 /// The tag this command is known by in tests and messages.
 const NAME: &str = "run";
 
+/// A built project, ready to start.
+#[derive(Debug, Clone)]
+pub struct Built {
+    /// `src-lepton/zig-out/bin`.
+    pub bin: std::path::PathBuf,
+    pub binary: String,
+}
+
 /// Flags for `lepton run`.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct Flags {
@@ -52,6 +60,16 @@ impl Flags {
 
     /// Builds and opens the project rooted at `root`.
     pub fn run_in(&self, root: &Path) -> Outcome {
+        let built = self.build_in(root)?;
+        if self.print_plan {
+            return Ok(());
+        }
+        super::launch::launch(NAME, &built.bin, &built.binary)
+    }
+
+    /// Builds the project as `run` does and says where the binary is — only prints the
+    /// steps with `--print-plan`. `record` and `replay` start the same binary their own way.
+    pub fn build_in(&self, root: &Path) -> Result<Built, CliError> {
         lepton_orchestrator::require_project(root)?;
         // A SIGTERM to `lepton` ends the build or the application it started.
         lepton_orchestrator::supervise::install();
@@ -85,7 +103,10 @@ impl Flags {
             for step in &steps {
                 println!("{}", display(step));
             }
-            return Ok(());
+            return Ok(Built {
+                bin: artifact_dir(root),
+                binary,
+            });
         }
 
         for step in &steps {
@@ -102,7 +123,10 @@ impl Flags {
             &manifest.product_name,
             &artifact_dir(root).join(&binary),
         );
-        super::launch::launch(NAME, &artifact_dir(root), &binary)
+        Ok(Built {
+            bin: artifact_dir(root),
+            binary,
+        })
     }
 
     /// The build steps, in order; opening the binary follows them.

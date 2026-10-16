@@ -70,6 +70,11 @@ pub const webviewBridge = @import("render/webview/bridge.zig");
 pub const webviewInvoke = @import("render/webview/invoke.zig");
 /// Application commands and the permission list (`registry.checked`).
 pub const webviewRegistry = @import("render/webview/registry.zig");
+/// Recording invoke traffic (`LEPTON_RECORD`) and replaying it without a window
+/// (`LEPTON_REPLAY`): `lepton record` / `lepton replay`.
+pub const webviewRecord = @import("render/webview/record.zig");
+pub const webviewReplay = @import("render/webview/replay.zig");
+pub const webviewPageReplay = @import("render/webview/page_replay.zig");
 /// The event log the page reads from (`/__lepton/events`).
 pub const webviewEvents = @import("render/webview/events.zig");
 /// `src/lepton-commands.d.ts` for an application's commands and events.

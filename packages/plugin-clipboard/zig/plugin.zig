@@ -14,6 +14,9 @@ pub const commands = [_]Registry.PluginCommand{
     .{ .name = "clipboard.write_text", .run = &writeText },
 };
 
+/// The clipboard is the user's own: a recording keeps its sizes, not its text.
+pub const private = .{ "clipboard.read_text", "clipboard.write_text" };
+
 /// What the first byte of a `clipboard.read_text` reply says.
 pub const Known = enum(u8) {
     /// The compositor has not told this window what the selection is yet: it does so

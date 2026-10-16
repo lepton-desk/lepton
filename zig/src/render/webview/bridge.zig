@@ -35,6 +35,9 @@ const transport = @import("transport.zig");
 const respond = @import("respond.zig");
 const invoke = @import("invoke.zig");
 const events = @import("events.zig");
+const record = @import("record.zig");
+const page_replay = @import("page_replay.zig");
+const wire = @import("../../ipc/wire.zig");
 
 /// The engine functions this bridge uses.
 ///
@@ -82,6 +85,12 @@ const e_stream_read_all = @extern(
 const e_unref = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_object_unref" });
 const e_ref = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "g_object_ref" });
 const e_free_error = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_error_free" });
+/// One-shot: the callback returns 0. (A repeating timeout added mid-dispatch was seen not
+/// to re-arm — `wpe_abi.zig`; a page replay's delayed answer fires once.)
+const e_timeout_add = @extern(
+    *const fn (c_uint, *const fn (?*anyopaque) callconv(.c) c_int, ?*anyopaque) callconv(.c) c_uint,
+    .{ .name = "g_timeout_add" },
+);
 
 const SchemeCallback = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) void;
 
@@ -128,6 +137,8 @@ pub const max_later = 8;
 const Later = struct {
     request: ?*anyopaque = null,
     generation: u32 = 0,
+    /// The command was `private`: its late reply is recorded masked too.
+    private: bool = false,
 };
 
 pub const Bridge = struct {
@@ -168,6 +179,12 @@ pub const Bridge = struct {
     /// `invoke` requests a command answers later (`invoke.takeLater`): referenced until
     /// `finishLater`. The generation tells a stale `Later` from the slot's next owner.
     later: [max_later]Later = @splat(.{}),
+    /// Every request and reply, when `LEPTON_RECORD` names a file (`record.zig`).
+    recorder: ?record.Recorder = null,
+    /// A command is running: an event emitted now belongs to its request.
+    handling: bool = false,
+    /// `LEPTON_REPLAY_PAGE=<file>`: the page's calls answered from a recording.
+    page_replay: ?page_replay.Script = null,
     /// The one origin answers may be read from cross-origin (the dev server's), or empty.
     allowed_origin: [respond.max_origin]u8 = @splat(0),
     allowed_origin_len: usize = 0,
@@ -259,6 +276,12 @@ pub const Bridge = struct {
     /// request waiting for it.
     pub fn emit(self: *Bridge, name: []const u8, data: []const u8) events.EmitError!u64 {
         const number = try self.events.emit(name, data);
+        if (self.recorder) |*recorder| {
+            var frame: [wire.header_bytes + @sizeOf(wire.Notice) + events.max_name + events.max_data]u8 = undefined;
+            if (self.events.writeSince(number - 1, &frame)) |written| {
+                recorder.addEvent(name, written, self.handling);
+            } else |_| {}
+        }
         if (self.held) |waiting| {
             self.held = null;
             self.sendEvents(waiting, self.held_after);
@@ -345,6 +368,10 @@ pub const Bridge = struct {
             return;
         }
 
+        if (self.page_replay) |*script| {
+            if (self.answerFromRecording(script, request, self.request_frame[0..read])) return;
+        }
+
         const raw = std.c.malloc(invoke.max_reply) orelse {
             self.counters.refused += 1;
             respond.refuse(request, "no memory for the reply");
@@ -366,7 +393,10 @@ pub const Bridge = struct {
             // it is still running, and that answer must find the request already here.
             self.later[index].request = e_ref(request);
         }
+        const begun = if (self.recorder) |*recorder| recorder.now() else 0;
+        self.handling = true;
         const answered = invoke.handle(self.request_frame[0..read], &self.registry, self.window, &effects, out[0..invoke.max_reply]);
+        self.handling = false;
         if (!effects.deferred) if (free_slot) |index| self.release(index);
         const frame = answered catch {
             std.c.free(raw);
@@ -375,6 +405,15 @@ pub const Bridge = struct {
             return;
         };
         self.invokes += 1;
+        if (self.recorder) |*recorder| {
+            const private = if (record.commandOf(self.request_frame[0..read])) |id| self.registry.isPrivate(id) else false;
+            recorder.add(.request, self.request_frame[0..read], private, effects.deferred, begun);
+            if (effects.deferred) {
+                if (free_slot) |index| self.later[index].private = private;
+            } else {
+                recorder.add(.reply, frame, private, false, recorder.now());
+            }
+        }
         if (effects.close_requested) self.close_requested = true;
         if (effects.deferred) {
             // Held until the command calls `finish` — which may already have happened.
@@ -386,6 +425,111 @@ pub const Bridge = struct {
             return;
         }
         self.counters.bytes_served += frame.len;
+    }
+
+    /// A page replay's answer to `frame`, when the recording has one: the events the
+    /// command emitted, then the reply — now, or after the recorded delay for a deferred
+    /// call. False when the call runs live instead.
+    fn answerFromRecording(self: *Bridge, script: *page_replay.Script, request: ?*anyopaque, frame: []const u8) bool {
+        const command = record.commandOf(frame) orelse return false;
+        const header = wire.readHeader(frame) catch return false;
+        const argument = page_replay.argumentOf(frame) orelse return false;
+        const call = switch (script.decide(command, argument)) {
+            .recorded => |call| call,
+            .live => |why| {
+                const name = self.registry.nameOf(command) orelse "unknown command";
+                switch (why) {
+                    .other_argument => std.debug.print("page     {s}: another argument than recorded; run live\n", .{name}),
+                    .unrecorded => std.debug.print("page     {s}: called more often than recorded; run live\n", .{name}),
+                    .window, .masked => {},
+                }
+                return false;
+            },
+        };
+        const owed = call.answer orelse return false;
+        for (script.eventsOf(call)) |event| {
+            const data = event.data orelse {
+                std.debug.print("page     event {s} was recorded without its data; not sent\n", .{event.name});
+                continue;
+            };
+            _ = self.emit(event.name, data) catch {};
+        }
+        self.invokes += 1;
+        if (call.deferred and owed.delay_ns >= std.time.ns_per_ms and self.answerAfter(request, header.sequence, owed, self.registry.nameOf(command) orelse "unknown command")) return true;
+
+        const raw = std.c.malloc(invoke.max_reply) orelse {
+            respond.refuse(request, "no memory for the reply");
+            return true;
+        };
+        const out: [*]u8 = @ptrCast(raw);
+        const reply = invoke.reply(out[0..invoke.max_reply], header.sequence, owed.status, owed.result) catch {
+            std.c.free(raw);
+            respond.refuse(request, "the reply does not fit");
+            return true;
+        };
+        if (respond.bytes(request, out, reply.len, std.c.free, "application/octet-stream", self.origin())) {
+            self.counters.bytes_served += reply.len;
+        }
+        return true;
+    }
+
+    /// A recorded answer owed after a delay, as a timeout's data.
+    const Owed = struct {
+        bridge: *Bridge,
+        slot: u16,
+        generation: u32,
+        sequence: u64,
+        answer: page_replay.Answer,
+        name: []const u8,
+        started: std.Io.Clock.Timestamp,
+
+        fn fire(data: ?*anyopaque) callconv(.c) c_int {
+            const owed: *Owed = @ptrCast(@alignCast(data orelse return 0));
+            const io = std.Io.Threaded.global_single_threaded.io();
+            const waited = owed.started.durationTo(std.Io.Clock.Timestamp.now(io, .awake)).raw.nanoseconds;
+            std.debug.print("page     {s}: the recorded answer after {d} ms (recorded {d} ms)\n", .{
+                owed.name,
+                @divTrunc(@max(waited, 0), std.time.ns_per_ms),
+                owed.answer.delay_ns / std.time.ns_per_ms,
+            });
+            finishLater(owed.bridge, owed.slot, owed.generation, owed.sequence, owed.answer.status, owed.answer.result);
+            std.c.free(owed);
+            return 0;
+        }
+    };
+
+    /// Holds `request` in a free slot and answers it after `answer.delay_ns`; false when
+    /// no slot is free (the caller answers now).
+    fn answerAfter(self: *Bridge, request: ?*anyopaque, sequence: u64, recorded: page_replay.Answer, name: []const u8) bool {
+        const index: u16 = for (self.later, 0..) |slot, at| {
+            if (slot.request == null) break @intCast(at);
+        } else return false;
+        const raw = std.c.malloc(@sizeOf(Owed)) orelse return false;
+        const owed: *Owed = @ptrCast(@alignCast(raw));
+        owed.* = .{
+            .bridge = self,
+            .slot = index,
+            .generation = self.later[index].generation,
+            .sequence = sequence,
+            .answer = recorded,
+            .name = name,
+            .started = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .awake),
+        };
+        self.later[index].request = e_ref(request);
+        const ms: c_uint = @intCast(@min(recorded.delay_ns / std.time.ns_per_ms, std.math.maxInt(c_uint)));
+        _ = e_timeout_add(ms, &Owed.fire, owed);
+        return true;
+    }
+
+    /// After the run: prints a page replay's verdict and says whether it passed; null when
+    /// this run was not a page replay.
+    pub fn pageReplayPassed(self: *Bridge) ?bool {
+        const script = if (self.page_replay) |*script| script else return null;
+        var report: std.Io.Writer.Allocating = .init(std.heap.page_allocator);
+        defer report.deinit();
+        script.report(&self.registry, &report.writer) catch return script.passed();
+        std.debug.print("{s}", .{report.written()});
+        return script.passed();
     }
 
     /// Drops a slot's hold on a request no command took.
@@ -403,7 +547,9 @@ pub const Bridge = struct {
         const held = &self.later[slot];
         if (held.generation != generation) return;
         const request = held.request orelse return;
+        const private = held.private;
         held.request = null;
+        held.private = false;
         held.generation +%= 1;
         defer e_unref(request);
         const raw = std.c.malloc(invoke.max_reply) orelse {
@@ -417,6 +563,8 @@ pub const Bridge = struct {
             respond.refuse(request, "the reply does not fit");
             return;
         };
+        // Before `respond.bytes`, which hands `out` to the engine to free.
+        if (self.recorder) |*recorder| recorder.add(.late_reply, frame, private, false, recorder.now());
         if (respond.bytes(request, out, frame.len, std.c.free, "application/octet-stream", self.origin())) {
             self.counters.bytes_served += frame.len;
         }
@@ -520,6 +668,8 @@ test "every request path the bridge answers is compiled" {
     _ = &Bridge.answer;
     _ = &Bridge.answerInvoke;
     _ = &Bridge.finishLater;
+    _ = &Bridge.answerFromRecording;
+    _ = &Bridge.pageReplayPassed;
     _ = &Bridge.answerEvents;
     _ = &Bridge.emit;
     _ = &onRequest;

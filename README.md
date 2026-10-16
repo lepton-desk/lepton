@@ -45,6 +45,33 @@ Templates: `vanilla-ts`, `vanilla-js`, `react-ts`, `react-js`, `vue-ts`, `svelte
 | `lepton run` | release build of the frontend and core, then the application |
 | `lepton build` | the same, without starting it |
 | `lepton package` | `.tar.gz`, Arch `.pkg.tar.zst`, `.deb` from `bundle.targets`; `--verify` unpacks and runs each |
+| `lepton record` | opens the application and writes every command the page calls, and its reply, to a file |
+| `lepton replay <file>` | runs a recording against the core again, with no window, and compares every reply |
+| `lepton replay --page <file>` | opens the application and answers the page's calls from the recording |
+
+## Recording a session
+
+```bash
+lepton record -o bug.lrec        # use the app, close it
+lepton replay bug.lrec           # exit 1 if any reply changed
+lepton replay --page bug.lrec    # the user's session again: the page live, the answers recorded
+```
+
+The page's calls are fixed-layout binary frames, so a recording replays byte for byte.
+Commands that carry the user's data (file contents and paths, the clipboard, the host
+name) are recorded with their sizes only; `--unmasked` keeps their bytes too. A replay
+skips what it cannot run again — a masked command, a dialog the user answered, a window
+command — and keeps the recorded reply. It gives the application an empty home directory
+of its own, so a recorded `fs.remove` cannot reach your files.
+
+`--page` turns it around: the page runs live and each call gets the recorded answer — the
+Nth call of a command the Nth recorded one, a dialog after its recorded delay, the events
+the command emitted sent again. Window commands, masked calls and calls the recording
+cannot answer run for real; a call with another argument, one more than recorded, or a
+recorded call the page never made fails the replay. An application's event data is masked
+like a private command's, so replay a page that waits for its events from an `--unmasked`
+recording. The same binary records with `LEPTON_RECORD=<file>`, so a user can send you
+a recording from a release build.
 
 ## Calling the core from the page
 

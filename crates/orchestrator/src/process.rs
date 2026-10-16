@@ -121,6 +121,8 @@ pub struct Step {
     pub args: Vec<String>,
     pub cwd: Option<std::path::PathBuf>,
     pub output: Output,
+    /// Variables set for this step only, on top of the inherited environment.
+    pub env: Vec<(String, String)>,
 }
 
 impl Step {
@@ -132,6 +134,7 @@ impl Step {
             args: Vec::new(),
             cwd: None,
             output: Output::Inherit,
+            env: Vec::new(),
         }
     }
 
@@ -160,6 +163,12 @@ impl Step {
     }
 
     #[must_use]
+    pub fn env(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.push((name.into(), value.into()));
+        self
+    }
+
+    #[must_use]
     pub fn in_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
         self.cwd = Some(dir.into());
         self
@@ -168,6 +177,7 @@ impl Step {
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
         command.args(&self.args);
+        command.envs(self.env.iter().map(|(name, value)| (name, value)));
         // An empty directory means "here", not "the directory whose name is the empty
         // string". `Path::parent` on a bare relative name returns exactly that, and
         // `setCurrentDir("")` fails with `ENOENT`, which surfaces as the program
@@ -340,7 +350,12 @@ fn pump_one<R: Read + Send + 'static>(
 /// Used in error messages and in `--verbose`, so a reported failure can be
 /// reproduced by hand instead of only being described.
 pub fn display(step: &Step) -> String {
-    let mut parts = vec![quote_arg(&step.program)];
+    let mut parts: Vec<String> = step
+        .env
+        .iter()
+        .map(|(name, value)| format!("{name}={}", quote_arg(value)))
+        .collect();
+    parts.push(quote_arg(&step.program));
     parts.extend(step.args.iter().map(|arg| quote_arg(arg)));
     parts.join(" ")
 }
@@ -427,6 +442,19 @@ mod tests {
         let captured = assert_ok!(crate::run(&shell("printf hello")), "the step should run");
 
         assert_eq!(captured.stdout, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn a_step_sets_its_own_variables_and_shows_them() -> Result<(), Failure> {
+        let step = shell("printf %s \"$LEPTON_STEP_TEST\"").env("LEPTON_STEP_TEST", "a b");
+        let captured = assert_ok!(crate::run(&step), "the step should run");
+
+        assert_eq!(captured.stdout, "a b");
+        assert_eq!(
+            super::display(&step),
+            "LEPTON_STEP_TEST='a b' sh -c 'printf %s \"$LEPTON_STEP_TEST\"'"
+        );
         Ok(())
     }
 

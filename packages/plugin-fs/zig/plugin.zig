@@ -28,6 +28,9 @@ pub const commands = [_]Registry.PluginCommand{
     .{ .name = "fs.exists", .run = &exists },
 };
 
+/// Paths and file contents are the user's own: a recording keeps their sizes, not their bytes.
+pub const private = .{ "fs.read_file", "fs.write_file", "fs.read_dir", "fs.mkdir", "fs.remove", "fs.stat", "fs.exists" };
+
 /// `flags` bits.
 pub const Flag = struct {
     /// `fs.write_file`: add to the end instead of replacing.

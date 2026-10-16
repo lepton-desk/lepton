@@ -326,6 +326,9 @@ pub const View = struct {
         if (!comptime @import("build_options").wpe_platform_abi) return;
         const context = platform_abi.webkit_web_view_get_context(self.web_view) orelse return;
         self.bridge.attach(context);
+        // `LEPTON_RECORD=<file>`: `lepton record`, or anyone reproducing a bug.
+        self.bridge.recorder = @import("record.zig").Recorder.fromEnvironment();
+        self.bridge.page_replay = @import("page_replay.zig").fromEnvironment();
         // The window the page's `window.*` commands act on, and the two changes it is
         // told about as events. `self` is the pointer GLib keeps, as in `watchClose`.
         self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState };
@@ -469,6 +472,7 @@ pub const View = struct {
     pub fn close(self: *View) void {
         // Dialogs the page opened would otherwise stay on screen after the window.
         @import("../../platform/linux/portal.zig").closeAll();
+        if (self.bridge.recorder) |*recorder| recorder.close();
         abi.g_object_unref(self.web_view);
         self.* = undefined;
     }

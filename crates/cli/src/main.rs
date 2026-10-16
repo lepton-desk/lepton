@@ -99,6 +99,8 @@ fn dispatch(command: Command) -> commands::Outcome {
         Command::Dev(flags) => flags.run(),
         Command::Run(flags) => flags.run(),
         Command::Package(flags) => flags.run(),
+        Command::Record(flags) => flags.run(),
+        Command::Replay(flags) => flags.run(),
     }
 }
 

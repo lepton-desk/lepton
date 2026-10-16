@@ -18,6 +18,9 @@ pub const commands = [_]Registry.PluginCommand{
     .{ .name = "os.exe_extension", .run = &exeExtension },
 };
 
+/// The host name often carries the user's name.
+pub const private = .{"os.hostname"};
+
 fn text(value: []const u8, out: []u8) Registry.HandlerError!usize {
     if (value.len > out.len) return error.TooLarge;
     @memcpy(out[0..value.len], value);

@@ -15,6 +15,9 @@ pub const commands = [_]Registry.PluginCommand{
     .{ .name = "dialog.save", .run = &save },
 };
 
+/// The chosen paths are the user's own: a recording keeps their sizes, not their bytes.
+pub const private = .{ "dialog.open", "dialog.save" };
+
 fn open(argument: []const u8, _: []u8) Registry.HandlerError!usize {
     return ask(.open, argument);
 }

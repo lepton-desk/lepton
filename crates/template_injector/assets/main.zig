@@ -77,6 +77,16 @@ pub fn main() !void {{
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    // `lepton replay`: the recorded requests run against these commands with no window,
+    // and the process ends with the verdict. Before the display: a replay needs none.
+    var app_state: AppState = .{{ .product = "{product}" }};
+    if (comptime !core.render.is_native) {{
+        if (core.webviewReplay.requested() != null) {{
+            const registry = commands.bind(&app_state);
+            core.webviewReplay.runFromEnvironment(allocator, &registry);
+        }}
+    }}
+
     // The channel is created before the engine: the frontend SDK looks the window up by
     // name the moment its script runs, and a window that appeared a turn later would
     // find nobody home.
@@ -141,7 +151,6 @@ pub fn main() !void {{
     // mapping at `/__lepton/region` on the page's own origin.
     // Before the transport is written: the page learns the application's command names
     // from it, and the bridge answers only what `permissions` grants.
-    var app_state: AppState = .{{ .product = "{product}" }};
     view.bridge.registry = commands.bind(&app_state);
     const outbound = window_channel.outboundRegion();
     if (!view.injectTransport(outbound.len)) {{
@@ -221,6 +230,11 @@ pub fn main() !void {{
         // Latest, not queued: the page snapshots the ring and never consumes, so a
         // queueing send would fill it in a minute and freeze the page on old numbers.
         _ = try window_channel.publishLatest(.sample, &sample);
+    }}
+
+    // `lepton replay --page`: what the page asked against what was recorded.
+    if (view.bridge.pageReplayPassed()) |passed| {{
+        if (!passed) return error.PageReplayDiverged;
     }}
 }}
 

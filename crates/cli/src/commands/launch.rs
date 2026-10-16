@@ -163,13 +163,26 @@ pub fn find_application(bin: &Path) -> Result<PathBuf, CliError> {
 /// scan is the fallback for a build that predates naming, so an existing project's
 /// `zig-out` still runs.
 pub fn launch(tool: &'static str, bin: &Path, binary: &str) -> Outcome {
+    launch_with(tool, bin, binary, &[])
+}
+
+/// [`launch`] with variables set for the application only (`LEPTON_RECORD`, …).
+pub fn launch_with(
+    tool: &'static str,
+    bin: &Path,
+    binary: &str,
+    env: &[(&str, String)],
+) -> Outcome {
     let named = bin.join(binary);
     let program = if named.is_file() {
         named
     } else {
         find_application(bin)?
     };
-    let step = Step::new(tool, program.to_string_lossy().as_ref());
+    let mut step = Step::new(tool, program.to_string_lossy().as_ref());
+    for (name, value) in env {
+        step = step.env(*name, value.clone());
+    }
     run_streaming(&step).map_err(CliError::from)
 }
 

@@ -24,6 +24,7 @@ pub mod new_view;
 pub mod package;
 pub mod package_manager;
 pub mod plugins;
+pub mod record;
 pub mod run;
 pub mod session;
 pub mod verify;
@@ -137,6 +138,12 @@ pub enum Command {
 
     /// Builds a release and lays it out as an installable tree with a desktop entry.
     Package(package::Flags),
+
+    /// Opens the application and records every command the page calls, to a file.
+    Record(record::RecordFlags),
+
+    /// Runs a recording against the core again, with no window, and compares the replies.
+    Replay(record::ReplayFlags),
 }
 
 impl Command {
@@ -149,6 +156,8 @@ impl Command {
             Self::Dev(_) => "dev",
             Self::Run(_) => "run",
             Self::Package(_) => "package",
+            Self::Record(_) => "record",
+            Self::Replay(_) => "replay",
         }
     }
 }

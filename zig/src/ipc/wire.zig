@@ -56,8 +56,12 @@ pub const Header = extern struct {
     /// flags live in a `u16` rather than in `u1` fields, which `extern struct`
     /// cannot carry.
     reserved: u16 = 0,
+    /// Padding, named so it is written as zeros: an unnamed gap is whatever the stack
+    /// held, and every frame carried it to the page (a replay caught a stack address).
+    _pad0: u16 = 0,
     /// Payload bytes following the header. Bounded by the cell capacity.
     payload_len: u32,
+    _pad1: u32 = 0,
     /// Monotonic per-channel counter. Zero on a `hello`.
     sequence: u64,
 };
@@ -68,6 +72,8 @@ pub const Hello = extern struct {
     build: u64,
     /// Render path the sender drives: webview or pure native.
     mode: u16,
+    _pad0: u16 = 0,
+    _pad1: u32 = 0,
     /// Bit per capability the sender supports.
     capabilities: u64,
 };
@@ -142,6 +148,8 @@ pub const Reply = extern struct {
     result_len: u32,
     result_off: u32,
     _pad: u32,
+    /// The struct is 8-aligned: without this the last four bytes are a gap.
+    _pad1: u32 = 0,
 };
 
 /// `notice` payload: the lengths of the name and data that follow it, in that order.
@@ -244,3 +252,20 @@ pub fn PayloadFor(comptime kind: Kind) type {
 /// distinct type rather than `void`: a zero-sized payload cannot be sent by
 /// accident through the same path as a real one.
 pub const FrameAbsent = enum {};
+
+/// Whether `T`'s fields cover every byte of it: a gap the compiler inserts is never
+/// written, so it would carry whatever memory held before.
+fn coversEveryByte(comptime T: type) bool {
+    var covered: usize = 0;
+    for (@typeInfo(T).@"struct".fields) |field| covered += @sizeOf(field.type);
+    return covered == @sizeOf(T);
+}
+
+test "no frame struct has a gap that would carry stale memory" {
+    inline for (.{ Header, Hello, Sample, Request, Reply, Notice }) |T| {
+        try std.testing.expect(comptime coversEveryByte(T));
+    }
+    try std.testing.expectEqual(@as(usize, 24), @sizeOf(Header));
+    try std.testing.expectEqual(@as(usize, 16), @offsetOf(Header, "sequence"));
+    try std.testing.expectEqual(@as(usize, 8), @offsetOf(Header, "payload_len"));
+}
