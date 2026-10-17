@@ -124,25 +124,26 @@ pub fn write(
 
     let mut written = Vec::new();
 
-    for (name, relative) in entries() {
-        // The shared TypeScript layer goes first so a per-template file of the same name
-        // wins, which is the ordering a template author expects and the reason
-        // `tsconfig.json` can be overridden per template without editing every sibling.
-        let wanted = if template.ends_with("-ts") && name.starts_with("shared-ts/") {
-            true
-        } else {
-            name.starts_with(&format!("{template}/"))
-        };
-        if !wanted {
-            continue;
+    // Two passes: the shared TypeScript layer, then the template, so a per-template file of
+    // the same name wins. One pass in the embed's order wrote `react-ts/` before
+    // `shared-ts/` (alphabetical), and the shared `tsconfig.json` replaced React's own.
+    let shared = template.ends_with("-ts");
+    let own = format!("{template}/");
+    let layers = [shared.then_some("shared-ts/"), Some(own.as_str())];
+    for prefix in layers.into_iter().flatten() {
+        for (name, relative) in entries() {
+            if !name.starts_with(prefix) {
+                continue;
+            }
+            let Some(bytes) = BaseFrontend::get(&name) else {
+                continue;
+            };
+            write_one(root, &relative, &bytes.data, bindings, &mut written)?;
         }
-        let Some(bytes) = BaseFrontend::get(&name) else {
-            continue;
-        };
-        write_one(root, &relative, &bytes.data, bindings, &mut written)?;
     }
-
+    // A file both layers carry was written twice; it is one file.
     written.sort();
+    written.dedup();
     Ok(written)
 }
 
@@ -196,4 +197,42 @@ fn write_one(
 
     written.push(relative.to_owned());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Bindings, available, write};
+    use lepton_orchestrator::ensure;
+    use lepton_orchestrator::testing::{Failure, Scratch};
+
+    /// Every TypeScript template whose sources hold JSX must tell `tsc` how to read it.
+    /// react-ts had no `tsconfig.json` of its own and inherited the shared one, which has
+    /// no `jsx`: `vite build` passed and `tsc --noEmit` failed on every new React project
+    /// (measured 2026-10-17, exit 2, TS17004 on `App.tsx`).
+    #[test]
+    fn a_template_with_jsx_sets_jsx_for_tsc() -> Result<(), Failure> {
+        let bindings = Bindings {
+            project_name: String::from("probe"),
+            app_id: String::from("dev.lepton.probe"),
+            render_mode: String::from("webview"),
+        };
+        for template in available().iter().filter(|name| name.ends_with("-ts")) {
+            let scratch = Scratch::new(&format!("base-{template}"))?;
+            let written = write(template, scratch.path(), &bindings)
+                .map_err(|error| lepton_orchestrator::testing::fail("the template is written", format!("{error:?}")))?;
+            if !written.iter().any(|path| path.ends_with(".tsx")) {
+                continue;
+            }
+            let configs: String = written
+                .iter()
+                .filter(|path| path.starts_with("tsconfig") && path.ends_with(".json"))
+                .map(|path| std::fs::read_to_string(scratch.path().join(path)).unwrap_or_default())
+                .collect();
+            ensure!(
+                configs.contains("\"jsx\""),
+                "{template} writes .tsx files but no tsconfig sets \"jsx\""
+            );
+        }
+        Ok(())
+    }
 }

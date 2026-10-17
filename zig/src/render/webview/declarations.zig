@@ -14,13 +14,19 @@ pub fn file(comptime commands: anytype, comptime Events: type) []const u8 {
         for (Events.list) |name| event_lines = event_lines ++ "    \"" ++ name ++ "\": true;\n";
         return "// Generated from this application's commands (`main.zig`) by its core build.\n" ++
             "// Do not edit: `lepton build`, `run` and `dev` rewrite it.\n\n" ++
-            "declare module \"@lepton-desk/api/core\" {\n  interface AppCommands {\n" ++
-            commands.entries ++
-            "  }\n}\n\n" ++
-            "declare module \"@lepton-desk/api/event\" {\n  interface AppEvents {\n" ++
-            event_lines ++
-            "  }\n}\n\nexport {};\n";
+            "declare module \"@lepton-desk/api/core\" {\n" ++ interface("AppCommands", commands.entries) ++ "}\n\n" ++
+            "declare module \"@lepton-desk/api/event\" {\n" ++ interface("AppEvents", event_lines) ++ "}\n\nexport {};\n";
     }
+}
+
+/// One interface, written the way Biome formats it: an empty one as `{}` on its line.
+/// Every project runs `biome check`, and the file this writes sits in `src/`: written as
+/// `{\n  }`, a new project failed the check after its first build (measured 2026-10-17).
+fn interface(comptime name: []const u8, comptime lines: []const u8) []const u8 {
+    return if (lines.len == 0)
+        "  interface " ++ name ++ " {}\n"
+    else
+        "  interface " ++ name ++ " {\n" ++ lines ++ "  }\n";
 }
 
 test "commands and events land in their own modules of one file" {
@@ -31,5 +37,5 @@ test "commands and events land in their own modules of one file" {
     const text = comptime file(commands, events.Declared(&.{"notes.saved"}));
     try std.testing.expect(std.mem.startsWith(u8, text, "// Generated from this application's commands (`main.zig`)"));
     try std.testing.expect(std.mem.indexOf(u8, text, "declare module \"@lepton-desk/api/event\" {\n  interface AppEvents {\n    \"notes.saved\": true;\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "interface AppCommands {\n  }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "  interface AppCommands {}\n") != null);
 }

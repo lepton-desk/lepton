@@ -285,12 +285,18 @@ pub fn render_manifest(manifest: &Manifest) -> String {
         }
     }
     let fs = manifest.plugins.contains(&"fs");
-    let _ = writeln!(
-        out,
-        "  \"permissions\": [{}]{}",
-        granted.join(", "),
-        if fs { "," } else { "" }
-    );
+    let comma = if fs { "," } else { "" };
+    // On one line while it fits the project's `biome.json` line width, one name per line
+    // after that: Biome formats an array this way, and a project made with plugins failed
+    // `biome check` before its first build on a 140-character line (measured 2026-10-17).
+    let line = format!("  \"permissions\": [{}]{comma}", granted.join(", "));
+    if line.chars().count() <= BIOME_LINE_WIDTH {
+        let _ = writeln!(out, "{line}");
+    } else {
+        let _ = writeln!(out, "  \"permissions\": [");
+        let _ = writeln!(out, "    {}", granted.join(",\n    "));
+        let _ = writeln!(out, "  ]{comma}");
+    }
     if fs {
         // The application's own directory and nothing else; widening it is the
         // developer's decision, written here by name.
@@ -302,6 +308,9 @@ pub fn render_manifest(manifest: &Manifest) -> String {
 
     out
 }
+
+/// `lineWidth` in the `biome.json` every project gets (`assets/biome.json`).
+const BIOME_LINE_WIDTH: usize = 100;
 
 /// Quotes and escapes a string as JSON.
 ///
@@ -382,6 +391,26 @@ mod tests {
     };
     use lepton_orchestrator::testing::{Failure, balanced};
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ne, ensure};
+
+    #[test]
+    fn the_configuration_fits_the_projects_biome_line_width() -> Result<(), Failure> {
+        // Every project runs `biome check`; with all four plugins the permissions once
+        // came out on one 140-character line and a new project failed it unbuilt.
+        for plugins in [vec![], vec!["fs"], vec!["os", "clipboard", "fs", "dialog"]] {
+            let mut manifest = Manifest::new("Ledger");
+            manifest.plugins = plugins.clone();
+            let text = render_manifest(&manifest);
+            for line in text.lines() {
+                ensure!(
+                    line.chars().count() <= super::BIOME_LINE_WIDTH,
+                    "plugins {plugins:?}: line over the width: {line}"
+                );
+            }
+            let parsed = crate::permissions::parse_permissions(&text);
+            ensure!(parsed.is_ok(), "plugins {plugins:?}: permissions do not parse");
+        }
+        Ok(())
+    }
 
     #[test]
     fn a_project_name_becomes_a_usable_identifier() -> Result<(), Failure> {
