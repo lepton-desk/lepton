@@ -54,6 +54,10 @@ pub struct ReplayFlags {
     #[arg(long)]
     pub page: bool,
 
+    /// With `--page`: ends by itself once the recording has been played, for a test.
+    #[arg(long, requires = "page")]
+    pub close: bool,
+
     /// Prints the steps instead of running them.
     #[arg(long)]
     pub print_plan: bool,
@@ -93,7 +97,7 @@ fn require_support(root: &Path, needs: Needs) -> Result<(), CliError> {
         .join("src/render/webview/record.zig");
     if !core.is_file() {
         return Err(CliError::Invalid(
-            "this project's core predates recordings; recreate it with a current `lepton new`"
+            "this project's core predates recordings; run `lepton update`"
                 .to_owned(),
         ));
     }
@@ -102,23 +106,41 @@ fn require_support(root: &Path, needs: Needs) -> Result<(), CliError> {
         Needs::Record => {}
         Needs::Replay if !main.contains("webviewReplay") => {
             return Err(CliError::Invalid(
-                "src-lepton/main.zig predates replays: it would open the window. Add the `core.webviewReplay` block from a current `lepton new` before the display probe".to_owned(),
+                "src-lepton/main.zig predates replays: it would open the window. Run `lepton update`".to_owned(),
             ));
         }
         Needs::Replay => {}
         Needs::PageReplay if !core.with_file_name("page_replay.zig").is_file() => {
             return Err(CliError::Invalid(
-                "this project's core predates page replays; recreate it with a current `lepton new`".to_owned(),
+                "this project's core predates page replays; run `lepton update`".to_owned(),
             ));
         }
         Needs::PageReplay if !main.contains("pageReplayPassed") => {
             return Err(CliError::Invalid(
-                "src-lepton/main.zig predates page replays: it would not report the verdict. Add the `pageReplayPassed` check from a current `lepton new` after the main loop".to_owned(),
+                "src-lepton/main.zig predates page replays: it would not report the verdict. Run `lepton update`".to_owned(),
             ));
         }
         Needs::PageReplay => {}
     }
     Ok(())
+}
+
+/// `--close` needs a core whose page replay reads `LEPTON_REPLAY_PAGE_CLOSE`; an older one
+/// would leave the window open and the test waiting.
+fn require_closing(root: &Path) -> Result<(), CliError> {
+    let page_replay = root
+        .join(CORE_DIR)
+        .join(lepton_core_vendoring::VENDORED_CORE)
+        .join("src/render/webview/page_replay.zig");
+    let text = std::fs::read_to_string(page_replay).unwrap_or_default();
+    if text.contains("LEPTON_REPLAY_PAGE_CLOSE") {
+        Ok(())
+    } else {
+        Err(CliError::Invalid(
+            "this project's core cannot end a page replay by itself; run `lepton update`"
+                .to_owned(),
+        ))
+    }
 }
 
 /// Where a recording goes: `output` against the working directory, or a new name in it.
@@ -212,7 +234,11 @@ impl ReplayFlags {
             )));
         }
         let home = std::env::temp_dir().join(format!("lepton-replay-{}", std::process::id()));
-        let env = replay_environment(&file, &home, self.page);
+        let mut env = replay_environment(&file, &home, self.page);
+        if self.close {
+            require_closing(&root)?;
+            env.push(("LEPTON_REPLAY_PAGE_CLOSE", "1".to_owned()));
+        }
         let built = build(&root, self.release, self.print_plan)?;
         if self.print_plan {
             print_launch(&built, &env);

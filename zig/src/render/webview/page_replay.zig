@@ -12,6 +12,11 @@
 //! Events a command emitted while it ran are sent again when its call is answered from
 //! the recording; a deferred call (a file dialog) is answered after its recorded delay.
 //!
+//! With `LEPTON_REPLAY_PAGE_CLOSE=1` (`lepton replay --page --close`) the run ends by
+//! itself, so a recording can be a test: 1.5 s after the last recorded call was made (a call
+//! more in that time is reported as diverged), or 10 s after the recording's own length
+//! when some never came. Without it the run ends when the window is closed.
+//!
 //! This file decides; `bridge.zig` answers.
 
 const std = @import("std");
@@ -45,6 +50,29 @@ pub const Call = struct {
     events_to: usize,
     used: bool = false,
 };
+
+/// One-shot, as in `bridge.zig`: the callback returns 0.
+const e_timeout_add = @extern(
+    *const fn (c_uint, *const fn (?*anyopaque) callconv(.c) c_int, ?*anyopaque) callconv(.c) c_uint,
+    .{ .name = "g_timeout_add" },
+);
+
+/// GLib is linked: a webview build (`scope.zig` asks the same).
+const engine_linked = blk: {
+    const options = @import("build_options");
+    break :blk options.have_wpe and options.wpe_platform_abi and !options.native_render;
+};
+
+/// Quiet time after the last recorded call before a `--close` run ends.
+const quiet_ms = 1500;
+/// Time past the recording's length before a `--close` run gives up on missing calls.
+const ceiling_margin_ms = 10_000;
+
+fn endRun(data: ?*anyopaque) callconv(.c) c_int {
+    const flag: *bool = @ptrCast(@alignCast(data orelse return 0));
+    flag.* = true;
+    return 0;
+}
 
 pub const Live = enum { window, masked, other_argument, unrecorded };
 
@@ -100,6 +128,11 @@ pub const Script = struct {
     from_recording: u32 = 0,
     live: u32 = 0,
     diverged: u32 = 0,
+    /// When the recording's last entry was written, from its start.
+    length_ns: u64 = 0,
+    /// `--close`: the flag that ends the run (`Bridge.close_requested`), set by a timeout.
+    close: ?*bool = null,
+    closing: bool = false,
 
     /// Reads a recording. `bytes` must outlive the script.
     pub fn load(allocator: std.mem.Allocator, bytes: []const u8) (record.ReadError || std.mem.Allocator.Error)!Script {
@@ -111,6 +144,7 @@ pub const Script = struct {
         var pending_from: usize = 0;
         // The request a `reply` record answers: the one recorded just before it.
         var awaiting: ?struct { index: usize, at_ns: u64 } = null;
+        var length_ns: u64 = 0;
         var requested_at: std.ArrayList(u64) = .empty;
         defer requested_at.deinit(allocator);
 
@@ -119,6 +153,7 @@ pub const Script = struct {
                 error.Truncated => break,
                 else => return err,
             } orelse break;
+            length_ns = @max(length_ns, next.at_ns);
             switch (next.kind) {
                 .event => {
                     if (!next.flags.during) continue;
@@ -162,7 +197,29 @@ pub const Script = struct {
             .bytes = bytes,
             .calls = try calls.toOwnedSlice(allocator),
             .events = try events.toOwnedSlice(allocator),
+            .length_ns = length_ns,
         };
+    }
+
+    /// `LEPTON_REPLAY_PAGE_CLOSE=1`: sets `flag` when the recording has been played (see
+    /// the top of this file). `flag` must live as long as the run.
+    pub fn closeWhenDone(self: *Script, flag: *bool) void {
+        // GLib's timeouts exist only where the engine is linked.
+        if (comptime !engine_linked) return;
+        const asked = std.c.getenv("LEPTON_REPLAY_PAGE_CLOSE") orelse return;
+        if (asked[0] == 0 or asked[0] == '0') return;
+        self.close = flag;
+        const ceiling = self.length_ns / std.time.ns_per_ms + ceiling_margin_ms;
+        _ = e_timeout_add(@intCast(@min(ceiling, std.math.maxInt(c_uint))), &endRun, flag);
+        self.closeIfDone();
+    }
+
+    fn closeIfDone(self: *Script) void {
+        if (comptime !engine_linked) return;
+        const flag = self.close orelse return;
+        if (self.closing or self.missing() != 0) return;
+        self.closing = true;
+        _ = e_timeout_add(quiet_ms, &endRun, flag);
     }
 
     pub fn deinit(self: *Script) void {
@@ -172,6 +229,7 @@ pub const Script = struct {
 
     /// How to answer the page's call of `command` with `argument`.
     pub fn decide(self: *Script, command: u32, argument: []const u8) Decision {
+        defer self.closeIfDone();
         const call = for (self.calls) |*call| {
             if (!call.used and call.command == command) break call;
         } else null;

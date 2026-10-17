@@ -337,6 +337,7 @@ pub const View = struct {
         // `LEPTON_RECORD=<file>`: `lepton record`, or anyone reproducing a bug.
         self.bridge.recorder = @import("record.zig").Recorder.fromEnvironment();
         self.bridge.page_replay = @import("page_replay.zig").fromEnvironment();
+        if (self.bridge.page_replay) |*script| script.closeWhenDone(&self.bridge.close_requested);
         @import("downloads.zig").watch(self.web_view, &self.bridge);
         @import("permissions.zig").watch(self.web_view, &self.bridge);
         // The window the page's `window.*` commands act on, and the two changes it is

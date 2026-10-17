@@ -34,7 +34,8 @@
     "format": "biome format --write .",
     "lepton": "../../target/release/lepton",
     "preview": "vite preview",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "test:replay": "../../target/release/lepton replay --page --close test/fixtures/startup.lrec"
   },
   "type": "module",
   "version": "0.1.0"
