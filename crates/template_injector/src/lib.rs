@@ -26,6 +26,7 @@ pub mod permissions;
 pub mod plan;
 pub mod plugin_catalog;
 pub mod read;
+pub mod update;
 
 pub use assets::{
     BIOME_CONFIG, BIOME_VERSION, MAIN_ENTRY, MEASURES, REACT_ENTRY, REACT_SCREEN, SDK_ENTRY,

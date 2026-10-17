@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+diffy = "0.5.2"
 rust-embed = "8"
 # The one place JSON is genuinely the format: a human reads and edits
 # `lepton.config.json`. The IPC path is zero-copy binary and never goes near this.

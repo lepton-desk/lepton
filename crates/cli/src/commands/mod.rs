@@ -29,6 +29,7 @@ pub mod record;
 pub mod report;
 pub mod run;
 pub mod session;
+pub mod update;
 pub mod verify;
 
 use std::error::Error;
@@ -146,6 +147,9 @@ pub enum Command {
 
     /// Runs a recording against the core again, with no window, and compares the replies.
     Replay(record::ReplayFlags),
+
+    /// Brings an existing project's core and `src-lepton/` files to this version.
+    Update(update::Flags),
 }
 
 impl Command {
@@ -160,6 +164,7 @@ impl Command {
             Self::Package(_) => "package",
             Self::Record(_) => "record",
             Self::Replay(_) => "replay",
+            Self::Update(_) => "update",
         }
     }
 }

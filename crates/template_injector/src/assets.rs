@@ -209,9 +209,15 @@ pub fn zig_entry(
         ("{title}", window_title),
         ("{identifier}", identifier),
     ];
+    fill(ZIG_ENTRY_TEMPLATE, &values)
+}
 
-    let mut out = String::with_capacity(ZIG_ENTRY_TEMPLATE.len() + 256);
-    let mut rest = ZIG_ENTRY_TEMPLATE;
+/// [`zig_entry`]'s walk over any entry template: the current one, or a released one that
+/// `lepton update` compares a project against (those also carry `{width}` and `{height}`).
+/// A placeholder missing from `values` is copied through as written.
+pub fn fill(template: &str, values: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len() + 256);
+    let mut rest = template;
 
     'scan: while !rest.is_empty() {
         let Some(open) = rest.find('{') else {
@@ -221,7 +227,7 @@ pub fn zig_entry(
         let tail = &rest[open..];
 
         // A placeholder first, so `{title}` is never mistaken for an escaped brace.
-        for (placeholder, value) in values {
+        for &(placeholder, value) in values {
             if let Some(after) = tail.strip_prefix(placeholder) {
                 out.push_str(&rest[..open]);
                 out.push_str(value);
@@ -398,12 +404,7 @@ mod tests {
 
     /// Fills the Zig entry point the way the plan does.
     fn entry() -> String {
-        zig_entry(
-            "Ledger",
-            "/lepton-ledger",
-            "Ledger",
-            "com.example.ledger",
-        )
+        zig_entry("Ledger", "/lepton-ledger", "Ledger", "com.example.ledger")
     }
 
     #[test]
