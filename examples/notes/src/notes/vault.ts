@@ -38,6 +38,12 @@ export interface TreeNode {
 
 export class VaultPathError extends Error {}
 
+/** The notes of a tree already read, depth first: no second walk of the folders. */
+export function notesIn(node: TreeNode): string[] {
+  if (node.kind === "note") return [node.path];
+  return node.children.flatMap(notesIn);
+}
+
 const noteExtension = ".md";
 /** Folders below the vault's top that the tree reads; deeper ones are not listed. */
 const maxDepth = 12;
@@ -126,13 +132,7 @@ export class Vault {
 
   /** Every note's path, depth first in tree order. */
   async notePaths(): Promise<string[]> {
-    const out: string[] = [];
-    const walk = (node: TreeNode) => {
-      if (node.kind === "note") out.push(node.path);
-      for (const child of node.children) walk(child);
-    };
-    walk(await this.tree());
-    return out;
+    return notesIn(await this.tree());
   }
 
   async read(path: string): Promise<string> {

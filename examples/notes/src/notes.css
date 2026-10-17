@@ -97,8 +97,17 @@ input {
 
 .notes {
   display: grid;
-  grid-template-columns: minmax(200px, 260px) 1fr;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) minmax(180px, 240px);
   height: 100%;
+}
+
+@media (max-width: 900px) {
+  .notes {
+    grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  }
+  .side {
+    display: none;
+  }
 }
 
 .sidebar {
@@ -267,4 +276,486 @@ input {
 .vault-name:disabled {
   opacity: 0.6;
   cursor: progress;
+}
+
+/* --- Vault menu, tools, rows --------------------------------------------------- */
+
+.vault-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 15rem;
+  max-width: 22rem;
+  padding: 0.3rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+}
+
+.menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.4rem 0.6rem;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu button:hover {
+  background: var(--selected);
+}
+
+.menu__hint {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__tools {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem 0.3rem;
+}
+
+.target {
+  margin: 0 0.75rem;
+  padding: 0.2rem 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.row__name {
+  flex: 1;
+  min-width: 0;
+}
+
+.row__actions {
+  display: none;
+  gap: 0.1rem;
+}
+
+.row:hover > .row__actions,
+.row:focus-within > .row__actions {
+  display: flex;
+}
+
+.row__actions button {
+  padding: 0 0.35rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.row__actions button:hover {
+  background: var(--selected);
+  color: var(--ink);
+}
+
+.row__actions .danger {
+  background: #b3261e;
+  color: #fff;
+}
+
+summary.row {
+  list-style-position: inside;
+}
+
+.tree__folder[data-selected="true"] {
+  background: var(--selected);
+  border-radius: 4px;
+  color: var(--ink);
+}
+
+.rename {
+  flex: 1;
+}
+
+.rename input {
+  width: 100%;
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--paper);
+}
+
+.naming {
+  padding: 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.welcome__recent {
+  margin-top: 0.5rem;
+}
+
+/* --- Pane: modes, split, preview, visual -------------------------------------- */
+
+.modes {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.modes button {
+  padding: 0.1em 0.55em;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.modes button[aria-pressed="true"] {
+  border-color: var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.pane__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.pane__body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane__body--split > .editor {
+  border-right: 1px solid var(--rule);
+}
+
+.preview,
+.visual {
+  overflow: auto;
+  padding: 1.25rem 1.5rem 3rem;
+  line-height: 1.65;
+}
+
+.preview > *,
+.visual .ProseMirror > * {
+  max-width: 46rem;
+}
+
+.visual .ProseMirror {
+  min-height: 100%;
+  outline: none;
+}
+
+.preview pre,
+.preview code,
+.visual pre,
+.visual code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--panel);
+  border-radius: 4px;
+}
+
+.preview pre,
+.visual pre {
+  padding: 0.75rem;
+  overflow: auto;
+}
+
+.preview a,
+.visual a {
+  color: var(--accent);
+}
+
+.preview .wikilink {
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+}
+
+.preview .wikilink--missing {
+  opacity: 0.65;
+  border-bottom-style: dashed;
+}
+
+.preview .tag {
+  cursor: pointer;
+  text-decoration: none;
+  font-size: 0.9em;
+}
+
+.preview table,
+.visual table {
+  border-collapse: collapse;
+}
+
+.preview th,
+.preview td,
+.visual th,
+.visual td {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--rule);
+}
+
+.preview img {
+  max-width: 100%;
+}
+
+/* --- Side panel ----------------------------------------------------------------- */
+
+.side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-left: 1px solid var(--rule);
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tabs button {
+  flex: 1;
+  padding: 0.6rem 0.3rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.tabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.side__body {
+  flex: 1;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list button,
+.back {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  padding: 0.2rem 0.4rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.list button:hover,
+.back:hover {
+  background: var(--selected);
+}
+
+.muted {
+  color: var(--ink-soft);
+}
+
+/* --- Palette -------------------------------------------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: rgb(0 0 0 / 0.25);
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 60vh;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.25);
+}
+
+.palette input {
+  padding: 0.8rem 1rem;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: none;
+  font-size: 1rem;
+  outline: none;
+}
+
+.palette__list {
+  overflow: auto;
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+}
+
+.palette__list button {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.palette__list [data-active="true"] > button {
+  background: var(--selected);
+}
+
+.palette__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__detail {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__empty {
+  padding: 0.6rem;
+}
+
+/* --- Board ---------------------------------------------------------------------- */
+
+.board {
+  display: flex;
+  gap: 0.9rem;
+  overflow: auto;
+  padding: 1rem;
+  align-items: flex-start;
+}
+
+.board--empty {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.board__column {
+  flex: 0 0 15rem;
+  padding: 0.6rem;
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.board__column h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.board__column ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  cursor: grab;
+}
+
+.card label {
+  display: flex;
+  gap: 0.45rem;
+  align-items: flex-start;
+}
+
+.card--done span {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.card__details {
+  margin: 0.3rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.board__add {
+  margin-top: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.board__add:hover {
+  background: var(--selected);
+}
+
+.board__add--column {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.board__column form input {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.3em 0.45em;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--paper);
 }
