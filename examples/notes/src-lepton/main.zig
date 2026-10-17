@@ -92,6 +92,9 @@ pub fn main() !void {
     // find nobody home.
     var window_channel = try core.channel.create(allocator, "/lepton-dev.lepton.notes", .{});
     defer window_channel.deinit(allocator);
+    // SIGTERM, Ctrl+C or the session ending: the loop ends and every `defer` runs, so the
+    // channel leaves `/dev/shm` with the process instead of staying behind.
+    core.termination.catchSignals();
 
     const display = core.display.Display.probe(core.display.processGetenv, null) catch |err| {
         std.debug.print("no display server: {t}\n", .{err});
@@ -215,7 +218,7 @@ pub fn main() !void {
     var heap_high_water: u64 = 0;
     var last_publish: ?std.Io.Clock.Timestamp = null;
 
-    while (!view.bridge.close_requested and !view.closed) {
+    while (!view.bridge.close_requested and !view.closed and !core.termination.requested()) {
         _ = core.render.pump_webview_blocking();
 
         const now = std.Io.Clock.Timestamp.now(io, .awake);
@@ -371,7 +374,7 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
     std.debug.print("channel      {s}\n", .{"/lepton-dev.lepton.notes"});
 
     var frames: u32 = 0;
-    while (true) {
+    while (!core.termination.requested()) {
         frames += 1;
 
         if (opened.takeConfigure()) |configure| {

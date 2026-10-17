@@ -39,6 +39,8 @@ pub const scope = @import("platform/linux/scope.zig");
 pub const report = @import("report.zig");
 /// Paths the user chose in a dialog, granted at run time and remembered (`plugin-fs` `chosen`).
 pub const grants = @import("platform/linux/grants.zig");
+/// SIGTERM, SIGINT and SIGHUP as a request the loop ends on, so the channel is unlinked.
+pub const termination = @import("platform/linux/termination.zig");
 pub const window = @import("window/window.zig");
 
 /// The frame the render layer draws into, and the render paths that fill it.
@@ -108,6 +110,7 @@ test {
     _ = @import("platform/linux/display_test.zig");
     _ = @import("metrics/probe_test.zig");
     _ = @import("metrics/latency.zig");
+    _ = @import("platform/linux/termination.zig");
     _ = @import("window/window.zig");
     _ = @import("window/linux/placement.zig");
     _ = @import("window/linux/gesture.zig");
