@@ -626,6 +626,32 @@ pub fn build(b: *std.Build) void {
         gpu_check_step.dependOn(&run_gpu_check.step);
     }
 
+    // The 0.2.0 GPU renderer's first measurement: does this machine's Vulkan meet the
+    // threshold (`render/gpu/vulkan_threshold.zig`), and does a device with exactly those
+    // features draw? Headless, so it is not tied to the render path.
+    if (hasPkgConfig(b, "vulkan")) {
+        const vulkan_module = b.createModule(.{
+            .root_source_file = b.path("src/tools/vulkan_check.zig"),
+            .target = target,
+            .optimize = .Debug,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "lepton_core", .module = core },
+            },
+        });
+        vulkan_module.linkSystemLibrary("vulkan", .{});
+        const vulkan_check = b.addExecutable(.{
+            .name = "lepton-vulkan-check",
+            .root_module = vulkan_module,
+        });
+        const run_vulkan_check = b.addRunArtifact(vulkan_check);
+        const vulkan_check_step = b.step(
+            "vulkan-check",
+            "Measure whether this machine's Vulkan meets the native renderer's threshold, and draws",
+        );
+        vulkan_check_step.dependOn(&run_vulkan_check.step);
+    }
+
     const run_window_check = b.addRunArtifact(window_check);
     const window_check_step = b.step("window-check", "Open a real window and report what the server said");
     window_check_step.dependOn(&run_window_check.step);

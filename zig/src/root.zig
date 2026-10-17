@@ -41,6 +41,8 @@ pub const report = @import("report.zig");
 pub const grants = @import("platform/linux/grants.zig");
 /// SIGTERM, SIGINT and SIGHUP as a request the loop ends on, so the channel is unlinked.
 pub const termination = @import("platform/linux/termination.zig");
+/// The Vulkan the native GPU renderer requires (the baseline R7 240's set); pure, no driver.
+pub const vulkanThreshold = @import("render/gpu/vulkan_threshold.zig");
 pub const window = @import("window/window.zig");
 
 /// The frame the render layer draws into, and the render paths that fill it.
@@ -111,6 +113,7 @@ test {
     _ = @import("metrics/probe_test.zig");
     _ = @import("metrics/latency.zig");
     _ = @import("platform/linux/termination.zig");
+    _ = @import("render/gpu/vulkan_threshold.zig");
     _ = @import("window/window.zig");
     _ = @import("window/linux/placement.zig");
     _ = @import("window/linux/gesture.zig");
