@@ -111,6 +111,10 @@ impl Flags {
             }
             return Ok(());
         }
+        // A webview build needs WPE WebKit; without it, say how to get it and offer to.
+        if !native {
+            super::engine::ensure()?;
+        }
 
         // The server goes first and goes to the **background**. The core asks it for the
         // bundle the moment it starts, so it has to be listening before then — and it

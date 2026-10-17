@@ -14,7 +14,7 @@ const std = @import("std");
 const support = @import("src/build_support.zig");
 const hasPkgConfig = support.hasPkgConfig;
 const pkgConfigVersion = support.pkgConfigVersion;
-const engineIsAtLeast = support.engineIsAtLeast;
+const pkgConfigRequires = support.pkgConfigRequires;
 const wpeBackendLibrary = support.wpeBackendLibrary;
 const addPkgConfigIncludes = support.addPkgConfigIncludes;
 const addIncludeDirectory = support.addIncludeDirectory;
@@ -135,16 +135,18 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
 
     // Two engine ABIs are in the wild and they are not source compatible.
     //
-    // Since 2.54 the platform integration lives inside WebKit, `libwpe` and the external
-    // rendering backends are deprecated, and `webkit_web_view_new` no longer exists — a
-    // view is made with `g_object_new(WEBKIT_TYPE_WEB_VIEW, nullptr)` and the platform
-    // view is read back from it. Before 2.54 it is the other way round: the embedder
-    // loads a backend, hands WebKit a view backend, and the display is the embedder's.
+    // The platform API (WPEPlatform) is stable and on by default since 2.54: the platform
+    // integration lives inside WebKit, a view is made with
+    // `g_object_new(WEBKIT_TYPE_WEB_VIEW, nullptr)` and the platform view is read back
+    // from it. The older libwpe API is the other way round: the embedder loads a backend
+    // (WPEBackend-fdo), hands WebKit a view backend, and the display is the embedder's.
+    // 2.54 still offers it as a build option ("may be deprecated in the future", 2.54.0
+    // release notes); Arch builds without it, Debian and openSUSE with it.
     //
     // Both are detected rather than assumed, because a machine may carry either, and
-    // `-Dwpe-abi=legacy` exists for the machines that still need the old one: 2.54 is
-    // the default on purpose, since staying on the deprecated path by accident would
-    // mean an update to WebKit breaks the build with no change on this side.
+    // `-Dwpe-abi=legacy` exists for engines that have only the old one: the platform API
+    // is preferred whenever it is there, since staying on the older path by accident
+    // would mean a distribution dropping it breaks the build with no change on this side.
     const have_wpe_platform = want_webview and hasPkgConfig(b, "wpe-platform-2.0");
     const have_wpe_legacy = want_webview and hasPkgConfig(b, "wpe-1.0");
     const wpe_abi_choice = b.option(
@@ -167,20 +169,19 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
         std.process.exit(1);
     }
 
-    // 2.54 removed `webkit_web_view_new` and `webkit_web_view_backend_new` outright, so on
-    // such an engine the legacy path cannot be built at all. Left to the linker this
-    // arrives as a wall of undefined symbols that names neither the flag that caused it
-    // nor the version that removed them, which is the least useful way to learn that the
-    // flag was never going to work here.
-    if (want_webview and std.mem.eql(u8, wpe_abi_choice, "legacy") and
-        engineIsAtLeast(b, "wpe-webkit-2.0", 2, 54))
+    // An engine built without its libwpe API (Arch: `ENABLE_WPE_LEGACY_API=OFF`) has no
+    // `webkit_web_view_new` or `webkit_web_view_backend_new`, even with libwpe itself still
+    // installed, as it is after an upgrade from 2.52. Left to the linker this arrives as a
+    // wall of undefined symbols that names neither the flag nor the reason, so the engine's
+    // own `.pc` file is asked: built with the libwpe API, it requires `wpe-1.0`.
+    if (want_webview and !use_platform_abi and hasPkgConfig(b, "wpe-webkit-2.0") and
+        !pkgConfigRequires(b, "wpe-webkit-2.0", "wpe-1.0"))
     {
         std.log.err(
-            "lepton: -Dwpe-abi=legacy was asked for, but this engine is " ++
-                "{s}, which removed webkit_web_view_new and " ++
-                "webkit_web_view_backend_new; that ABI only exists up to 2.52. " ++
-                "Drop the flag to use the platform ABI.",
-            .{pkgConfigVersion(b, "wpe-webkit-2.0") orelse "2.54 or newer" },
+            "lepton: the libwpe API was asked for (-Dwpe-abi=legacy, or no WPEPlatform found), " ++
+                "but this WebKit {s} was built without it. " ++
+                "Drop -Dwpe-abi=legacy to use the platform API.",
+            .{pkgConfigVersion(b, "wpe-webkit-2.0") orelse ""},
         );
         std.process.exit(1);
     }
@@ -192,8 +193,9 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // *ABI*, which is not the release version: libwpe 1.16.3 and its fdo backend
     // 1.16.1 both ship `libWPEBackend-fdo-1.0.so`. `pkg-config --libs-only-l` is where
     // that ABI is written down, so this reads the packaging instead of guessing at it.
-    const wpe_backend_library = wpeBackendLibrary(b, "wpebackend-fdo-1.0");
-    if (have_wpe and wpe_backend_library == null) {
+    // Only the libwpe path loads a backend; the platform path has none to find.
+    const wpe_backend_library = if (want_webview and !use_platform_abi) wpeBackendLibrary(b, "wpebackend-fdo-1.0") else null;
+    if (have_wpe and !use_platform_abi and wpe_backend_library == null) {
         std.log.warn(
             "lepton: the web engine is installed but no platform backend was found;" ++
                 " the webview path will report NoBackendLibrary at run time",

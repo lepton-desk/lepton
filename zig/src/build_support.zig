@@ -55,17 +55,22 @@ pub fn pkgConfigVersion(b: *std.Build, pkg: []const u8) ?[]const u8 {
     return std.mem.trim(u8, stdout, " \t\r\n");
 }
 
-/// Whether `pkg` is installed at `major`.`minor` or newer.
+/// Whether `pkg`'s `.pc` file lists `required` among the packages it requires.
 ///
-/// A version that does not parse is not treated as new: refusing a working build over a
-/// version string this code failed to read would be a worse failure than the one it is
-/// guarding against.
-pub fn engineIsAtLeast(b: *std.Build, pkg: []const u8, major: u32, minor: u32) bool {
-    const text = pkgConfigVersion(b, pkg) orelse return false;
-    var parts = std.mem.splitScalar(u8, text, '.');
-    const found_major = std.fmt.parseInt(u32, parts.next() orelse return false, 10) catch return false;
-    const found_minor = std.fmt.parseInt(u32, parts.next() orelse "0", 10) catch 0;
-    return found_major > major or (found_major == major and found_minor >= minor);
+/// How a WebKit build says which ABIs it carries: one configured with its libwpe API
+/// requires `wpe-1.0` (openSUSE's and Debian's 2.54.1), one without it does not (Arch's
+/// 2.54.1, `ENABLE_WPE_LEGACY_API=OFF`). The version number cannot tell them apart.
+pub fn pkgConfigRequires(b: *std.Build, pkg: []const u8, required: []const u8) bool {
+    const found = b.findProgram(&.{"pkg-config"}, &.{}) catch return false;
+    var code: u8 = 0;
+    const stdout = b.runAllowFail(&.{ found, "--print-requires", pkg }, &code, .ignore) catch return false;
+    if (code != 0) return false;
+    var lines = std.mem.tokenizeAny(u8, stdout, "\r\n");
+    while (lines.next()) |line| {
+        var words = std.mem.tokenizeAny(u8, line, " \t");
+        if (std.mem.eql(u8, words.next() orelse continue, required)) return true;
+    }
+    return false;
 }
 
 /// Copies GLib's headers with `_Pragma` and `__pragma` neutralised, and returns the
@@ -85,6 +90,11 @@ pub fn engineIsAtLeast(b: *std.Build, pkg: []const u8, major: u32, minor: u32) b
 /// number out of this file, where it would be a constant that is right until it is
 /// not, and wrong in the same way a missing backend is wrong.
 pub fn wpeBackendLibrary(b: *std.Build, pkg: []const u8) ?[]const u8 {
+    // Asked first, because `b.run` stops the whole build when the package is missing:
+    // that made every webview build require WPEBackend-fdo, which the 2.54 platform
+    // path never loads and which Arch no longer packages (measured with its `.pc`
+    // hidden: `zig build webview-check` failed before compiling anything).
+    if (!hasPkgConfig(b, pkg)) return null;
     const found = b.findProgram(&.{"pkg-config"}, &.{}) catch return null;
     const reported = b.run(&.{ found, "--libs-only-l", pkg });
 

@@ -127,6 +127,11 @@ impl Flags {
             }
             return Ok(());
         }
+        // A webview build for Linux needs WPE WebKit (Servo links its own engine); without
+        // it, say how to get it and offer to.
+        if !native && !self.servo && !self.windows && !self.macos {
+            super::engine::ensure()?;
+        }
 
         for step in &steps {
             run_streaming(step).map_err(CliError::from)?;

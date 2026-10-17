@@ -98,60 +98,27 @@ fn render_text(chain: &Toolchain) -> String {
     out
 }
 
-/// The libraries a render path needs, and what a build on this machine would get.
-///
-/// Probed rather than remembered, because the whole point of this report is to tell a
-/// developer whether a build will work before they run one. Each row names a package
-/// the build genuinely requires and nothing else: a row for a library no build reads
-/// would be a row that cannot change the answer.
-const ENGINE_PACKAGES: [(&str, &str); 4] = [
-    ("wpe-webkit-2.0", "web engine (WPE WebKit)"),
-    ("wpebackend-fdo-1.0", "platform backend"),
-    ("cairo", "type rasterisation"),
-    ("xcb", "X11 windows"),
-];
-
-/// The engine section, as a person reads it.
+/// The web engine section, as a person reads it: the facts (`engine.rs`, read the way the
+/// core's build reads them), then one line of consequence, and when the engine is missing,
+/// what this distribution can do about it.
 fn engine_section() -> String {
+    let engine = super::engine::Engine::probe();
     let mut out = String::from("  engine\n");
-
-    let mut missing = 0usize;
-    for (package, label) in ENGINE_PACKAGES {
-        if pkg_config_exists(package) {
-            out.push_str(&format!("    {label:<24} present\n"));
-        } else {
-            missing += 1;
-            out.push_str(&format!("    {label:<24} missing — {package}\n"));
-        }
+    for (label, value) in engine.rows() {
+        out.push_str(&format!("    {label:<24} {value}\n"));
     }
-
-    // The consequence, in one sentence, because the rows above are facts and a
-    // developer needs the reading of them. `-Drender=native` is named as the way
-    // through, since a missing engine does not block a native build.
-    if missing > 0 {
+    if engine.ready() {
+        out.push_str(&format!("    {:<24} webview builds here\n", "consequence"));
+    } else {
         out.push_str(&format!(
-            "    {:<24} {missing} missing; build with --native\n",
+            "    {:<24} native builds only, for now\n",
             "consequence"
         ));
-    } else {
-        out.push_str(&format!("    {:<24} webview builds here\n", "consequence"));
+        for line in super::engine::advice(super::engine::offer().as_ref()) {
+            out.push_str(&format!("      {line}\n"));
+        }
     }
-
     out
-}
-
-/// Whether `pkg-config` can find `package`.
-///
-/// Runs the real query rather than looking for a file. A `.pc` present on disk can
-/// name an include directory that was removed, and a header directory present can hold
-/// headers a removed library no longer exports; only the query answers the question the
-/// build will actually ask.
-fn pkg_config_exists(package: &str) -> bool {
-    std::process::Command::new("pkg-config")
-        .arg("--exists")
-        .arg(package)
-        .status()
-        .is_ok_and(|status| status.success())
 }
 
 /// What is stopping one command, in words that name the fix.
@@ -219,20 +186,12 @@ fn render_json(chain: &Toolchain) -> String {
         display_json(&chain.display)
     ));
 
-    // The same four packages the text report rows come from, read once and rendered
-    // both ways, so the two reports cannot disagree about whether a build will work.
-    let engine: Vec<String> = ENGINE_PACKAGES
-        .iter()
-        .map(|(package, label)| {
-            format!(
-                "    {{\"label\": {}, \"package\": {}, \"present\": {}}}",
-                quote(label),
-                quote(package),
-                pkg_config_exists(package),
-            )
-        })
-        .collect();
-    out.push_str(&format!("  \"engine\": [\n{}\n  ],\n", engine.join(",\n")));
+    // The same probe the text report reads, so the two reports cannot disagree about
+    // whether a webview build will work.
+    out.push_str(&format!(
+        "  \"engine\": {},\n",
+        super::engine::Engine::probe().json()
+    ));
 
     out.push_str("  \"ready\": {\n");
     let rows: Vec<String> = READINESS
@@ -294,10 +253,7 @@ fn quote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ENGINE_PACKAGES, Flags, engine_section, pkg_config_exists, quote, render_json, render_text,
-        tool_status,
-    };
+    use super::{Flags, engine_section, render_json, render_text, tool_status};
     use lepton_orchestrator::testing::{Failure, Scratch};
     use lepton_orchestrator::{
         DisplayStatus, ToolProblem, ToolStatus, Toolchain, assert_contains, assert_eq, assert_ok,
@@ -502,45 +458,19 @@ mod tests {
     }
 
     #[test]
-    fn the_engine_section_names_a_package_that_is_genuinely_absent() -> Result<(), Failure> {
-        // A package no build reads, so its absence is a fact about this machine rather
-        // than about the report: the assertion is that a missing library is *named*
-        // with the thing to install, not merely counted.
-        assert!(!pkg_config_exists("lepton-nonexistent-package"));
-        Ok(())
-    }
-
-    #[test]
-    fn both_reports_agree_on_which_packages_are_present() -> Result<(), Failure> {
-        // The text and JSON reports read the same table, and this is what would catch a
-        // future edit that added a row to one and not the other.
-        for (package, label) in ENGINE_PACKAGES {
-            let probe = quote(package);
-            let expected = if pkg_config_exists(package) {
-                "true"
-            } else {
-                "false"
-            };
-
-            // The text report names what the package is for; the JSON report names the
-            // package, because a machine reading it needs the identifier to install.
-            let text = engine_section();
-            if !text.contains(label) {
-                return Err(Failure {
-                    claim: "the text report should name every library it probes".to_owned(),
-                    actual: text,
-                });
-            }
-
-            let json = render_json(&Toolchain::detect());
-            let wanted = format!("\"package\": {probe}, \"present\": {expected}");
-            if !json.contains(&wanted) {
-                return Err(Failure {
-                    claim: "the JSON report should carry the same verdict as the text one"
-                        .to_owned(),
-                    actual: json,
-                });
-            }
+    fn both_reports_agree_on_the_engine() -> Result<(), Failure> {
+        // Text and JSON read the same probe: the verdict in one is the verdict in the other.
+        let ready = super::super::engine::Engine::probe().ready();
+        let text = engine_section();
+        let says_ready = text.contains("webview builds here");
+        let json = render_json(&Toolchain::detect());
+        let wanted = format!("\"ready\": {ready}}}");
+        if says_ready != ready || !json.contains(&wanted) {
+            return Err(Failure {
+                claim: "the text and JSON reports should give the engine the same verdict"
+                    .to_owned(),
+                actual: format!("{text}\n{json}"),
+            });
         }
         Ok(())
     }

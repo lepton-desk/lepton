@@ -108,6 +108,10 @@ impl Flags {
                 binary,
             });
         }
+        // A webview build needs WPE WebKit; without it, say how to get it and offer to.
+        if !native {
+            super::engine::ensure()?;
+        }
 
         for step in &steps {
             run_streaming(step).map_err(CliError::from)?;
