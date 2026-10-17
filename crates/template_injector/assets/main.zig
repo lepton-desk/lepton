@@ -242,6 +242,8 @@ pub fn main() !void {{
         // Latest, not queued: the page snapshots the ring and never consumes, so a
         // queueing send would fill it in a minute and freeze the page on old numbers.
         _ = try window_channel.publishLatest(.sample, &sample);
+        // Wakes the page's held `/__lepton/region` read; without it the page sleeps.
+        view.bridge.published();
     }}
 
     // `lepton replay --page`: what the page asked against what was recorded.

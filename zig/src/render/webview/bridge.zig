@@ -35,6 +35,7 @@ const transport = @import("transport.zig");
 const respond = @import("respond.zig");
 const invoke = @import("invoke.zig");
 const events = @import("events.zig");
+const region = @import("region.zig");
 const record = @import("record.zig");
 const page_replay = @import("page_replay.zig");
 const wire = @import("../../ipc/wire.zig");
@@ -133,6 +134,8 @@ pub fn lastPath() ?[]const u8 {
 /// that produced it may well have returned by the time the page's request arrives.
 /// How many `invoke` requests may wait for a later answer at once — open file dialogs.
 pub const max_later = 8;
+/// How many pages may wait on `/__lepton/region` at once; one more evicts the oldest.
+pub const max_region_held = 4;
 
 const Later = struct {
     request: ?*anyopaque = null,
@@ -161,6 +164,11 @@ pub const Bridge = struct {
 
     /// The ring the page snapshots at `/__lepton/region`; empty until `exposeRegion`.
     region: []const u8 = &.{},
+    /// Region requests waiting for the ring to move past their `after`: one per page (a
+    /// `window.open` view is a second), and one a page abandoned until it is answered.
+    region_held: [max_region_held]?*anyopaque = @splat(null),
+    region_after: [max_region_held]u64 = @splat(0),
+    region_evict: usize = 0,
     /// Set when the page asked at `/__lepton/close`; the owner's loop reads it.
     close_requested: bool = false,
     /// One request frame, plus one byte to tell "exactly the limit" from "more".
@@ -202,6 +210,62 @@ pub const Bridge = struct {
         const origin_text = respond.originOf(url, &self.allowed_origin) orelse return false;
         self.allowed_origin_len = origin_text.len;
         return true;
+    }
+
+    /// The owner published into the ring: the pages waiting for it are answered now.
+    /// Called after `Channel.publishLatest`, so an idle page sleeps instead of re-reading.
+    pub fn published(self: *Bridge) void {
+        const newest = region.position(self.region);
+        for (&self.region_held, self.region_after) |*slot, after| {
+            const waiting = slot.* orelse continue;
+            if (newest == after) continue;
+            slot.* = null;
+            self.sendRegion(waiting, after);
+            e_unref(waiting);
+        }
+    }
+
+    /// `/__lepton/region?after=N`: the frames published since `N` (`region.zig`), now
+    /// when there are any, otherwise held until `published`. With every slot taken, the
+    /// oldest hold is answered empty — the page asks again — and released.
+    fn answerRegion(self: *Bridge, request: ?*anyopaque) void {
+        const uri = if (e_request_uri(request)) |raw| std.mem.span(raw) else "";
+        const after = events.afterOf(uri);
+        if (after == 0 or region.position(self.region) != after) {
+            self.sendRegion(request, after);
+            return;
+        }
+        const index = for (self.region_held, 0..) |slot, i| {
+            if (slot == null) break i;
+        } else evict: {
+            const i = self.region_evict;
+            self.region_evict = (i + 1) % max_region_held;
+            const stale = self.region_held[i].?;
+            _ = respond.bytes(stale, "", 0, null, "application/octet-stream", self.origin());
+            e_unref(stale);
+            break :evict i;
+        };
+        self.region_held[index] = e_ref(request);
+        self.region_after[index] = after;
+    }
+
+    fn sendRegion(self: *Bridge, request: ?*anyopaque, after: u64) void {
+        const len = region.deltaLen(self.region, after) orelse {
+            // No destroy: the bytes are the live mapping, owned by the channel.
+            if (respond.bytes(request, self.region.ptr, self.region.len, null, "application/octet-stream", self.origin())) {
+                self.counters.bytes_served += self.region.len;
+            } else self.counters.refused += 1;
+            return;
+        };
+        const raw = std.c.malloc(len) orelse {
+            respond.refuse(request, "no memory for the frames");
+            return;
+        };
+        const out: [*]u8 = @ptrCast(raw);
+        region.writeDelta(self.region, after, out[0..len]);
+        if (respond.bytes(request, out, len, std.c.free, "application/octet-stream", self.origin())) {
+            self.counters.bytes_served += len;
+        }
     }
 
     fn origin(self: *Bridge) [:0]const u8 {
@@ -578,12 +642,7 @@ pub const Bridge = struct {
         if (e_request_path(request)) |raw| {
             const path = std.mem.span(raw);
             if (std.mem.eql(u8, path, transport.region_path) and self.region.len != 0) {
-                // No destroy: the bytes are the live mapping, owned by the channel.
-                if (!respond.bytes(request, self.region.ptr, self.region.len, null, "application/octet-stream", self.origin())) {
-                    self.counters.refused += 1;
-                    return;
-                }
-                self.counters.bytes_served += self.region.len;
+                self.answerRegion(request);
                 return;
             }
             if (std.mem.eql(u8, path, events.path)) {
@@ -671,6 +730,8 @@ test "every request path the bridge answers is compiled" {
     _ = &Bridge.answerFromRecording;
     _ = &Bridge.pageReplayPassed;
     _ = &Bridge.answerEvents;
+    _ = &Bridge.answerRegion;
+    _ = &Bridge.published;
     _ = &Bridge.emit;
     _ = &onRequest;
 }

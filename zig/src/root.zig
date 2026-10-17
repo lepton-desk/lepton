@@ -117,6 +117,7 @@ test {
     _ = @import("render/webview/invoke.zig");
     _ = @import("render/webview/registry.zig");
     _ = @import("render/webview/events.zig");
+    _ = @import("render/webview/region.zig");
     _ = @import("render/webview/declarations.zig");
     _ = @import("window/linux/chrome_test.zig");
     // `comptime` is load-bearing and not a stylistic choice. Without it this reads as

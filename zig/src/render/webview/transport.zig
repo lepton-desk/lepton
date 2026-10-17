@@ -2,10 +2,12 @@
 //!
 //! The frontend SDK (`lepton.ts`) reads the core's outbound ring through a
 //! `ChannelTransport`. A web page cannot map this process's shared memory, so the
-//! transport keeps one fixed `Uint8Array` the size of the ring and refreshes it from
-//! `/__lepton/region` on the document's own origin, which the bridge answers straight
-//! from the mapping. One copy reaches the page — WebKit's, into the web process — and
-//! none is made on the core's side.
+//! transport keeps one fixed `Uint8Array` the size of the ring and keeps it current from
+//! `/__lepton/region?after=N`: the bridge holds that request until the core publishes
+//! past `N` and answers with only the new frames (`region.zig`), which the page writes
+//! into its copy. The first answer, and one after the page fell a lap behind, is the
+//! mapping itself. A page with nothing new to read sleeps: the 250 ms re-read this
+//! replaced kept an idle page at 2.9% of a core with a 6–32 MiB heap sawtooth.
 //!
 //! The ring's layout is not written into JavaScript by hand. Every offset the page reads
 //! is taken here, at compile time, from the `extern struct`s the core itself writes
@@ -31,9 +33,9 @@ pub const close_path = "/__lepton/close";
 /// which the bridge allows for that one origin (`Bridge.allowOriginOf`).
 pub const core_origin = "lepton://localhost";
 
-/// How often the page refreshes its snapshot, in milliseconds. Four times a second:
-/// the template redraws once a second, and a quarter-second lag is not visible there.
-pub const refresh_ms: u32 = 250;
+/// How long the page waits before asking again after a failed read, in milliseconds:
+/// the core is gone or going, and asking at once would spin.
+pub const retry_ms: u32 = 1000;
 
 pub const layout_object = std.fmt.comptimePrint(
     "{{headerBytes:{d},cellCountOffset:{d},cellStrideOffset:{d},enqueueOffset:{d}," ++
@@ -169,24 +171,49 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry) 
         \\  let newest = 0n;
         \\  let connected = false;
         \\  let closed = false;
-        \\  const refresh = async () => {{
-        \\    if (closed) return;
-        \\    try {{
-        \\      const answer = await fetch("{s}", {{ cache: "no-store" }});
-        \\      if (!answer.ok) throw new Error(String(answer.status));
-        \\      const got = new Uint8Array(await answer.arrayBuffer());
-        \\      if (got.byteLength !== bytes.byteLength) throw new Error("region size changed");
+        \\  const apply = (got) => {{
+        \\    if (got.byteLength === bytes.byteLength) {{
         \\      bytes.set(got);
-        \\      connected = true;
-        \\      const position = view.getBigUint64(layout.enqueueOffset, true);
-        \\      if (position !== newest) {{
-        \\        newest = position;
-        \\        for (const listener of listeners) listener(position);
-        \\      }}
-        \\    }} catch {{
-        \\      connected = false;
+        \\      return;
         \\    }}
-        \\    setTimeout(refresh, {d});
+        \\    if (got.byteLength < layout.headerBytes) throw new Error("short answer");
+        \\    bytes.set(got.subarray(0, layout.headerBytes));
+        \\    const count = BigInt(view.getUint32(layout.cellCountOffset, true));
+        \\    const stride = view.getUint32(layout.cellStrideOffset, true);
+        \\    const cells = new DataView(got.buffer, got.byteOffset, got.byteLength);
+        \\    let used = layout.headerBytes;
+        \\    for (let at = newest; used < got.byteLength; at += 1n) {{
+        \\      const len = layout.cellHeaderBytes + cells.getUint32(used + layout.cellLenOffset, true);
+        \\      bytes.set(got.subarray(used, used + len), layout.headerBytes + Math.imul(Number(at % count), stride));
+        \\      used += len;
+        \\    }}
+        \\  }};
+        \\  const refresh = async () => {{
+        \\    while (!closed) {{
+        \\      const controller = new AbortController();
+        \\      const timer = setTimeout(() => controller.abort(), layout.events.holdMs);
+        \\      try {{
+        \\        const answer = await fetch(`{s}?after=${{newest}}`, {{ cache: "no-store", signal: controller.signal }});
+        \\        if (!answer.ok) throw new Error(String(answer.status));
+        \\        const got = new Uint8Array(await answer.arrayBuffer());
+        \\        // Empty: another of this core's pages took the slot this one waited in.
+        \\        if (got.byteLength === 0) continue;
+        \\        apply(got);
+        \\        connected = true;
+        \\        const position = view.getBigUint64(layout.enqueueOffset, true);
+        \\        if (position !== newest) {{
+        \\          newest = position;
+        \\          for (const listener of listeners) listener(position);
+        \\        }}
+        \\      }} catch {{
+        \\        if (!controller.signal.aborted) {{
+        \\          connected = false;
+        \\          await new Promise((wake) => setTimeout(wake, {d}));
+        \\        }}
+        \\      }} finally {{
+        \\        clearTimeout(timer);
+        \\      }}
+        \\    }}
         \\  }};
         \\  Object.defineProperty(globalThis, "__lepton", {{
         \\    value: Object.freeze({{
@@ -208,7 +235,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry) 
         \\  refresh();
         \\}})();
         \\
-    , .{ layout_object, region_len, core_origin ++ region_path, refresh_ms, app, core_origin ++ close_path });
+    , .{ layout_object, region_len, core_origin ++ region_path, retry_ms, app, core_origin ++ close_path });
 }
 
 // --- Injection ------------------------------------------------------------------
@@ -329,6 +356,6 @@ test "the page fetches the core's origin by absolute address, never a wildcard" 
     // rather than asking Vite for `/__lepton/region` and getting a 404.
     var buffer: [8192]u8 = undefined;
     const text = try scriptFor(&buffer, 1);
-    try std.testing.expect(std.mem.indexOf(u8, text, "fetch(\"lepton://localhost/__lepton/region\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "fetch(`lepton://localhost/__lepton/region?after=") != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "*") == null);
 }
