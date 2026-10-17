@@ -174,8 +174,8 @@ pub fn package_manifest(plugins: &[&str]) -> String {
 
 /// The Zig entry point, with its placeholders filled from a project's manifest.
 ///
-/// The asset carries `{product}`, `{channel}`, `{title}`, `{identifier}`,
-/// `{width}` and `{height}` as literal placeholders rather than a template engine's
+/// The asset carries `{product}`, `{channel}`, `{title}` and `{identifier}` as
+/// literal placeholders rather than a template engine's
 /// syntax: a reader opening `assets/main.zig` sees exactly what will be replaced
 /// and where, which a mini-language would hide.
 const ZIG_ENTRY_TEMPLATE: &str = include_str!("../assets/main.zig");
@@ -200,21 +200,14 @@ pub fn zig_entry(
     channel_name: &str,
     window_title: &str,
     identifier: &str,
-    width: u32,
-    height: u32,
 ) -> String {
-    // The two numeric values need owned storage because the table below borrows them;
-    // the strings are borrowed from the caller directly.
-    let width_text = width.to_string();
-    let height_text = height.to_string();
-
-    let values: [(&str, &str); 6] = [
+    // The window size is not among them: it reaches the core as a build option
+    // (`-Dwindow-width`), so `lepton.config.json` stays the source after `lepton new`.
+    let values: [(&str, &str); 4] = [
         ("{product}", product_name),
         ("{channel}", channel_name),
         ("{title}", window_title),
         ("{identifier}", identifier),
-        ("{width}", width_text.as_str()),
-        ("{height}", height_text.as_str()),
     ];
 
     let mut out = String::with_capacity(ZIG_ENTRY_TEMPLATE.len() + 256);
@@ -410,8 +403,6 @@ mod tests {
             "/lepton-ledger",
             "Ledger",
             "com.example.ledger",
-            1200,
-            800,
         )
     }
 
@@ -453,18 +444,18 @@ mod tests {
             assert_absent!(&rendered, placeholder);
         }
         assert_contains!(&rendered, "/lepton-ledger");
-        assert_contains!(&rendered, "1200");
-        assert_contains!(&rendered, "800");
+        // The size comes from the build, never from numbers written here once.
+        assert_contains!(&rendered, "options.window_width");
         balanced(&rendered, '{', '}')
     }
 
     #[test]
     fn a_value_containing_a_brace_does_not_break_the_substitution() -> Result<(), Failure> {
-        // The failure this guards is a silent one. A title of `{width}` puts a brace
+        // The failure this guards is a silent one. A title of `{identifier}` puts a brace
         // into the output at exactly the place a `replace`-based substitution would
-        // rescan, and the numeric width that follows would then be filled with the
-        // title's text instead of a number.
-        let rendered = zig_entry("Ledger", "{channel}", "{width}", "com.example", 640, 480);
+        // rescan, and the identifier that follows would then be filled with the title's
+        // text instead of the real one.
+        let rendered = zig_entry("Ledger", "{channel}", "{identifier}", "com.example");
 
         // The value survives verbatim, which is correct: it is the developer's text.
         // Asserted through the channel name rather than the window title, because the
@@ -473,8 +464,7 @@ mod tests {
         assert_contains!(&rendered, "\"{channel}\"");
         // And the placeholder after it was filled from the real argument, which is the
         // property that a rescan would have destroyed.
-        assert_contains!(&rendered, ".width = 640");
-        assert_contains!(&rendered, ".height = 480");
+        assert_contains!(&rendered, "\"com.example\"");
         balanced(&rendered, '{', '}')
     }
 
@@ -534,7 +524,7 @@ mod tests {
 
     #[test]
     fn a_braces_only_title_is_substituted_verbatim() -> Result<(), Failure> {
-        let rendered = zig_entry("Ledger", "/ch", "{}", "com.example", 1, 1);
+        let rendered = zig_entry("Ledger", "/ch", "{}", "com.example");
 
         // The braces in the value must survive: a template engine that rescans its
         // output would eat them.

@@ -217,16 +217,23 @@ fn the_zig_entry_point_carries_the_manifests_own_values() -> Result<(), Failure>
     // project whose configuration file lies.
     let mut manifest = Manifest::new("Ledger");
     manifest.render_path = RenderPath::Native;
-    manifest.window_width = 1024;
-    manifest.window_height = 640;
+    manifest.window_width = 1031;
+    manifest.window_height = 677;
 
     let planned = planned_for(&manifest)?;
     let zig = contents_of(&planned, "src-lepton/main.zig")?;
 
     assert_contains!(zig, manifest.channel_name.as_str());
-    assert_contains!(zig, "1024");
-    assert_contains!(zig, "640");
     assert_contains!(zig, "Ledger");
+    // The size is not written into `main.zig`: once it was, and editing the
+    // configuration afterwards changed nothing. It comes from the build options the
+    // CLI fills from `lepton.config.json` on every build.
+    assert_absent!(zig, "1031");
+    assert_absent!(zig, "677");
+    assert_contains!(zig, "options.window_width");
+    let build = contents_of(&planned, "src-lepton/build.zig")?;
+    assert_contains!(build, "\"window-width\"");
+    assert_contains!(build, "\"window_height\"");
 
     // Braces must balance, or the file a developer opens first is a syntax error.
     balanced(zig, '{', '}')

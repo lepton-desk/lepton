@@ -104,6 +104,30 @@ fn grant_web_permissions(steps: &mut [Step], root: &Path, config: &str) -> Resul
     Ok(())
 }
 
+/// Hands `lepton.config.json`'s `window.width`/`window.height` to every core build as
+/// `-Dwindow-width`/`-Dwindow-height`.
+///
+/// `lepton new` once wrote the size into `main.zig` and nothing read the configuration
+/// again, so a project changed to 800×600 still opened at 1200×800 (measured). A project
+/// from before this has that `main.zig` and a build that rejects the option: it keeps
+/// building at its written size, and is told so rather than left to wonder.
+pub fn size_window(steps: &mut [Step], root: &Path, width: u32, height: u32) {
+    let build = std::fs::read_to_string(root.join(super::build::CORE_DIR).join("build.zig"))
+        .unwrap_or_default();
+    if !build.contains("\"window-width\"") {
+        eprintln!(
+            "lepton: src-lepton/build.zig predates the configured window size; the window keeps the size written in src-lepton/main.zig (recreate the project with a current `lepton new` to use lepton.config.json's)"
+        );
+        return;
+    }
+    for step in steps.iter_mut() {
+        if is_core_build(step) {
+            step.args.push(format!("-Dwindow-width={width}"));
+            step.args.push(format!("-Dwindow-height={height}"));
+        }
+    }
+}
+
 pub(super) fn is_core_build(step: &Step) -> bool {
     step.args.first().is_some_and(|arg| arg == "build")
         && step
@@ -285,7 +309,7 @@ mod tests {
 
 #[cfg(test)]
 mod naming_tests {
-    use super::{binary_name, grant_permissions, name_core};
+    use super::{binary_name, grant_permissions, name_core, size_window};
     use crate::commands::build::CORE_DIR;
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{Step, assert_eq, ensure};
@@ -451,6 +475,37 @@ mod naming_tests {
         ensure!(
             !steps[0].args.iter().any(|arg| arg.starts_with("-Dweb-")),
             "bundler got web permissions: {:?}",
+            steps[0].args
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_configured_window_size_reaches_a_current_core_only() -> Result<(), Failure> {
+        let scratch = lepton_orchestrator::testing::Scratch::new("window-size")?;
+        scratch.write("src-lepton/build.zig", "const x = \"permissions\";\n")?;
+        let mut steps = bundle_then_core(scratch.path());
+        size_window(&mut steps, scratch.path(), 800, 600);
+        ensure!(
+            !steps[1].args.iter().any(|arg| arg.starts_with("-Dwindow-")),
+            "an older core takes no such option: {:?}",
+            steps[1].args
+        );
+
+        // The build file `lepton new` writes today, not a stand-in: a template that
+        // stopped declaring the option would leave the configuration unread again.
+        scratch.write("src-lepton/build.zig", lepton_template_injector::ZIG_BUILD)?;
+        let mut steps = bundle_then_core(scratch.path());
+        size_window(&mut steps, scratch.path(), 800, 600);
+        ensure!(
+            steps[1].args.iter().any(|arg| arg == "-Dwindow-width=800")
+                && steps[1].args.iter().any(|arg| arg == "-Dwindow-height=600"),
+            "core args: {:?}",
+            steps[1].args
+        );
+        ensure!(
+            !steps[0].args.iter().any(|arg| arg.starts_with("-Dwindow-")),
+            "bundler got the window size: {:?}",
             steps[0].args
         );
         Ok(())

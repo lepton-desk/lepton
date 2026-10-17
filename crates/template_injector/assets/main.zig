@@ -143,7 +143,8 @@ pub fn main() !void {{
     }};
     defer view.close();
 
-    const size: core.window.Size = .{{ .width = {width}, .height = {height} }};
+    // `lepton.config.json`'s `window`, passed to the build by the CLI (`-Dwindow-width`).
+    const size = configuredSize();
     view.resized(@intCast(size.width), @intCast(size.height));
     view.map();
     // The window's name until the page sets `document.title`, and whenever it clears it.
@@ -319,6 +320,13 @@ fn frontendAddress(allocator: std.mem.Allocator, io: std.Io) ![:0]const u8 {{
     );
 }}
 
+/// The window's first size, from the build rather than this file: `lepton new` once
+/// wrote the numbers here, so a later edit to `lepton.config.json` changed nothing.
+fn configuredSize() core.window.Size {{
+    const options = @import("build_options");
+    return .{{ .width = options.window_width, .height = options.window_height }};
+}}
+
 /// The native program: open a window, paint into it, present.
 ///
 /// This is the whole of what `--target native` means, and it is a real frame presented
@@ -329,7 +337,7 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
     const request: core.window.Request = .{{
         .title = "{product}",
         .app_id = "{identifier}",
-        .size = .{{ .width = {width}, .height = {height} }},
+        .size = configuredSize(),
     }};
 
     var opened = try openWindow(allocator, request);

@@ -66,6 +66,11 @@ pub fn build(b: *std.Build) !void {
     // `webPermissions`: what the page may ask the engine for (camera, notifications, …),
     // `kind=allow|deny|ask` comma-separated. Absent kinds are denied.
     const web_permissions = b.option([]const u8, "web-permissions", "Engine permissions, kind=policy comma-separated") orelse "";
+    // `lepton.config.json`'s `window.width`/`window.height`, handed over by the CLI on
+    // every build so the configuration stays the source; a bare `zig build` gets the
+    // configuration's own defaults.
+    const window_width = b.option(u32, "window-width", "Initial window width") orelse 1200;
+    const window_height = b.option(u32, "window-height", "Initial window height") orelse 800;
 
     // The vendored location, named once. `configureCore` needs it because
     // `std.Build` resolves paths against the root of the build that called it, and
@@ -88,6 +93,8 @@ pub fn build(b: *std.Build) !void {
     options.addOption(u16, "dev_port", dev_port);
     options.addOption([]const u8, "permissions", permissions);
     options.addOption([]const u8, "web_permissions", web_permissions);
+    options.addOption(u32, "window_width", window_width);
+    options.addOption(u32, "window_height", window_height);
 
     const root = b.createModule(.{
         .root_source_file = b.path("main.zig"),

@@ -157,8 +157,6 @@ pub fn plan(manifest: &Manifest) -> Result<Plan, InjectionError> {
                 &manifest.channel_name,
                 &manifest.window_title,
                 &manifest.identifier,
-                manifest.window_width,
-                manifest.window_height,
             ),
             mode: Mode::Write,
         },
