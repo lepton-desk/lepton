@@ -124,6 +124,24 @@ pub fn presentPixels(self: *WaylandWindow, pixels: []const u8, frame: Size, form
     try self.present(frame);
 }
 
+/// Shows a draw command list, drawn by the GPU (`render/gles3.zig`). `GpuRefused` when
+/// this window has no ES 3 presenter: the caller paints with the CPU instead.
+pub fn presentScene(
+    self: *WaylandWindow,
+    list: *const presenter.Scene,
+    glyphs: *presenter.Atlas,
+    clear: [4]f32,
+    frame: Size,
+    before_swap: ?[]u8,
+) Error!void {
+    if (!self.gpu_settled) {
+        self.gpu = presenter.open(@ptrCast(self.display), @ptrCast(self.surface), frame.width, frame.height);
+        self.gpu_settled = true;
+    }
+    const gpu = if (self.gpu) |*gpu| gpu else return error.GpuRefused;
+    gpu.presentScene(list, glyphs, clear, frame.width, frame.height, before_swap) catch return error.GpuRefused;
+}
+
 /// Unmaps the framebuffer and closes its descriptor.
 pub fn releaseBuffer(self: *WaylandWindow) void {
     if (self.buffer_ptr) |ptr| posix.munmap(@as([*]align(4096) const u8, @ptrCast(@alignCast(ptr)))[0..self.buffer_len]);

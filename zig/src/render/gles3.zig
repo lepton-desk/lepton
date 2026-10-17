@@ -13,6 +13,8 @@
 
 const std = @import("std");
 pub const scene = @import("scene.zig");
+pub const atlas = @import("atlas.zig");
+pub const glyph_text = @import("glyph_text.zig");
 
 const c = @cImport({
     @cInclude("EGL/egl.h");
@@ -32,6 +34,7 @@ const vertex_source: [:0]const u8 =
     \\layout(location = 3) in vec4 a_params;
     \\uniform vec2 u_size;
     \\out vec2 v_local;
+    \\out vec2 v_uv;
     \\flat out vec2 v_half;
     \\flat out vec4 v_fill;
     \\flat out vec4 v_border_colour;
@@ -39,11 +42,13 @@ const vertex_source: [:0]const u8 =
     \\void main() {
     \\    // A shadow reaches `blur` past its edge; every shape gets a pixel for its edge's
     \\    // antialiasing.
-    \\    float pad = a_params.z + 1.0;
+    \\    bool glyph = a_params.w > 1.5;
+    \\    float pad = glyph ? 0.0 : a_params.z + 1.0;
     \\    vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
     \\    vec2 origin = a_rect.xy - pad;
     \\    vec2 extent = a_rect.zw + 2.0 * pad;
     \\    vec2 pixel = origin + corner * extent;
+    \\    v_uv = mix(a_border_colour.xy, a_border_colour.zw, corner);
     \\    v_half = a_rect.zw * 0.5;
     \\    v_local = pixel - (a_rect.xy + v_half);
     \\    v_fill = a_fill;
@@ -57,10 +62,12 @@ const fragment_source: [:0]const u8 =
     \\#version 300 es
     \\precision highp float;
     \\in vec2 v_local;
+    \\in vec2 v_uv;
     \\flat in vec2 v_half;
     \\flat in vec4 v_fill;
     \\flat in vec4 v_border_colour;
     \\flat in vec4 v_params;
+    \\uniform sampler2D u_atlas;
     \\out vec4 o_colour;
     \\float roundedBox(vec2 p, vec2 half_size, float radius) {
     \\    vec2 q = abs(p) - half_size + radius;
@@ -68,6 +75,10 @@ const fragment_source: [:0]const u8 =
     \\}
     \\vec4 premultiplied(vec4 c) { return vec4(c.rgb * c.a, c.a); }
     \\void main() {
+    \\    if (v_params.w > 1.5) {
+    \\        o_colour = premultiplied(v_fill) * texture(u_atlas, v_uv).r;
+    \\        return;
+    \\    }
     \\    float radius = v_params.x;
     \\    float border = v_params.y;
     \\    float blur = v_params.z;
@@ -99,12 +110,17 @@ pub const Renderer = struct {
     /// Bytes the instance buffer holds; it grows, never shrinks.
     capacity: usize = 0,
     size_location: c.GLint,
+    /// The glyph atlas on the GPU (`GL_R8`, `atlas.side` square).
+    atlas_texture: c.GLuint,
+    /// Atlas bytes sent by `syncAtlas`, all frames: only glyphs seen for the first time.
+    atlas_uploaded: u64 = 0,
     width: u32,
     height: u32,
     /// Bytes handed to the driver by `draw`, all frames: the figure this path exists for.
     uploaded: u64 = 0,
 
     pub fn deinit(self: *Renderer) void {
+        c.glDeleteTextures(1, &self.atlas_texture);
         c.glDeleteBuffers(1, &self.instances);
         c.glDeleteVertexArrays(1, &self.vertex_array);
         c.glDeleteProgram(self.program);
@@ -135,11 +151,25 @@ pub const Renderer = struct {
 
         c.glUseProgram(self.program);
         c.glUniform2f(self.size_location, @floatFromInt(self.width), @floatFromInt(self.height));
+        c.glActiveTexture(c.GL_TEXTURE0);
+        c.glBindTexture(c.GL_TEXTURE_2D, self.atlas_texture);
         c.glEnable(c.GL_BLEND);
         c.glBlendFunc(c.GL_ONE, c.GL_ONE_MINUS_SRC_ALPHA);
         c.glBindVertexArray(self.vertex_array);
         c.glDrawArraysInstanced(c.GL_TRIANGLE_STRIP, 0, 4, @intCast(list.instances.items.len));
         c.glBindVertexArray(0);
+    }
+
+    /// Sends the part of `glyphs` that changed since the last call: one sub-image upload.
+    pub fn syncAtlas(self: *Renderer, glyphs: *atlas.Atlas) void {
+        const region = glyphs.takeDirty() orelse return;
+        c.glBindTexture(c.GL_TEXTURE_2D, self.atlas_texture);
+        c.glPixelStorei(c.GL_UNPACK_ALIGNMENT, 1);
+        c.glPixelStorei(c.GL_UNPACK_ROW_LENGTH, atlas.side);
+        const first = glyphs.pixels[region.y * atlas.side + region.x ..];
+        c.glTexSubImage2D(c.GL_TEXTURE_2D, 0, @intCast(region.x), @intCast(region.y), @intCast(region.width), @intCast(region.height), c.GL_RED, c.GL_UNSIGNED_BYTE, first.ptr);
+        c.glPixelStorei(c.GL_UNPACK_ROW_LENGTH, 0);
+        self.atlas_uploaded += @as(u64, region.width) * region.height;
     }
 
     /// Waits for the GPU: for timing, and before `read`.
@@ -236,6 +266,18 @@ fn setup(display: c.EGLDisplay, surface: c.EGLSurface, context: c.EGLContext, ow
     }
     c.glBindVertexArray(0);
 
+    var atlas_texture: c.GLuint = 0;
+    c.glGenTextures(1, &atlas_texture);
+    if (atlas_texture == 0) return error.NoBuffer;
+    c.glBindTexture(c.GL_TEXTURE_2D, atlas_texture);
+    c.glTexImage2D(c.GL_TEXTURE_2D, 0, c.GL_R8, atlas.side, atlas.side, 0, c.GL_RED, c.GL_UNSIGNED_BYTE, null);
+    c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MIN_FILTER, c.GL_LINEAR);
+    c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_MAG_FILTER, c.GL_LINEAR);
+    c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_S, c.GL_CLAMP_TO_EDGE);
+    c.glTexParameteri(c.GL_TEXTURE_2D, c.GL_TEXTURE_WRAP_T, c.GL_CLAMP_TO_EDGE);
+    c.glUseProgram(program);
+    c.glUniform1i(c.glGetUniformLocation(program, "u_atlas"), 0);
+
     return .{
         .display = display,
         .surface = surface,
@@ -245,9 +287,16 @@ fn setup(display: c.EGLDisplay, surface: c.EGLSurface, context: c.EGLContext, ow
         .vertex_array = vertex_array,
         .instances = instances,
         .size_location = c.glGetUniformLocation(program, "u_size"),
+        .atlas_texture = atlas_texture,
         .width = width,
         .height = height,
     };
+}
+
+/// A renderer on a window's EGL display, surface and ES 3 context, borrowed from the
+/// presenter (`gpu/presenter.zig`), which keeps them. The context must be current.
+pub fn attach(display: c.EGLDisplay, surface: c.EGLSurface, context: c.EGLContext, width: u32, height: u32) Error!Renderer {
+    return setup(display, surface, context, false, width, height);
 }
 
 /// An off-screen ES 3 renderer of `width`×`height`.
@@ -363,4 +412,76 @@ test "later shapes draw over earlier ones, with alpha" {
     const frame = try render(&list, scene.rgba(0x000000ff));
     // Half red over blue: 128 red, 127 blue.
     try std.testing.expect(near(pixel(&frame, 30, 30), .{ 128, 0, 127, 255 }, 2));
+}
+
+test "a glyph is the atlas's coverage, tinted" {
+    var glyphs = try atlas.Atlas.init(std.testing.allocator);
+    defer glyphs.deinit(std.testing.allocator);
+    // A 4×4 coverage block: left half full, right half none.
+    const bitmap = [_]u8{ 255, 255, 0, 0 } ** 4;
+    const slot = (try glyphs.put(std.testing.allocator, .{ .font = 0, .glyph = 1, .size = 4 }, 4, 4, 4, &bitmap, 0, 4)).?;
+    var list: scene.List = .{};
+    defer list.deinit(std.testing.allocator);
+    // Drawn 4× larger: 16×16, so the halves are 8 pixels wide.
+    try list.glyph(std.testing.allocator, .{ .x = 40, .y = 20, .width = 16, .height = 16 }, slot.uv(), scene.rgba(0xff0000ff));
+    var renderer = try open(test_width, test_height);
+    defer renderer.deinit();
+    renderer.syncAtlas(&glyphs);
+    try std.testing.expectEqual(@as(u64, 16), renderer.atlas_uploaded);
+    renderer.draw(&list, scene.rgba(0x000000ff));
+    renderer.finish();
+    var frame: [test_width * test_height * 4]u8 = undefined;
+    renderer.read(&frame);
+    try std.testing.expect(near(pixel(&frame, 42, 28), .{ 255, 0, 0, 255 }, 2));
+    try std.testing.expect(near(pixel(&frame, 53, 28), .{ 0, 0, 0, 255 }, 2));
+    // Nothing more to send until a new glyph arrives.
+    renderer.syncAtlas(&glyphs);
+    try std.testing.expectEqual(@as(u64, 16), renderer.atlas_uploaded);
+}
+
+test "text is shaped, rasterised once and drawn where the pen put it" {
+    const text = @import("glyph_text.zig");
+    var path_buffer: [1024]u8 = undefined;
+    const path = try text.find("sans", &path_buffer);
+    var font = try text.Font.open(path, 20, 0);
+    defer font.deinit();
+    var glyphs = try atlas.Atlas.init(std.testing.allocator);
+    defer glyphs.deinit(std.testing.allocator);
+    var list: scene.List = .{};
+    defer list.deinit(std.testing.allocator);
+
+    const advance = try font.draw(std.testing.allocator, &glyphs, &list, "Lepton", 6, 40, scene.rgba(0x000000ff));
+    try std.testing.expectEqual(@as(usize, 6), list.instances.items.len);
+    try std.testing.expect(advance > 40 and advance < 90);
+
+    var renderer = try open(test_width, test_height);
+    defer renderer.deinit();
+    renderer.syncAtlas(&glyphs);
+    const first_upload = renderer.atlas_uploaded;
+    renderer.draw(&list, scene.rgba(0xffffffff));
+    renderer.finish();
+    var frame: [test_width * test_height * 4]u8 = undefined;
+    renderer.read(&frame);
+
+    // Ink between the pen's start and its end, above the baseline; none below the
+    // descender line or past the advance.
+    var ink: usize = 0;
+    var stray: usize = 0;
+    for (0..test_height) |y| {
+        for (0..test_width) |x| {
+            const dark = pixel(&frame, x, y)[0] < 128;
+            const inside = x >= 6 and x <= 6 + @as(usize, @intFromFloat(advance)) and y >= 40 - 20 and y <= 40 + 6;
+            if (dark and inside) ink += 1;
+            if (dark and !inside) stray += 1;
+        }
+    }
+    try std.testing.expect(ink > 80);
+    try std.testing.expectEqual(@as(usize, 0), stray);
+
+    // The same text again: every glyph is in the atlas, nothing more to send.
+    list.clear();
+    _ = try font.draw(std.testing.allocator, &glyphs, &list, "Lepton", 6, 40, scene.rgba(0x000000ff));
+    renderer.syncAtlas(&glyphs);
+    try std.testing.expect(first_upload > 0);
+    try std.testing.expectEqual(first_upload, renderer.atlas_uploaded);
 }

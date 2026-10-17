@@ -215,6 +215,11 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
         core.linkSystemLibrary("egl", .{});
         core.linkSystemLibrary("GLESv2", .{});
         core.linkSystemLibrary("wayland-egl", .{});
+        // Text for the draw command list (`render/glyph_text.zig`), when installed: only
+        // what draws text on the GPU needs it, so an application without HarfBuzz still builds.
+        for ([_][]const u8{ "freetype2", "harfbuzz", "fontconfig" }) |library| {
+            if (hasPkgConfig(b, library)) core.linkSystemLibrary(library, .{});
+        }
     }
 
     if (have_wpe) {
@@ -394,7 +399,7 @@ pub fn build(b: *std.Build) void {
         const gpu_module = b.createModule(.{
             // The presenter, not the renderer: it imports the renderer, so both files'
             // tests run, and the presenter's choice of path is tested where it is made.
-            .root_source_file = b.path("src/render/gpu/presenter.zig"),
+            .root_source_file = b.path("src/render/gpu_tests.zig"),
             .target = target,
             .optimize = .Debug,
             .link_libc = true,
@@ -403,6 +408,10 @@ pub fn build(b: *std.Build) void {
         gpu_module.linkSystemLibrary("GLESv2", .{});
         gpu_module.linkSystemLibrary("wayland-egl", .{});
         gpu_module.linkSystemLibrary("wayland-client", .{});
+        // The presenter reaches the scene renderer, whose text half needs these.
+        gpu_module.linkSystemLibrary("freetype2", .{});
+        gpu_module.linkSystemLibrary("harfbuzz", .{});
+        gpu_module.linkSystemLibrary("fontconfig", .{});
 
         const gpu_tests = b.addTest(.{ .root_module = gpu_module });
         const run_gpu_tests = b.addRunArtifact(gpu_tests);
@@ -421,6 +430,10 @@ pub fn build(b: *std.Build) void {
         });
         gles3_module.linkSystemLibrary("egl", .{});
         gles3_module.linkSystemLibrary("GLESv2", .{});
+        // Text: HarfBuzz shapes, FreeType rasterises, fontconfig finds the file.
+        gles3_module.linkSystemLibrary("freetype2", .{});
+        gles3_module.linkSystemLibrary("harfbuzz", .{});
+        gles3_module.linkSystemLibrary("fontconfig", .{});
         const gles3_tests = b.addTest(.{ .root_module = gles3_module });
         gpu_test_step.dependOn(&b.addRunArtifact(gles3_tests).step);
 
@@ -653,6 +666,23 @@ pub fn build(b: *std.Build) void {
             "Measure whether this framework's own window can carry a GPU surface",
         );
         gpu_check_step.dependOn(&run_gpu_check.step);
+
+        const scene_window_check = b.addExecutable(.{
+            .name = "lepton-scene-window-check",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/tools/scene_window_check.zig"),
+                .target = target,
+                .optimize = .ReleaseSafe,
+                .link_libc = true,
+                .imports = &.{.{ .name = "lepton_core", .module = core }},
+            }),
+        });
+        const scene_window_step = b.step(
+            "scene-window-check",
+            "Present the draw command list in a real window for 3 s and read the surface back",
+        );
+        scene_window_step.dependOn(&b.addRunArtifact(scene_window_check).step);
+        if (configured.protocol_step) |generated| scene_window_check.step.dependOn(generated);
     }
 
     // The 0.2.0 GPU renderer's first measurement: does this machine's Vulkan meet the

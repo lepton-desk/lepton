@@ -11,6 +11,7 @@
 const std = @import("std");
 const gles3 = @import("gles3");
 const scene = gles3.scene;
+const glyph_text = gles3.glyph_text;
 const c = @cImport({
     @cInclude("GLES3/gl3.h");
 });
@@ -19,7 +20,13 @@ const width = 1200;
 const height = 800;
 const frames = 300;
 
-fn cards(list: *scene.List, allocator: std.mem.Allocator, count: usize, frame: usize) !void {
+/// Text on every card: `Card <n>` in 11 px sans, shaped and placed each frame.
+const Labels = struct {
+    font: *glyph_text.Font,
+    glyphs: *gles3.atlas.Atlas,
+};
+
+fn cards(list: *scene.List, allocator: std.mem.Allocator, count: usize, frame: usize, labels: ?Labels) !void {
     list.clear();
     try list.rect(allocator, .{ .x = 0, .y = 0, .width = width, .height = 48 }, .{ .fill = scene.rgba(0x2b2d42ff) });
     const columns = 40;
@@ -44,6 +51,11 @@ fn cards(list: *scene.List, allocator: std.mem.Allocator, count: usize, frame: u
             .border = 1,
             .border_colour = scene.rgba(0xd0d4dcff),
         });
+        if (labels) |with| {
+            var name: [16]u8 = undefined;
+            const label = try std.fmt.bufPrint(&name, "{d}", .{index});
+            _ = try with.font.draw(allocator, with.glyphs, list, label, at.x + 3, at.y + 12, scene.rgba(0x2b2d42ff));
+        }
     }
 }
 
@@ -63,34 +75,56 @@ pub fn main() !void {
     defer list.deinit(allocator);
 
     const io = std.Io.Threaded.global_single_threaded.io();
-    var times: [frames]u64 = undefined;
-    for (0..frames) |frame| {
-        try cards(&list, allocator, count, frame);
-        const started = std.Io.Clock.Timestamp.now(io, .awake);
-        renderer.draw(&list, scene.rgba(0xedf2f4ff));
-        renderer.finish();
-        const elapsed = started.durationTo(std.Io.Clock.Timestamp.now(io, .awake)).raw.nanoseconds;
-        times[frame] = @intCast(@max(elapsed, 0));
-    }
-    // The first frames compile and warm caches; the figure is the steady state.
-    const steady = times[30..];
-    std.mem.sort(u64, steady, {}, std.sort.asc(u64));
-    var total: u64 = 0;
-    for (steady) |t| total += t;
-
-    const per_frame = list.bytes().len;
     const texture = width * height * 4;
     std.debug.print("driver       {s}\n", .{renderer.rendererName()});
-    std.debug.print("scene        {d} cards = {d} shapes, {d}x{d}\n", .{ count, list.instances.items.len, width, height });
-    std.debug.print("upload       {d} B a frame (a full-frame texture is {d} B: {d:.1}x less)\n", .{
-        per_frame, texture, @as(f64, @floatFromInt(texture)) / @as(f64, @floatFromInt(@max(per_frame, 1))),
-    });
-    std.debug.print("frame        median {d} us, p95 {d} us, mean {d} us over {d} frames (draw + glFinish)\n", .{
-        steady[steady.len / 2] / 1000,
-        steady[steady.len * 95 / 100] / 1000,
-        total / steady.len / 1000,
-        steady.len,
-    });
+
+    var path_buffer: [1024]u8 = undefined;
+    const font_path = try glyph_text.find("sans", &path_buffer);
+    var font = try glyph_text.Font.open(font_path, 11, 0);
+    defer font.deinit();
+    var glyphs = try gles3.atlas.Atlas.init(allocator);
+    defer glyphs.deinit(allocator);
+
+    for ([_]?Labels{ null, .{ .font = &font, .glyphs = &glyphs } }) |labels| {
+        var times: [frames]u64 = undefined;
+        var build_ns: u64 = 0;
+        var first_atlas: u64 = 0;
+        for (0..frames) |frame| {
+            const built_at = std.Io.Clock.Timestamp.now(io, .awake);
+            try cards(&list, allocator, count, frame, labels);
+            build_ns += @intCast(@max(built_at.durationTo(std.Io.Clock.Timestamp.now(io, .awake)).raw.nanoseconds, 0));
+            const started = std.Io.Clock.Timestamp.now(io, .awake);
+            renderer.syncAtlas(&glyphs);
+            if (frame == 0) first_atlas = renderer.atlas_uploaded;
+            renderer.draw(&list, scene.rgba(0xedf2f4ff));
+            renderer.finish();
+            const elapsed = started.durationTo(std.Io.Clock.Timestamp.now(io, .awake)).raw.nanoseconds;
+            times[frame] = @intCast(@max(elapsed, 0));
+        }
+        // The first frames compile and warm caches; the figure is the steady state.
+        const steady = times[30..];
+        std.mem.sort(u64, steady, {}, std.sort.asc(u64));
+        var total: u64 = 0;
+        for (steady) |t| total += t;
+        const per_frame = list.bytes().len;
+        std.debug.print("scene        {d} cards{s} = {d} instances, {d}x{d}\n", .{
+            count, if (labels == null) "" else " with labels", list.instances.items.len, width, height,
+        });
+        std.debug.print("upload       {d} B a frame (a full-frame texture is {d} B: {d:.1}x less)\n", .{
+            per_frame, texture, @as(f64, @floatFromInt(texture)) / @as(f64, @floatFromInt(@max(per_frame, 1))),
+        });
+        if (labels != null) {
+            std.debug.print("atlas        {d} B on the first frame, {d} B in the {d} after\n", .{
+                first_atlas, renderer.atlas_uploaded - first_atlas, frames - 1,
+            });
+        }
+        std.debug.print("frame        median {d} us, p95 {d} us, mean {d} us (GPU: draw + glFinish); building the list {d} us a frame (CPU)\n", .{
+            steady[steady.len / 2] / 1000,
+            steady[steady.len * 95 / 100] / 1000,
+            total / steady.len / 1000,
+            build_ns / frames / 1000,
+        });
+    }
 
     // Today's path, at the least: the whole frame uploaded as a texture, every frame.
     {

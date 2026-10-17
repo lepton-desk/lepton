@@ -485,6 +485,12 @@ pub fn wait(self: *WaylandWindow, timeout_ms: i32) Error!void {
         return wayland_present.presentPixels(self, pixels, frame, format);
     }
 
+    /// Shows a draw command list drawn by the GPU; `GpuRefused` without an ES 3 presenter.
+    /// `before_swap` receives the finished frame (RGBA, top row first) when given.
+    pub fn presentScene(self: *WaylandWindow, list: *const presenter.Scene, glyphs: *presenter.Atlas, clear: [4]f32, frame: Size, before_swap: ?[]u8) Error!void {
+        return wayland_present.presentScene(self, list, glyphs, clear, frame, before_swap);
+    }
+
     /// Unmaps the framebuffer and closes its descriptor.
     pub fn releaseBuffer(self: *WaylandWindow) void {
         wayland_present.releaseBuffer(self);

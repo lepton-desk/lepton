@@ -22,6 +22,9 @@ pub const Kind = enum(u32) {
     /// A soft shadow of a rounded rectangle: opaque inside, fading over `blur` pixels
     /// either side of the edge.
     shadow = 1,
+    /// A glyph from the atlas (`atlas.zig`): `fill` tinted by the atlas coverage at the
+    /// rectangle `border_colour` holds as u0, v0, u1, v1.
+    glyph = 2,
 };
 
 pub const Colour = [4]f32;
@@ -41,6 +44,7 @@ pub const Instance = extern struct {
     /// x, y, width, height.
     rect: [4]f32,
     fill: Colour,
+    /// For a glyph, the atlas rectangle u0, v0, u1, v1 instead.
     border_colour: Colour,
     /// radius, border width, blur, kind.
     params: [4]f32,
@@ -99,6 +103,16 @@ pub const List = struct {
             .fill = colour,
             .border_colour = .{ 0, 0, 0, 0 },
             .params = .{ @min(@max(radius, 0), @min(at.width, at.height) / 2), 0, @max(blur, 0), @floatFromInt(@intFromEnum(Kind.shadow)) },
+        });
+    }
+
+    /// A glyph: the atlas rectangle `uv` (u0, v0, u1, v1) drawn at `at` in `colour`.
+    pub fn glyph(self: *List, allocator: std.mem.Allocator, at: Rect, uv: [4]f32, colour: Colour) std.mem.Allocator.Error!void {
+        try self.instances.append(allocator, .{
+            .rect = .{ at.x, at.y, at.width, at.height },
+            .fill = colour,
+            .border_colour = uv,
+            .params = .{ 0, 0, 0, @floatFromInt(@intFromEnum(Kind.glyph)) },
         });
     }
 

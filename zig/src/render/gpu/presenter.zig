@@ -22,6 +22,9 @@
 const std = @import("std");
 
 const gl = @import("gl_renderer.zig");
+const gles3 = @import("../gles3.zig");
+pub const Scene = gles3.scene.List;
+pub const Atlas = gles3.atlas.Atlas;
 
 const c = @cImport({
     @cInclude("EGL/egl.h");
@@ -46,6 +49,8 @@ const eglCreateWindowSurface = @extern(
 );
 
 const egl_platform_wayland: c.EGLint = 0x31D8;
+/// `EGL_OPENGL_ES3_BIT`, not in every `egl.h`.
+const egl_opengl_es3_bit: c.EGLint = 0x0040;
 
 const getenv = @extern(
     *const fn ([*:0]const u8) callconv(.c) ?[*:0]const u8,
@@ -99,8 +104,13 @@ pub const Presenter = struct {
     surface: c.EGLSurface,
     context: c.EGLContext,
     renderer: gl.Renderer,
+    /// The context is ES 3 (the scene renderer can attach), not only ES 2.
+    es3: bool,
+    /// The draw command list's renderer, attached on the first `presentScene`.
+    scene: ?gles3.Renderer = null,
 
     pub fn deinit(self: *Presenter) void {
+        if (self.scene) |*renderer| renderer.deinit();
         self.renderer.deinit();
         _ = c.eglDestroyContext(self.display, self.context);
         _ = c.eglDestroySurface(self.display, self.surface);
@@ -119,6 +129,34 @@ pub const Presenter = struct {
             self.height = height;
         }
         try gl.drawFrame(&self.renderer, pixels, @intCast(width), @intCast(height));
+        if (c.eglSwapBuffers(self.display, self.surface) == 0) return error.SwapRefused;
+    }
+
+    /// Draws `list` (glyphs from `glyphs`) on the GPU and shows it: no frame painted on
+    /// the CPU, no frame-sized upload. `before_swap`, when given, reads the finished frame
+    /// back first (`scene-window-check`'s proof of what reached the window's surface).
+    pub fn presentScene(
+        self: *Presenter,
+        list: *const gles3.scene.List,
+        glyphs: *gles3.atlas.Atlas,
+        clear: gles3.scene.Colour,
+        width: u32,
+        height: u32,
+        before_swap: ?[]u8,
+    ) !void {
+        if (!self.es3) return error.NoEs3;
+        if (width != self.width or height != self.height) {
+            c.wl_egl_window_resize(self.egl_window, @intCast(width), @intCast(height), 0, 0);
+            self.width = width;
+            self.height = height;
+        }
+        if (self.scene == null) self.scene = try gles3.attach(self.display, self.surface, self.context, width, height);
+        const renderer = &(self.scene orelse return error.NoEs3);
+        renderer.width = width;
+        renderer.height = height;
+        renderer.syncAtlas(glyphs);
+        renderer.draw(list, clear);
+        if (before_swap) |out| renderer.read(out);
         if (c.eglSwapBuffers(self.display, self.surface) == 0) return error.SwapRefused;
     }
 };
@@ -165,19 +203,23 @@ pub fn open(
     var minor: c.EGLint = 0;
     if (c.eglInitialize(display, &major, &minor) == 0) return null;
 
-    const attributes = [_]c.EGLint{
-        c.EGL_SURFACE_TYPE,    c.EGL_WINDOW_BIT,
-        c.EGL_RENDERABLE_TYPE, c.EGL_OPENGL_ES2_BIT,
-        c.EGL_RED_SIZE,        8,
-        c.EGL_GREEN_SIZE,      8,
-        c.EGL_BLUE_SIZE,       8,
-        c.EGL_NONE,
-    };
+    // ES 3 first: the draw command list needs it, and an ES 3 context still runs the ES 2
+    // frame-upload path. A driver without it gets the ES 2 context as before.
+    var es3 = true;
     var config: c.EGLConfig = null;
     var config_count: c.EGLint = 0;
-    if (c.eglChooseConfig(display, &attributes, &config, 1, &config_count) == 0 or config_count == 0) {
-        return null;
-    }
+    for ([_]c.EGLint{ egl_opengl_es3_bit, c.EGL_OPENGL_ES2_BIT }) |renderable| {
+        const attributes = [_]c.EGLint{
+            c.EGL_SURFACE_TYPE,    c.EGL_WINDOW_BIT,
+            c.EGL_RENDERABLE_TYPE, renderable,
+            c.EGL_RED_SIZE,        8,
+            c.EGL_GREEN_SIZE,      8,
+            c.EGL_BLUE_SIZE,       8,
+            c.EGL_NONE,
+        };
+        if (c.eglChooseConfig(display, &attributes, &config, 1, &config_count) != 0 and config_count != 0) break;
+        es3 = false;
+    } else return null;
 
     const window_surface = eglCreateWindowSurface(
         display,
@@ -190,7 +232,7 @@ pub fn open(
         return null;
     }
 
-    const context_attributes = [_]c.EGLint{ c.EGL_CONTEXT_CLIENT_VERSION, 2, c.EGL_NONE };
+    const context_attributes = [_]c.EGLint{ c.EGL_CONTEXT_CLIENT_VERSION, if (es3) 3 else 2, c.EGL_NONE };
     const context = c.eglCreateContext(display, config, c.EGL_NO_CONTEXT, &context_attributes);
     if (context == c.EGL_NO_CONTEXT) {
         _ = c.eglDestroySurface(display, window_surface);
@@ -215,6 +257,7 @@ pub fn open(
         .surface = window_surface,
         .context = context,
         .renderer = renderer,
+        .es3 = es3,
     };
 }
 

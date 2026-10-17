@@ -44,6 +44,11 @@ pub const termination = @import("platform/linux/termination.zig");
 /// The Vulkan the native GPU renderer requires (the baseline R7 240's set); pure, no driver.
 /// The draw command list every GPU backend reads (64 bytes a shape); pure, no driver.
 pub const scene = @import("render/scene.zig");
+/// The glyph atlas the GPU backends draw text from; pure memory.
+pub const atlas = @import("render/atlas.zig");
+/// The native path's GPU drawing: the command list's GLES 3 renderer and its text
+/// (HarfBuzz + FreeType). Linked only into the native render build.
+pub const gles3 = if (@import("build_options").native_render) @import("render/gles3.zig") else struct {};
 pub const vulkanThreshold = @import("render/gpu/vulkan_threshold.zig");
 pub const window = @import("window/window.zig");
 
@@ -117,6 +122,7 @@ test {
     _ = @import("platform/linux/termination.zig");
     _ = @import("render/gpu/vulkan_threshold.zig");
     _ = @import("render/scene.zig");
+    _ = @import("render/atlas.zig");
     _ = @import("window/window.zig");
     _ = @import("window/linux/placement.zig");
     _ = @import("window/linux/gesture.zig");
