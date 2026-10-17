@@ -52,6 +52,13 @@ pub fn run() -> ExitCode {
     // with, and a CI log line that does not say which command failed is a line
     // somebody has to guess about.
     let name = cli.command.name();
+    // The tools `lepton` streams colour exactly when `lepton` does (`colour.rs`).
+    lepton_orchestrator::colour::set_level(match style::depth() {
+        style::Depth::None => 0,
+        style::Depth::Basic => 1,
+        style::Depth::Extended => 2,
+        style::Depth::True => 3,
+    });
 
     match dispatch(cli.command) {
         Ok(()) => ExitCode::SUCCESS,

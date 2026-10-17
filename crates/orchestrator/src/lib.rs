@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod colour;
 mod process;
 pub mod supervise;
 mod toolchain;

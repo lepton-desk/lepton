@@ -135,7 +135,8 @@ pub fn main() !void {{
     // the application moves into its own `app-{identifier}-<pid>.scope` first and a task
     // manager shows the core and every WebKit process as {product} — not as part of the
     // terminal or editor that started it. Left where it is without systemd.
-    std.debug.print("scope        {{t}}\n", .{{core.scope.enter("{identifier}", "{product}")}});
+    const scoped = core.scope.enter("{identifier}", "{product}");
+    core.report.fact("scope", if (scoped == .unavailable) .warn else .good, "{{t}}", .{{scoped}});
 
     var view = core.render.WebView.open() catch |err| {{
         std.debug.print("the engine refused to start: {{t}}\n", .{{err}});
@@ -166,7 +167,7 @@ pub fn main() !void {{
     view.bridge.registry = commands.bind(&app_state);
     const outbound = window_channel.outboundRegion();
     if (!view.injectTransport(outbound.len)) {{
-        std.debug.print("transport    not injected: the page will run without a channel\n", .{{}});
+        core.report.fact("transport", .warn, "not injected: the page will run without a channel", .{{}});
     }}
     view.bridge.exposeRegion(outbound);
 
@@ -177,20 +178,20 @@ pub fn main() !void {{
         // The dev server's page reads the ring cross-origin from `lepton://localhost`;
         // the bridge names exactly this origin in its answers, never a wildcard.
         if (!view.bridge.allowOriginOf(address)) {{
-            std.debug.print("transport    {{s}} is not an origin; the page will not reach the core\n", .{{address}});
+            core.report.fact("transport", .bad, "{{s}} is not an origin; the page will not reach the core", .{{address}});
         }}
         view.load(address);
     }}
 
     // The size is printed from the value the engine was given rather than from a second
     // copy baked in at substitution time, so the two cannot drift apart.
-    std.debug.print("{product} on {{s}}, {{d}}x{{d}}\n", .{{
+    core.report.fact("window", .plain, "{product} · {{s}} · {{d}}×{{d}}", .{{
         @tagName(display.session),
         size.width,
         size.height,
     }});
     if (core.render.loaded_webview_backend()) |implementation| {{
-        std.debug.print("engine       {{s}}\n", .{{implementation}});
+        core.report.fact("engine", .plain, "{{s}}", .{{implementation}});
     }}
 
     // A second, private channel for the round-trip figure: a frame out and its echo back
@@ -354,12 +355,12 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
     var subject: ?core.render.Text = null;
     if (core.render.can_draw_text) {{
         subject = core.render.Text.init(frame) catch |failure| blk: {{
-            std.debug.print("text         unavailable: {{t}}\n", .{{failure}});
+            core.report.fact("text", .warn, "unavailable: {{t}}", .{{failure}});
             break :blk null;
         }};
         if (subject) |*type_face| type_face.setFace("monospace", 13);
     }} else {{
-        std.debug.print("text         no cairo; drawing without labels\n", .{{}});
+        core.report.fact("text", .warn, "no cairo; drawing without labels", .{{}});
     }}
     defer if (subject) |*type_face| type_face.deinit();
 

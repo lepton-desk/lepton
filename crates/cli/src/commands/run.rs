@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use lepton_orchestrator::{Step, ToolRequirement, Toolchain, display, run_streaming};
+use lepton_orchestrator::{Step, ToolRequirement, Toolchain, display};
 
 use super::build::{CORE_DIR, artifact_dir, read_manifest};
 use super::{CliError, Outcome};
@@ -60,6 +60,9 @@ impl Flags {
 
     /// Builds and opens the project rooted at `root`.
     pub fn run_in(&self, root: &Path) -> Outcome {
+        if !self.print_plan {
+            super::report::Report::new().header("run");
+        }
         let built = self.build_in(root)?;
         if self.print_plan {
             return Ok(());
@@ -119,8 +122,9 @@ impl Flags {
             super::engine::ensure()?;
         }
 
+        let report = super::report::Report::new();
         for step in &steps {
-            run_streaming(step).map_err(CliError::from)?;
+            report.run(step).map_err(CliError::from)?;
             // After every core build, the declarations step included: the frontend step
             // that follows type-checks against them.
             if super::launch::is_core_build(step) {

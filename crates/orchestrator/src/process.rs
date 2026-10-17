@@ -249,8 +249,10 @@ pub fn run(step: &Step) -> Result<Captured> {
 /// buffering it and printing at the end would turn a working build into a frozen
 /// one that looks hung.
 pub fn run_streaming(step: &Step) -> Result<()> {
-    let mut child = step
-        .command()
+    let mut command = step.command();
+    // Streamed through a pipe, so told to colour when `lepton` does (`colour.rs`).
+    crate::colour::apply(&mut command, &step.env);
+    let mut child = command
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

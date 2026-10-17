@@ -87,12 +87,15 @@ pub fn types_first(steps: &mut Vec<lepton_orchestrator::Step>, root: &Path) {
 pub fn sync_and_report(root: &Path) {
     let core_dir = root.join(super::build::CORE_DIR);
     match sync(root, &core_dir) {
-        Ok(Synced::Written) => println!("commands     {TARGET} updated"),
-        Ok(Synced::Foreign) => println!(
-            "commands     {TARGET} was not written by lepton; left as is (delete it to regenerate)"
+        Ok(Synced::Written) => {
+            super::report::Report::new().fact("commands", &format!("{TARGET} updated"))
+        }
+        Ok(Synced::Foreign) => super::report::Report::new().warn(
+            "commands",
+            &format!("{TARGET} was not written by lepton; left as is (delete it to regenerate)"),
         ),
         Ok(Synced::NothingGenerated | Synced::Unchanged) => {}
-        Err(error) => println!("commands     {error}"),
+        Err(error) => super::report::Report::new().warn("commands", &error.to_string()),
     }
 }
 

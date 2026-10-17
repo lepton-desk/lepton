@@ -235,7 +235,11 @@ pub fn launch_with(
     for (name, value) in env {
         step = step.env(*name, value.clone());
     }
-    run_streaming(&step).map_err(CliError::from)
+    let report = super::report::Report::new();
+    let started = report.start("app", &super::report::shown(&program));
+    let outcome = run_streaming(&step);
+    report.finished(&started, outcome.is_ok());
+    outcome.map_err(CliError::from)
 }
 
 #[cfg(test)]

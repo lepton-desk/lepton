@@ -146,13 +146,17 @@ impl Watcher {
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_default();
                     if rebuilt.succeeded {
-                        println!(
-                            "linked       {SCOPE}/{name} rebuilt in {:.1} s",
-                            rebuilt.took.as_secs_f64()
+                        super::report::Report::new().fact(
+                            "linked",
+                            &format!(
+                                "{SCOPE}/{name} rebuilt in {:.1} s",
+                                rebuilt.took.as_secs_f64()
+                            ),
                         );
                     } else {
-                        println!(
-                            "linked       {SCOPE}/{name} failed to build; waiting for the next edit"
+                        super::report::Report::new().warn(
+                            "linked",
+                            &format!("{SCOPE}/{name} failed to build; waiting for the next edit"),
                         );
                     }
                 }

@@ -14,6 +14,7 @@
 //! `Entry.len` bytes of frame.
 
 const std = @import("std");
+const report = @import("../../report.zig");
 const wire = @import("../../ipc/wire.zig");
 
 pub const magic = "LEPTONRC".*;
@@ -126,10 +127,10 @@ pub const Recorder = struct {
         if (path[0] == 0) return null;
         const unmasked = if (std.c.getenv("LEPTON_RECORD_UNMASKED")) |value| std.mem.eql(u8, std.mem.span(value), "1") else false;
         const recorder = create(path, unmasked) orelse {
-            std.debug.print("record       cannot create {s}\n", .{path});
+            report.fact("record", .bad, "cannot create {s}", .{path});
             return null;
         };
-        std.debug.print("record       {s}{s}\n", .{ path, if (unmasked) " (unmasked: private bytes included)" else "" });
+        report.fact("record", .good, "{s}{s}", .{ path, if (unmasked) " (unmasked: private bytes included)" else "" });
         return recorder;
     }
 

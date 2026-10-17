@@ -61,6 +61,7 @@ impl Flags {
         let root = std::env::current_dir().map_err(|error| {
             CliError::Invalid(format!("could not read the working directory: {error}"))
         })?;
+        super::report::Report::new().header("package");
         self.package_in(&root)
     }
 
@@ -89,7 +90,8 @@ impl Flags {
             out: root.join(CORE_DIR).join("bundle"),
         };
         let bundle = assemble(&spec)?;
-        println!("packaged {}", bundle.display());
+        let report = super::report::Report::new();
+        report.fact("packaged", &super::report::shown(&bundle));
 
         let depends = report_dependencies(&bundle.join("bin").join(&spec.binary));
 
@@ -97,13 +99,14 @@ impl Flags {
         let mut written = Vec::with_capacity(formats.targets.len());
         for target in &formats.targets {
             let (artifact, line) = write_target(&spec, &bundle, *target, &depends, &formats)?;
-            println!("  {line}");
+            report.fact(target.name(), &super::report::shown_text(&line));
             written.push((*target, artifact));
         }
         if self.verify {
             for (target, artifact) in &written {
                 let report = super::verify::verify(artifact, *target, &spec.binary)?;
-                println!("  verify {}  {}", target.name(), report.summary());
+                super::report::Report::new()
+                    .fact(&format!("verify {}", target.name()), &report.summary());
             }
         }
         Ok(())
@@ -119,15 +122,15 @@ fn report_dependencies(binary: &Path) -> Vec<String> {
     match super::depends::resolve(binary) {
         Ok(found) => {
             let packages = super::depends::packages(&found);
-            println!("  depends  {}", packages.join(" "));
+            super::report::Report::new().fact("depends", &packages.join(" "));
             let unowned = super::depends::unowned(&found);
             if !unowned.is_empty() {
-                println!("  no package owns  {}", unowned.join(" "));
+                super::report::Report::new().warn("no package owns", &unowned.join(" "));
             }
             packages
         }
         Err(error) => {
-            println!("  depends  unknown: {error}");
+            super::report::Report::new().warn("depends", &format!("unknown: {error}"));
             Vec::new()
         }
     }

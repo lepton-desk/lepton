@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use lepton_orchestrator::{Step, ToolRequirement, Toolchain, require, run_streaming};
+use lepton_orchestrator::{Step, ToolRequirement, Toolchain, require};
 
 use super::{CliError, Outcome};
 
@@ -76,7 +76,9 @@ impl Flags {
         let root = std::env::current_dir().map_err(|error| {
             CliError::Invalid(format!("could not read the working directory: {error}"))
         })?;
-
+        if !self.dry_run {
+            super::report::Report::new().header("build");
+        }
         self.build_in(&root)
     }
 
@@ -139,8 +141,9 @@ impl Flags {
             super::engine::ensure()?;
         }
 
+        let report = super::report::Report::new();
         for step in &steps {
-            run_streaming(step).map_err(CliError::from)?;
+            report.run(step).map_err(CliError::from)?;
             // After every core build, the declarations step included: the frontend step
             // that follows type-checks against them.
             if super::launch::is_core_build(step) {
@@ -151,7 +154,7 @@ impl Flags {
         // "it built" is the least useful sentence in a build log. Where the artifact
         // is, is the sentence a developer acts on — and it is the one thing this
         // command knows that `zig` does not print.
-        println!("built {}", artifact_dir(root).display());
+        report.fact("built", &super::report::shown(&artifact_dir(root)));
         Ok(())
     }
 

@@ -85,8 +85,12 @@ pub fn register(app_id: &str, name: &str, exec: &Path) -> Result<PathBuf, CliErr
 /// failure is reported and the command carries on.
 pub fn announce(app_id: &str, name: &str, exec: &Path) {
     match register(app_id, name, exec) {
-        Ok(path) => println!("desktop entry  {}", path.display()),
-        Err(error) => eprintln!("desktop entry  not written: {error}"),
+        Ok(path) => {
+            super::report::Report::new().fact("desktop entry", &super::report::home_short(&path))
+        }
+        Err(error) => {
+            super::report::Report::new().warn("desktop entry", &format!("not written: {error}"))
+        }
     }
 }
 

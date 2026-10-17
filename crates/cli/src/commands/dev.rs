@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use lepton_orchestrator::{Step, ToolRequirement, Toolchain, display, run_streaming};
+use lepton_orchestrator::{Step, ToolRequirement, Toolchain, display};
 
 use super::build::CORE_DIR;
 use super::{CliError, Outcome};
@@ -68,7 +68,9 @@ impl Flags {
         let root = std::env::current_dir().map_err(|error| {
             CliError::Invalid(format!("could not read the working directory: {error}"))
         })?;
-
+        if !self.print_plan {
+            super::report::Report::new().header("dev");
+        }
         self.dev_in(&root)
     }
 
@@ -143,12 +145,17 @@ impl Flags {
         // A SIGTERM to `lepton` must end the server and the application with it.
         lepton_orchestrator::supervise::install();
 
+        let report = super::report::Report::new();
         for step in &rebuilds {
-            run_streaming(step).map_err(CliError::from)?;
+            report.run(step).map_err(CliError::from)?;
         }
 
         for step in &background {
-            let child = std::process::Command::new(&step.program)
+            let mut command = std::process::Command::new(&step.program);
+            // Vite's own colours: its output goes to the terminal directly here, but the
+            // variables also keep a server started under a pipe coloured (`colour.rs`).
+            lepton_orchestrator::colour::apply(&mut command, &step.env);
+            let child = command
                 .args(&step.args)
                 .current_dir(step.cwd.as_deref().unwrap_or(root))
                 // Not the terminal's: a server reading a TTY from outside the foreground
@@ -158,7 +165,10 @@ impl Flags {
                 .map_err(|error| {
                     CliError::Invalid(format!("could not start the dev server: {error}"))
                 })?;
-            println!("dev server  started, pid {}", child.id());
+            report.fact(
+                "dev server",
+                &format!("{} · pid {}", display(step), child.id()),
+            );
             lepton_orchestrator::supervise::track(child.id());
             background_children.0.push(child);
         }
@@ -170,7 +180,7 @@ impl Flags {
         let mut core_build_time = std::time::Duration::ZERO;
         for step in &foreground {
             let began = std::time::Instant::now();
-            run_streaming(step).map_err(CliError::from)?;
+            report.run(step).map_err(CliError::from)?;
             if step.program == "zig" {
                 core_builds += 1;
                 core_build_time += began.elapsed();
@@ -268,6 +278,10 @@ impl Flags {
             // on some machines, and a server there is refused at `127.0.0.1`.
             "--host".to_owned(),
             DEV_HOST.to_owned(),
+            // Vite clears the terminal when it starts, which wiped `lepton dev`'s own lines
+            // above it (seen in a pseudo-terminal: `ESC[1;1H ESC[0J` after the header).
+            "--clearScreen".to_owned(),
+            "false".to_owned(),
         ];
         Step::new(NAME, manager.program())
             .args(manager.run_script("dev", &flags))

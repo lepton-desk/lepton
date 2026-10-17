@@ -35,6 +35,8 @@ pub const portal = @import("platform/linux/portal.zig");
 /// The application's own systemd scope (`app-<identifier>-<pid>.scope`), entered before
 /// the engine starts so its processes are one application in a task manager.
 pub const scope = @import("platform/linux/scope.zig");
+/// The start-up lines (`  ◆ scope  joined`), coloured as `lepton` colours its own.
+pub const report = @import("report.zig");
 /// Paths the user chose in a dialog, granted at run time and remembered (`plugin-fs` `chosen`).
 pub const grants = @import("platform/linux/grants.zig");
 pub const window = @import("window/window.zig");
@@ -118,6 +120,7 @@ test {
     _ = @import("render/webview/registry.zig");
     _ = @import("render/webview/events.zig");
     _ = @import("render/webview/region.zig");
+    _ = @import("report.zig");
     _ = @import("render/webview/declarations.zig");
     _ = @import("window/linux/chrome_test.zig");
     // `comptime` is load-bearing and not a stylistic choice. Without it this reads as

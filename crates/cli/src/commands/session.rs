@@ -70,13 +70,23 @@ pub fn receipt(session: &Session) -> String {
     } else {
         format!("{} times", session.core_builds)
     };
-    format!(
-        "lepton dev · session\n  window open        {}\n  core built         {}, {:.1} s\n  frontend edits     {} file(s) — 0 rebuilds, 0 restarts",
-        span(session.window_open),
-        builds,
-        session.core_build_time.as_secs_f64(),
-        session.frontend_edits,
-    )
+    let report = super::report::Report::new();
+    [
+        report.title("session"),
+        report.fact_text("window open", &span(session.window_open)),
+        report.fact_text(
+            "core built",
+            &format!("{builds}, {:.1} s", session.core_build_time.as_secs_f64()),
+        ),
+        report.fact_text(
+            "frontend edits",
+            &format!(
+                "{} file(s) — 0 rebuilds, 0 restarts",
+                session.frontend_edits
+            ),
+        ),
+    ]
+    .join("\n")
 }
 
 #[cfg(test)]
@@ -129,9 +139,9 @@ mod tests {
             core_build_time: Duration::from_millis(3200),
             frontend_edits: 7,
         });
-        assert_contains!(&text, "window open        4m 12s");
-        assert_contains!(&text, "core built         1 time, 3.2 s");
-        assert_contains!(&text, "frontend edits     7 file(s)");
+        assert_contains!(&text, "◆ window open    4m 12s");
+        assert_contains!(&text, "◆ core built     1 time, 3.2 s");
+        assert_contains!(&text, "◆ frontend edits 7 file(s)");
         Ok(())
     }
 }
