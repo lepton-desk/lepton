@@ -20,7 +20,25 @@ for package in api cli "${plugins[@]}" create-lepton-app; do
 done
 wanted="$(node -p "require('$root/packages/create-lepton-app/package.json').dependencies['@lepton-desk/cli']")"
 [ "$wanted" = "$version" ] || fail "create-lepton-app depends on @lepton-desk/cli $wanted, not $version"
+for plugin in "${plugins[@]}"; do
+  peer="$(node -p "require('$root/packages/$plugin/package.json').peerDependencies['@lepton-desk/api']")"
+  # `^0.1.6` does not admit `0.2.0-beta.1`: a plugin must name the API it ships with.
+  [ "$peer" = "^$version" ] || fail "packages/$plugin wants @lepton-desk/api $peer, not ^$version"
+done
+platform="$(node -p "require('$root/packages/cli/package.json').optionalDependencies['@lepton-desk/cli-linux-x64']")"
+[ "$platform" = "$version" ] || fail "@lepton-desk/cli wants cli-linux-x64 $platform, not $version"
 echo "all at $version"
+
+step "dist-tag"
+# Plain versions are `latest`, `-beta.N` is `beta` (0.2.0), `-rc.N` is `next` (1.0.0); npm 11
+# refuses a prerelease without `--tag`, and a beta under `latest` would reach every install.
+case "$version" in
+  *-beta.[0-9]*) tag=beta ;;
+  *-rc.[0-9]*) tag=next ;;
+  *-*) fail "$version is a prerelease but neither -beta.N nor -rc.N" ;;
+  *) tag=latest ;;
+esac
+echo "$version publishes under $tag"
 
 step "not already published"
 for package in "${packages[@]}"; do
@@ -68,4 +86,8 @@ for package in "${packages[@]}"; do
   (cd "$root/packages/$package" && npm pack --dry-run 2>&1 | grep -E 'npm notice ([0-9.]+[kMG]?B |package size|total files)')
 done
 
-printf '\npreflight: ready to publish %s\n' "$version"
+if [ "$tag" = latest ]; then
+  printf '\npreflight: ready to publish %s (npm publish)\n' "$version"
+else
+  printf '\npreflight: ready to publish %s (npm publish --tag %s)\n' "$version" "$tag"
+fi

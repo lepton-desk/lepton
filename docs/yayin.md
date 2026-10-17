@@ -3,7 +3,11 @@
 Şu anki sürüm: **0.1.6** (0.1.0–0.1.5 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı: `Cargo.toml`
 `[workspace.package] version`, `packages/api`, `packages/cli` ve `packages/plugin-*`
 ve `packages/create-lepton-app` `package.json` (cli'nin `optionalDependencies`'i ve eklentilerin `peerDependencies`'i dahil);
-platform paketini `stage.mjs` yazar.
+platform paketini `stage.mjs` yazar. Sürümü artırınca yeni sürümün şablonunu sakla:
+`crates/template_injector/assets/main.zig` → `assets/history/<sürüm>/main.zig`,
+`lepton-build.zig` → `assets/history/<sürüm>/build.zig`, ve `src/update.rs` `RELEASES`'e ekle
+(`lepton update` bir projenin hangi sürümden kaldığını bunlarla bulur; test, derlenen sürüm
+listede yoksa kırılır).
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
 `@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
@@ -34,6 +38,10 @@ npm whoami
 ```
 
 ## 4. Yayın (2FA açıksa her komuta `--otp=<kod>` ekleyin)
+
+Ön kontrolün son satırı dist-tag'i söyler: düz sürüm `npm publish` (`latest`); `0.2.0-beta.N` için
+her komuta `--tag beta`, `1.0.0-rc.N` için `--tag next` (npm 11 ön sürümü etiketsiz yayımlamaz).
+Eklentilerin `peerDependencies` (`^<sürüm>`) ve `cli`'nin `optionalDependencies`'i de sürümle birlikte artar.
 
 ```bash
 cd packages/cli-linux-x64 && npm publish
