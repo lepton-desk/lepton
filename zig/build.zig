@@ -411,6 +411,35 @@ pub fn build(b: *std.Build) void {
             "Draw a frame on the GPU and assert on what the GPU read back",
         );
         gpu_test_step.dependOn(&run_gpu_tests.step);
+
+        // The draw command list on GLES 3: shapes drawn by the GPU, read back.
+        const gles3_module = b.createModule(.{
+            .root_source_file = b.path("src/render/gles3.zig"),
+            .target = target,
+            .optimize = .Debug,
+            .link_libc = true,
+        });
+        gles3_module.linkSystemLibrary("egl", .{});
+        gles3_module.linkSystemLibrary("GLESv2", .{});
+        const gles3_tests = b.addTest(.{ .root_module = gles3_module });
+        gpu_test_step.dependOn(&b.addRunArtifact(gles3_tests).step);
+
+        const scene_check = b.addExecutable(.{
+            .name = "lepton-scene-check",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/tools/scene_check.zig"),
+                .target = target,
+                // Timed: the driver's work, not a Debug build's bounds checks.
+                .optimize = .ReleaseSafe,
+                .link_libc = true,
+                .imports = &.{.{ .name = "gles3", .module = gles3_module }},
+            }),
+        });
+        const scene_check_step = b.step(
+            "scene-check",
+            "Time a window-sized scene of cards on GLES 3 and say what crosses to the GPU",
+        );
+        scene_check_step.dependOn(&b.addRunArtifact(scene_check).step);
     }
 
     // A measurement, not a demo: the round-trip figure the framework's claim rests
