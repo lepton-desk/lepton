@@ -1,11 +1,11 @@
 {
   "name": "@lepton-desk/cli-linux-x64",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "The Lepton CLI binary for linux-x64. Installed by @lepton-desk/cli; not used directly.",
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/lepton-desk/lepton",
+    "url": "git+https://github.com/lepton-desk/lepton.git",
     "directory": "packages/cli-linux-x64"
   },
   "os": [

@@ -79,7 +79,7 @@ export function coloured(env, terminal) {
  * @returns {string[]}
  */
 export function missing(json) {
-  /** @type {{ tools?: { name: string, problem: unknown }[], engine?: { label: string, package: string, present: boolean }[] }} */
+  /** @type {{ tools?: { name: string, problem: unknown }[], engine?: { webkit: string | null, platform: boolean, legacy: boolean, cairo: boolean, xcb: boolean, ready: boolean } }} */
   let report;
   try {
     report = JSON.parse(json);
@@ -90,10 +90,22 @@ export function missing(json) {
   for (const tool of report.tools ?? []) {
     if (tool.problem !== null) lines.push(`${tool.name}: not usable (${describe(tool.problem)})`);
   }
-  for (const part of report.engine ?? []) {
-    if (!part.present && part.package.startsWith("wpe")) {
-      lines.push(`${part.label}: pkg-config cannot find ${part.package}`);
-    }
+  // The engine as `lepton info --json` reports it (commands/engine.rs `Engine::json`).
+  // 0.1.5 read the list this used to be and failed on the object before creating anything.
+  const engine = report.engine;
+  if (
+    engine !== undefined &&
+    engine !== null &&
+    typeof engine === "object" &&
+    !Array.isArray(engine) &&
+    !engine.ready
+  ) {
+    if (engine.webkit === null)
+      lines.push("WPE WebKit: not installed (`lepton info` says how to get it)");
+    else if (!engine.platform && !engine.legacy)
+      lines.push(`WPE WebKit ${engine.webkit}: wpe-platform-2.0 is missing`);
+    if (!engine.cairo) lines.push("cairo: missing");
+    if (!engine.xcb) lines.push("xcb: missing");
   }
   return lines;
 }

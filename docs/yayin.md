@@ -1,6 +1,6 @@
 # npm yayını: `@lepton-desk/*`
 
-Şu anki sürüm: **0.1.5** (0.1.0–0.1.4 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı: `Cargo.toml`
+Şu anki sürüm: **0.1.6** (0.1.0–0.1.5 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı: `Cargo.toml`
 `[workspace.package] version`, `packages/api`, `packages/cli` ve `packages/plugin-*`
 ve `packages/create-lepton-app` `package.json` (cli'nin `optionalDependencies`'i ve eklentilerin `peerDependencies`'i dahil);
 platform paketini `stage.mjs` yazar.
@@ -68,6 +68,10 @@ cd packages/create-lepton-app && npm publish
 ```
 
 `publishConfig.access: public` her pakette var; `--access public` gerekmez.
+- `E404 Not Found - PUT` paket yokluğu değil, oturum yok demek (`npm whoami` 401 verir): `npm login`.
+- `E409 Cannot publish over previously staged version` aynı sürümün ilk yayını hâlâ işleniyor demek
+  (0.1.5'te plugin-dialog: 409'dan 2 dk sonra yayında göründü). Tekrar yayımlamayın; birkaç dakika
+  bekleyip `npm view <paket>@<sürüm> version` ile bakın.
 `api` yayından önce kendi `prepublishOnly`'sini çalıştırır (derleme + denetim + test).
 
 ## 5. Doğrulama (boş bir dizinde)
@@ -77,10 +81,10 @@ npm view @lepton-desk/cli version
 ```
 
 ```bash
-npx @lepton-desk/cli@0.1.5 --version
+npx @lepton-desk/cli@0.1.6 --version
 ```
 
-Beklenen: `lepton 0.1.5`.
+Beklenen: `lepton 0.1.6`.
 
 ## 6. Geri alma
 - 72 saat içinde: `npm unpublish @lepton-desk/<paket>@<sürüm>` (aynı sürüm bir daha kullanılamaz).

@@ -29,33 +29,62 @@ test("install is the default and not repeated", () => {
 });
 
 test("what lepton info reports missing is listed, and nothing when ready", () => {
+  // The engine fields are Engine::json's; the real output is read in the next test.
+  const engine = {
+    webkit: "2.54.1",
+    platform: true,
+    legacy: false,
+    cairo: true,
+    xcb: true,
+    ready: true,
+  };
   const ready = JSON.stringify({
     tools: [{ name: "zig", version: "0.16.0", problem: null }],
-    engine: [
-      {
-        label: "web engine (WPE WebKit)",
-        package: "wpe-webkit-2.0",
-        present: true,
-      },
-    ],
+    engine,
   });
   assert.deepEqual(missing(ready), []);
   const lacking = JSON.stringify({
     tools: [{ name: "zig", version: null, problem: "Missing" }],
-    engine: [
-      {
-        label: "web engine (WPE WebKit)",
-        package: "wpe-webkit-2.0",
-        present: false,
-      },
-      { label: "X11 windows", package: "xcb", present: false },
-    ],
+    engine: { webkit: null, platform: false, legacy: false, cairo: true, xcb: false, ready: false },
   });
   assert.deepEqual(missing(lacking), [
     "zig: not usable (Missing)",
-    "web engine (WPE WebKit): pkg-config cannot find wpe-webkit-2.0",
+    "WPE WebKit: not installed (`lepton info` says how to get it)",
+    "xcb: missing",
   ]);
+  const noPlatform = JSON.stringify({
+    engine: {
+      webkit: "2.52.3",
+      platform: false,
+      legacy: false,
+      cairo: true,
+      xcb: true,
+      ready: false,
+    },
+  });
+  assert.deepEqual(missing(noPlatform), ["WPE WebKit 2.52.3: wpe-platform-2.0 is missing"]);
   assert.equal(missing("not json").length, 1);
+});
+
+test("the real lepton info --json is read, and agrees with its own ready", () => {
+  // 0.1.5 was published reading an engine shape the CLI no longer printed: the hand-written
+  // report above had drifted from the real one. This one comes from the binary.
+  const binary = process.env.LEPTON_BINARY;
+  if (binary === undefined) return;
+  const json = execFileSync(binary, ["info", "--json"], { encoding: "utf8" });
+  const report = JSON.parse(json);
+  assert.deepEqual(Object.keys(report.engine).sort(), [
+    "cairo",
+    "legacy",
+    "platform",
+    "ready",
+    "webkit",
+    "xcb",
+  ]);
+  const engineLines = missing(json).filter(
+    (line) => !report.tools.some((tool) => line.startsWith(`${tool.name}:`)),
+  );
+  assert.equal(engineLines.length === 0, report.engine.ready);
 });
 
 test("the manager that started the command is named", () => {
