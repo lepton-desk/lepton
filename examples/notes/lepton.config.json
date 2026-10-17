@@ -1,0 +1,43 @@
+{
+  "$schema": "https://lepton.style/schema/config.json",
+  "productName": "Notes",
+  "identifier": "dev.lepton.notes",
+  "version": "0.1.0",
+  "renderPath": "webview",
+  "target": "react",
+  "sdkScope": "@lepton-desk",
+  "channel": {
+    "name": "/lepton-dev.lepton.notes",
+    "geometry": {
+      "cellCount": 64,
+      "payloadCapacity": 4096
+    }
+  },
+  "window": {
+    "title": "Notes",
+    "width": 1200,
+    "height": 800
+  },
+  "permissions": [
+    "app.name",
+    "clipboard.read_text",
+    "clipboard.write_text",
+    "fs.read_file",
+    "fs.write_file",
+    "fs.read_dir",
+    "fs.mkdir",
+    "fs.remove",
+    "fs.stat",
+    "fs.exists",
+    "fs.rename",
+    "dialog.open",
+    "dialog.save",
+    "window.close"
+  ],
+  "plugins": {
+    "fs": {
+      "scope": ["$APPDATA"],
+      "chosen": true
+    }
+  }
+}

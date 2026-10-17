@@ -1,0 +1,270 @@
+/* Notes: a quiet writing tool. Paper and ink, one accent, system fonts (no web fonts: an
+   example app should start instantly and offline). Dark follows the system. */
+
+:root {
+  --paper: #f7f6f2;
+  --panel: #efede6;
+  --ink: #23221f;
+  --ink-soft: #5c5a54;
+  --rule: #dcd9cf;
+  --accent: #2f5d8a;
+  --accent-ink: #ffffff;
+  --selected: #e2e7ee;
+  --font: system-ui, "Noto Sans", "DejaVu Sans", sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #1d1f22;
+    --panel: #24272b;
+    --ink: #e4e2dc;
+    --ink-soft: #a4a29c;
+    --rule: #34373c;
+    --accent: #8ab4e0;
+    --accent-ink: #12161a;
+    --selected: #2e3742;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px / 1.5 var(--font);
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.button {
+  padding: 0.3em 0.8em;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.button:hover {
+  border-color: var(--ink-soft);
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  padding: 0.55em 1.2em;
+}
+
+.welcome {
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  gap: 0.75rem;
+  height: 100%;
+  padding: 2rem;
+}
+
+.welcome h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.welcome p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.notes {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  height: 100%;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--rule);
+}
+
+.sidebar__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.vault-name {
+  overflow: hidden;
+  border: 0;
+  background: none;
+  padding: 0;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.naming {
+  padding: 0.5rem 0.75rem 0;
+}
+
+.naming input {
+  width: 100%;
+  padding: 0.35em 0.5em;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--paper);
+}
+
+.sidebar nav {
+  flex: 1;
+  overflow: auto;
+  padding: 0.5rem 0.25rem 1rem;
+}
+
+.tree {
+  margin: 0;
+  padding: 0 0 0 0.75rem;
+  list-style: none;
+}
+
+.sidebar nav > .tree {
+  padding-left: 0.25rem;
+}
+
+.tree__folder {
+  padding: 0.15em 0.4em;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree__note {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  padding: 0.15em 0.5em;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tree__note:hover {
+  background: var(--selected);
+}
+
+.tree__note[aria-current] {
+  background: var(--selected);
+  font-weight: 600;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.pane__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor {
+  flex: 1;
+  min-height: 0;
+}
+
+.editor .cm-editor {
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.editor .cm-scroller {
+  font: 15px / 1.65 var(--mono);
+  padding: 0.75rem 0;
+}
+
+.editor .cm-content {
+  max-width: 46rem;
+  padding: 0 1.25rem;
+}
+
+.editor .cm-gutters {
+  background: var(--paper);
+  border-right: 1px solid var(--rule);
+  color: var(--ink-soft);
+}
+
+.editor .cm-activeLine,
+.editor .cm-activeLineGutter {
+  background: color-mix(in srgb, var(--selected) 50%, transparent);
+}
+
+.empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.status {
+  min-height: 1.9rem;
+  padding: 0.35rem 1.25rem;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.welcome .status {
+  border: 0;
+  padding: 0;
+}
+
+.button:disabled,
+.vault-name:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
