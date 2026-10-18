@@ -26,7 +26,7 @@ optdepends=(
 # `"lepton"` script runs the CLI from the project's own node_modules, not this one.
 conflicts=('lepton-desk-bin')
 # 0.1.6 as released to npm (`Release 0.1.6`); the release was not tagged.
-_commit=22e92b7838c1f4c2f7f19144933a77d226263726
+_commit=0b898dc426cc81881ade15dfe437a06449311d66
 source=("$pkgname::git+https://github.com/lepton-desk/lepton.git#commit=$_commit")
 sha256sums=('SKIP')
 

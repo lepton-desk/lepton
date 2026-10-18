@@ -1,6 +1,6 @@
 pkgbase = lepton-desk-bin
 	pkgdesc = Desktop app framework with a Zig core and a web frontend on WPE WebKit (prebuilt CLI)
-	pkgver = 0.1.6
+	pkgver = 0.1.7
 	pkgrel = 1
 	url = https://github.com/lepton-desk/lepton
 	arch = x86_64
@@ -21,7 +21,7 @@ pkgbase = lepton-desk-bin
 	conflicts = lepton-desk
 	options = !strip
 	options = !debug
-	source = cli-linux-x64-0.1.6.tgz::https://registry.npmjs.org/@lepton-desk/cli-linux-x64/-/cli-linux-x64-0.1.6.tgz
-	sha512sums = 914b457239eda169dcb8808a9afd68aef1763656161be899bd2e01e3804c0b33d20abec674a6cb9132bf967ca7361698f0d0e2467bc2119b53370d1defb120a9
+	source = cli-linux-x64-0.1.7.tgz::https://registry.npmjs.org/@lepton-desk/cli-linux-x64/-/cli-linux-x64-0.1.7.tgz
+	sha512sums = 9a4ec41ffbfaa6b7eab0f4bafc7dcfdd9cea903fdd12b1214350c086d45358781eabf222db7a8418cc02a7bd79a4140baafd9131fde2afc2d9c849822041219b
 
 pkgname = lepton-desk-bin
