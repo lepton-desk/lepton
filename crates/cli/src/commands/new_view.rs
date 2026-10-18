@@ -24,7 +24,7 @@ pub fn question(label: &str) -> String {
 /// The wizard's order: TypeScript first, then the frameworks by how often they start a
 /// desktop app, vanilla leading as in other app creators; anything new goes last.
 pub fn wizard_order(available: &[String]) -> Vec<String> {
-    const ORDER: [&str; 5] = ["vanilla", "react", "vue", "svelte", "solid"];
+    const ORDER: [&str; 7] = ["vanilla", "react", "vue", "svelte", "solid", "preact", "lit"];
     let mut sorted = available.to_vec();
     sorted.sort_by_key(|name| {
         let (framework, language) = name.rsplit_once('-').unwrap_or((name, ""));
@@ -46,6 +46,8 @@ pub fn template_label(template: &str) -> String {
         "vue" => "Vue",
         "svelte" => "Svelte",
         "solid" => "Solid",
+        "preact" => "Preact",
+        "lit" => "Lit",
         "angular" => "Angular",
         other => other,
     };

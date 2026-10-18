@@ -524,6 +524,8 @@ fn target_of(template: &str) -> Result<Target, CliError> {
         "vue" => Ok(Target::Vue),
         "svelte" => Ok(Target::Svelte),
         "solid" => Ok(Target::Solid),
+        "preact" => Ok(Target::Preact),
+        "lit" => Ok(Target::Lit),
         "angular" => Ok(Target::Angular),
         other => Err(CliError::Invalid(format!(
             "`{template}` names a framework this build does not know: {other}"

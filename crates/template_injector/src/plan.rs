@@ -380,7 +380,9 @@ mod plan_tests;
 /// the file has to say so. Everything else follows the language.
 fn entry_extension(manifest: &Manifest) -> &'static str {
     match manifest.target {
-        crate::manifest::Target::React | crate::manifest::Target::Solid => {
+        crate::manifest::Target::React
+        | crate::manifest::Target::Solid
+        | crate::manifest::Target::Preact => {
             match manifest.language {
                 crate::manifest::Language::TypeScript => "tsx",
                 crate::manifest::Language::JavaScript => "jsx",
@@ -421,6 +423,27 @@ fn entry_contents(manifest: &Manifest) -> &'static str {
         (crate::manifest::Target::Solid, crate::manifest::Language::TypeScript) => {
             crate::assets::SOLID_ENTRY
         }
+        (crate::manifest::Target::Vue, crate::manifest::Language::JavaScript) => {
+            crate::assets::JS_VUE_ENTRY
+        }
+        (crate::manifest::Target::Svelte, crate::manifest::Language::JavaScript) => {
+            crate::assets::JS_SVELTE_ENTRY
+        }
+        (crate::manifest::Target::Solid, crate::manifest::Language::JavaScript) => {
+            crate::assets::JS_SOLID_ENTRY
+        }
+        (crate::manifest::Target::Preact, crate::manifest::Language::TypeScript) => {
+            crate::assets::PREACT_ENTRY
+        }
+        (crate::manifest::Target::Preact, crate::manifest::Language::JavaScript) => {
+            crate::assets::JS_PREACT_ENTRY
+        }
+        (crate::manifest::Target::Lit, crate::manifest::Language::TypeScript) => {
+            crate::assets::LIT_ENTRY
+        }
+        (crate::manifest::Target::Lit, crate::manifest::Language::JavaScript) => {
+            crate::assets::JS_LIT_ENTRY
+        }
         (_, crate::manifest::Language::JavaScript) => crate::assets::JS_MAIN_ENTRY,
         (_, crate::manifest::Language::TypeScript) => crate::assets::MAIN_ENTRY,
     }
@@ -445,17 +468,33 @@ fn extra_injections(manifest: &Manifest) -> Vec<Injection> {
         mode: Mode::Write,
     }];
 
-    // Vue, Svelte and Solid ship as TypeScript templates; their screen is a component
-    // file the entry imports, in the framework's own file type.
-    let typed_screen = match manifest.target {
+    // Vue, Svelte and Solid's screen is a component file the entry imports, in the
+    // framework's own file type and the project's language.
+    let javascript = manifest.language == crate::manifest::Language::JavaScript;
+    let screen = match manifest.target {
+        crate::manifest::Target::Vue if javascript => {
+            Some(("src/App.vue", crate::assets::JS_VUE_SCREEN))
+        }
         crate::manifest::Target::Vue => Some(("src/App.vue", crate::assets::VUE_SCREEN)),
+        crate::manifest::Target::Svelte if javascript => {
+            Some(("src/App.svelte", crate::assets::JS_SVELTE_SCREEN))
+        }
         crate::manifest::Target::Svelte => Some(("src/App.svelte", crate::assets::SVELTE_SCREEN)),
+        crate::manifest::Target::Solid if javascript => {
+            Some(("src/App.jsx", crate::assets::JS_SOLID_SCREEN))
+        }
         crate::manifest::Target::Solid => Some(("src/App.tsx", crate::assets::SOLID_SCREEN)),
+        crate::manifest::Target::Preact if javascript => {
+            Some(("src/App.jsx", crate::assets::JS_PREACT_SCREEN))
+        }
+        crate::manifest::Target::Preact => Some(("src/App.tsx", crate::assets::PREACT_SCREEN)),
+        crate::manifest::Target::Lit if javascript => {
+            Some(("src/measures-screen.js", crate::assets::JS_LIT_SCREEN))
+        }
+        crate::manifest::Target::Lit => Some(("src/measures-screen.ts", crate::assets::LIT_SCREEN)),
         _ => None,
     };
-    if let (Some((path, screen)), crate::manifest::Language::TypeScript) =
-        (typed_screen, manifest.language)
-    {
+    if let Some((path, screen)) = screen {
         out.push(Injection {
             path: path.to_owned(),
             contents: screen.to_owned(),

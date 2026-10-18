@@ -103,6 +103,8 @@ pub enum Target {
     Vue,
     Svelte,
     Solid,
+    Preact,
+    Lit,
     Angular,
 }
 
@@ -114,6 +116,8 @@ impl Target {
             Self::Vue => "vue",
             Self::Svelte => "svelte",
             Self::Solid => "solid",
+            Self::Preact => "preact",
+            Self::Lit => "lit",
             Self::Angular => "angular",
         }
     }
@@ -125,6 +129,8 @@ impl Target {
             "vue" => Some(Self::Vue),
             "svelte" => Some(Self::Svelte),
             "solid" => Some(Self::Solid),
+            "preact" => Some(Self::Preact),
+            "lit" => Some(Self::Lit),
             "angular" => Some(Self::Angular),
             _ => None,
         }
@@ -570,11 +576,13 @@ mod tests {
             Target::Vue,
             Target::Svelte,
             Target::Solid,
+            Target::Preact,
+            Target::Lit,
             Target::Angular,
         ] {
             assert_eq!(Target::parse(target.as_str()), Some(target));
         }
-        assert_eq!(Target::parse("preact"), None::<Target>);
+        assert_eq!(Target::parse("qwik"), None::<Target>);
         Ok(())
     }
 
