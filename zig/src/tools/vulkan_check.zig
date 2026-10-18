@@ -23,7 +23,7 @@ const pixel_bytes = 4;
 const clear_rgba = [4]f32{ 0.25, 0.5, 0.75, 1.0 };
 const expected = [4]u8{ 64, 128, 191, 255 };
 
-const Failure = error{ Vulkan, NoDevice, NoQueue, NoMemoryType, WrongPixels };
+const Failure = error{ Vulkan, NoDevice, NoQueue, NoMemoryType, WrongPixels, ValidationFailed };
 
 fn check(result: c.VkResult, what: []const u8) Failure!void {
     if (result == c.VK_SUCCESS) return;
@@ -361,12 +361,39 @@ pub fn main() !void {
     app.pApplicationName = "lepton-vulkan-check";
     app.pEngineName = "lepton";
     app.apiVersion = makeVersion(1, 3);
+    // `VK_KHR_swapchain` (a threshold requirement) needs `VK_KHR_surface` on the instance;
+    // the validation layer caught the probe enabling one without the other.
+    var extensions: [4][*c]const u8 = undefined;
+    var extension_count: u32 = 0;
+    extensions[extension_count] = "VK_KHR_surface";
+    extension_count += 1;
+    if (hasExtension(listed[0..instance_extensions], "VK_KHR_wayland_surface")) {
+        extensions[extension_count] = "VK_KHR_wayland_surface";
+        extension_count += 1;
+    }
+    // Khronos validation, when installed and not turned off: every misuse of the API is
+    // counted and fails the check. `LEPTON_VULKAN_VALIDATION=0` runs without it.
+    const validate = validationWanted() and try hasLayer("VK_LAYER_KHRONOS_validation");
+    const layers = [_][*c]const u8{"VK_LAYER_KHRONOS_validation"};
+    if (validate) {
+        extensions[extension_count] = "VK_EXT_debug_utils";
+        extension_count += 1;
+    }
     var create: c.VkInstanceCreateInfo = std.mem.zeroes(c.VkInstanceCreateInfo);
     create.sType = c.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     create.pApplicationInfo = &app;
+    create.enabledExtensionCount = extension_count;
+    create.ppEnabledExtensionNames = &extensions;
+    if (validate) {
+        create.enabledLayerCount = layers.len;
+        create.ppEnabledLayerNames = &layers;
+    }
     var instance: c.VkInstance = null;
     try check(c.vkCreateInstance(&create, null, &instance), "vkCreateInstance");
     defer c.vkDestroyInstance(instance, null);
+    const messenger = if (validate) try listen(instance) else null;
+    defer if (messenger) |handle| stopListening(instance, handle);
+    std.debug.print("validation   {s}\n", .{if (validate) "Khronos layer on" else "off (layer not installed, or LEPTON_VULKAN_VALIDATION=0)"});
 
     var count: u32 = 0;
     try check(c.vkEnumeratePhysicalDevices(instance, &count, null), "physical devices");
@@ -401,4 +428,59 @@ pub fn main() !void {
     if (chosen >= count) return error.NoDevice;
     std.debug.print("chosen       device {d}: {s}\n", .{ chosen, std.mem.sliceTo(&devices[chosen].properties.deviceName, 0) });
     try draw(devices[chosen]);
+    if (validate) {
+        std.debug.print("validation   {d} errors, {d} warnings\n", .{ validation_errors, validation_warnings });
+        if (validation_errors != 0) return error.ValidationFailed;
+    }
+}
+
+var validation_errors: u32 = 0;
+var validation_warnings: u32 = 0;
+
+fn validationWanted() bool {
+    const value = std.c.getenv("LEPTON_VULKAN_VALIDATION") orelse return true;
+    return !(value[0] == '0' and value[1] == 0);
+}
+
+fn hasLayer(name: []const u8) Failure!bool {
+    var count: u32 = 0;
+    try check(c.vkEnumerateInstanceLayerProperties(&count, null), "instance layers");
+    var layers: [64]c.VkLayerProperties = undefined;
+    count = @min(count, layers.len);
+    try check(c.vkEnumerateInstanceLayerProperties(&count, &layers), "instance layers");
+    for (layers[0..count]) |layer| {
+        if (std.mem.eql(u8, std.mem.sliceTo(&layer.layerName, 0), name)) return true;
+    }
+    return false;
+}
+
+fn onMessage(
+    severity: c.VkDebugUtilsMessageSeverityFlagBitsEXT,
+    _: c.VkDebugUtilsMessageTypeFlagsEXT,
+    data: [*c]const c.VkDebugUtilsMessengerCallbackDataEXT,
+    _: ?*anyopaque,
+) callconv(.c) c.VkBool32 {
+    const error_bit = c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    if (severity & error_bit != 0) validation_errors += 1 else validation_warnings += 1;
+    const text: [*:0]const u8 = if (data != null and data.*.pMessage != null) data.*.pMessage else "(no message)";
+    std.debug.print("validation   {s}: {s}\n", .{ if (severity & error_bit != 0) "error" else "warning", text });
+    return c.VK_FALSE;
+}
+
+fn listen(instance: c.VkInstance) Failure!c.VkDebugUtilsMessengerEXT {
+    const create_fn: c.PFN_vkCreateDebugUtilsMessengerEXT = @ptrCast(c.vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+    const create = create_fn orelse return error.Vulkan;
+    var info: c.VkDebugUtilsMessengerCreateInfoEXT = std.mem.zeroes(c.VkDebugUtilsMessengerCreateInfoEXT);
+    info.sType = c.VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+    info.messageSeverity = c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | c.VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+    info.messageType = c.VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | c.VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | c.VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+    info.pfnUserCallback = &onMessage;
+    var messenger: c.VkDebugUtilsMessengerEXT = null;
+    try check(create(instance, &info, null, &messenger), "vkCreateDebugUtilsMessengerEXT");
+    return messenger;
+}
+
+fn stopListening(instance: c.VkInstance, messenger: c.VkDebugUtilsMessengerEXT) void {
+    const destroy_fn: c.PFN_vkDestroyDebugUtilsMessengerEXT = @ptrCast(c.vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+    if (destroy_fn) |destroy| destroy(instance, messenger, null);
 }
