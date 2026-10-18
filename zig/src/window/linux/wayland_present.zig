@@ -21,13 +21,13 @@ const Size = window.Size;
 /// are linked into the core only for the native render path (`build.zig`), so a webview
 /// build that merely *referenced* the presenter failed to link: `window-check` never
 /// presents through it, yet `WaylandWindow.close`'s `gpu.deinit()` alone left ten EGL/GL
-/// symbols undefined (measured 2026-10-19). Compiled out, every frame takes shared memory.
+/// symbols undefined (measured 2026-10-18). Compiled out, every frame takes shared memory.
 pub const gpu_present = @import("build_options").native_render;
 
 /// One shared-memory buffer: a memfd mapped here and by the compositor, its pool and its
 /// `wl_buffer`, kept while the window keeps its size.
 ///
-/// Measured before this (2026-10-19, `strace -c`, 8 s of a native app with
+/// Measured before this (2026-10-18, `strace -c`, 8 s of a native app with
 /// `LEPTON_PRESENT=shm`): every frame made a new memfd, `ftruncate`, `mmap`, pool and buffer
 /// and threw them away (2301 `memfd_create` in ~7 s), and nothing paced the loop, so it
 /// painted ~300 frames a second for a 60 Hz screen — 9.06 s of CPU in 10 s. The buffer
