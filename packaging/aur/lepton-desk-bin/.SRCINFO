@@ -1,0 +1,27 @@
+pkgbase = lepton-desk-bin
+	pkgdesc = Desktop app framework with a Zig core and a web frontend on WPE WebKit (prebuilt CLI)
+	pkgver = 0.1.6
+	pkgrel = 1
+	url = https://github.com/lepton-desk/lepton
+	arch = x86_64
+	license = MIT OR Apache-2.0
+	depends = glibc
+	depends = libgcc
+	depends = zig>=0.16.0
+	depends = zig<0.17
+	depends = pkgconf
+	depends = wpewebkit>=2.54
+	optdepends = nodejs: frontend builds for npm, pnpm and Yarn projects
+	optdepends = pnpm: the default package manager when installed
+	optdepends = bun: Bun projects
+	optdepends = cairo: text on the native (no web engine) render path
+	optdepends = mesa: GPU presentation on the native render path
+	optdepends = harfbuzz: GPU text on the native render path
+	provides = lepton-desk
+	conflicts = lepton-desk
+	options = !strip
+	options = !debug
+	source = cli-linux-x64-0.1.6.tgz::https://registry.npmjs.org/@lepton-desk/cli-linux-x64/-/cli-linux-x64-0.1.6.tgz
+	sha512sums = 914b457239eda169dcb8808a9afd68aef1763656161be899bd2e01e3804c0b33d20abec674a6cb9132bf967ca7361698f0d0e2467bc2119b53370d1defb120a9
+
+pkgname = lepton-desk-bin

@@ -1,0 +1,39 @@
+# Maintainer: Lepton <lepton-framework@protonmail.com>
+
+pkgname=lepton-desk-bin
+pkgver=0.1.6
+pkgrel=1
+pkgdesc="Desktop app framework with a Zig core and a web frontend on WPE WebKit (prebuilt CLI)"
+arch=('x86_64')
+url="https://github.com/lepton-desk/lepton"
+license=('MIT OR Apache-2.0')
+# The CLI builds each application's Zig core with the system Zig and probes libraries
+# with pkg-config. Lepton targets Zig 0.16 exactly: std APIs change between releases.
+# zig, pkgconf and wpewebkit are run or built against, not linked, so namcap reports
+# them as possibly unneeded; they are needed.
+depends=('glibc' 'libgcc' 'zig>=0.16.0' 'zig<0.17' 'pkgconf' 'wpewebkit>=2.54')
+optdepends=(
+  'nodejs: frontend builds for npm, pnpm and Yarn projects'
+  'pnpm: the default package manager when installed'
+  'bun: Bun projects'
+  'cairo: text on the native (no web engine) render path'
+  'mesa: GPU presentation on the native render path'
+  'harfbuzz: GPU text on the native render path'
+)
+provides=('lepton-desk')
+# Installed as /usr/bin/lepton-desk: Dropbox's JPEG compressor is packaged as `lepton` and
+# owns /usr/bin/lepton, so both can be installed side by side. Inside a project the
+# `"lepton"` script runs the CLI from the project's own node_modules, not this one.
+conflicts=('lepton-desk')
+# The binary is published to npm as the CLI's platform package; it is the same file
+# `npm install @lepton-desk/cli` runs.
+source=("cli-linux-x64-${pkgver}.tgz::https://registry.npmjs.org/@lepton-desk/cli-linux-x64/-/cli-linux-x64-${pkgver}.tgz")
+# npm's own integrity for this tarball (sha512), from `npm view @lepton-desk/cli-linux-x64@0.1.6 dist.integrity`.
+sha512sums=('914b457239eda169dcb8808a9afd68aef1763656161be899bd2e01e3804c0b33d20abec674a6cb9132bf967ca7361698f0d0e2467bc2119b53370d1defb120a9')
+options=('!strip' '!debug')
+
+package() {
+  install -Dm755 package/bin/lepton "$pkgdir/usr/bin/lepton-desk"
+  install -Dm644 package/LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm644 package/LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}

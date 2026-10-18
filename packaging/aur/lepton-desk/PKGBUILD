@@ -1,0 +1,52 @@
+# Maintainer: Lepton <lepton-framework@protonmail.com>
+
+pkgname=lepton-desk
+pkgver=0.1.6
+pkgrel=1
+pkgdesc="Desktop app framework with a Zig core and a web frontend on WPE WebKit"
+arch=('x86_64' 'aarch64')
+url="https://github.com/lepton-desk/lepton"
+license=('MIT OR Apache-2.0')
+# The CLI builds each application's Zig core with the system Zig and probes libraries
+# with pkg-config. Lepton targets Zig 0.16 exactly: std APIs change between releases.
+# zig, pkgconf and wpewebkit are run or built against, not linked, so namcap reports
+# them as possibly unneeded; they are needed.
+depends=('glibc' 'libgcc' 'zig>=0.16.0' 'zig<0.17' 'pkgconf' 'wpewebkit>=2.54')
+makedepends=('cargo' 'git')
+optdepends=(
+  'nodejs: frontend builds for npm, pnpm and Yarn projects'
+  'pnpm: the default package manager when installed'
+  'bun: Bun projects'
+  'cairo: text on the native (no web engine) render path'
+  'mesa: GPU presentation on the native render path'
+  'harfbuzz: GPU text on the native render path'
+)
+# Installed as /usr/bin/lepton-desk: Dropbox's JPEG compressor is packaged as `lepton` and
+# owns /usr/bin/lepton, so both can be installed side by side. Inside a project the
+# `"lepton"` script runs the CLI from the project's own node_modules, not this one.
+conflicts=('lepton-desk-bin')
+# 0.1.6 as released to npm (`Release 0.1.6`); the release was not tagged.
+_commit=22e92b7838c1f4c2f7f19144933a77d226263726
+source=("$pkgname::git+https://github.com/lepton-desk/lepton.git#commit=$_commit")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc --print host-tuple)"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # One binary; the Zig core it vendors into new projects is embedded at build time.
+  cargo build --frozen --release --bin lepton
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/lepton "$pkgdir/usr/bin/lepton-desk"
+  install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+  install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
+}
