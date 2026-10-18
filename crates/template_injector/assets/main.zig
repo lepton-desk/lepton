@@ -369,6 +369,14 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
 
     var state: State = .{{}};
 
+    // The GPU draws the screen as a command list when it can (Wayland, an ES 3 context,
+    // the text libraries at build time); otherwise, or when the driver refuses, the CPU
+    // paints the frame below and it is uploaded whole, as before.
+    var gpu_screen: GpuSlot = if (comptime core.gles3.available) (if (opened == .wayland) GpuScreen.init(allocator) catch null else null) else {{}};
+    defer if (comptime core.gles3.available) {{
+        if (gpu_screen) |*screen| screen.deinit(allocator);
+    }};
+
     std.debug.print("render       native, no engine\n", .{{}});
     std.debug.print("requested    {{d}}x{{d}}\n", .{{ request.size.width, request.size.height }});
     std.debug.print("channel      {{s}}\n", .{{"{channel}"}});
@@ -395,6 +403,23 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
         // the figure this project's native mode exists to be low, and a number that is
         // only ever printed to a log is a number nobody checks.
         state.resident_bytes = core.probe.residentSetBytes() catch state.resident_bytes;
+
+        if (comptime core.gles3.available) {{
+            if (gpu_screen) |*screen| switch (opened) {{
+                .wayland => |handle| {{
+                    if (screen.draw(allocator, handle, frame.size, frames, &state)) |_| {{
+                        if (frames == 1) std.debug.print("present      gpu scene\n", .{{}});
+                        opened.wait(16) catch break;
+                        continue;
+                    }} else |err| {{
+                        core.report.fact("gpu scene", .warn, "{{t}}; drawing with the CPU", .{{err}});
+                        screen.deinit(allocator);
+                        gpu_screen = null;
+                    }}
+                }},
+                .x11 => {{}},
+            }};
+        }}
 
         paint(&frame, if (subject) |*t| t else null, frames, &state);
         // The window's own chrome, over the content: client-side decorations are drawn by
@@ -474,6 +499,63 @@ fn paint(frame: *core.surface.Surface, subject: ?*core.render.Text, frames: u32,
         frame.hLine(baseline, y, width - baseline * 2, ink.groove);
     }}
 }}
+
+/// The screen as draw commands (`core.scene`), drawn by the GPU in one call with the
+/// window's frame (`core.chromeScene`): the same masthead, counters and lattice as `paint`,
+/// with the title in the bar and the menu's labels, which the CPU path cannot shape.
+const GpuScreen = if (core.gles3.available) struct {{
+    heading: core.gles3.glyph_text.Font,
+    body: core.gles3.glyph_text.Font,
+    glyphs: core.gles3.atlas.Atlas,
+    list: core.gles3.scene.List = .{{}},
+
+    fn init(allocator: std.mem.Allocator) !@This() {{
+        var path: [1024]u8 = undefined;
+        const file = try core.gles3.glyph_text.find("sans", &path);
+        var heading = try core.gles3.glyph_text.Font.open(allocator, file, 20, 0);
+        errdefer heading.deinit();
+        var body = try core.gles3.glyph_text.Font.open(allocator, file, 13, 1);
+        errdefer body.deinit();
+        return .{{ .heading = heading, .body = body, .glyphs = try core.gles3.atlas.Atlas.init(allocator) }};
+    }}
+
+    fn deinit(self: *@This(), allocator: std.mem.Allocator) void {{
+        self.list.deinit(allocator);
+        self.glyphs.deinit(allocator);
+        self.body.deinit();
+        self.heading.deinit();
+    }}
+
+    fn draw(self: *@This(), allocator: std.mem.Allocator, handle: *core.waylandWindow.WaylandWindow, size: core.window.Size, frames: u32, state: *const State) !void {{
+        const scene = core.gles3.scene;
+        self.list.clear();
+        const w: f32 = @floatFromInt(size.width);
+        const h: f32 = @floatFromInt(size.height);
+        const top: f32 = @floatFromInt(handle.input.titlebar_height);
+        const b: f32 = baseline;
+        try self.list.rect(allocator, .{{ .x = 0, .y = top, .width = w, .height = b * 4 }}, .{{ .fill = scene.rgba(0x1b2026ff) }});
+        try self.list.rect(allocator, .{{ .x = 0, .y = top + b * 4, .width = w, .height = 1 }}, .{{ .fill = scene.rgba(0x2c343dff) }});
+        _ = try self.heading.draw(allocator, &self.glyphs, &self.list, "{product}", b, top + b * 2, scene.rgba(0xe6eaefff));
+        _ = try self.body.draw(allocator, &self.glyphs, &self.list, "native render, drawn on the GPU", b, top + b * 3, scene.rgba(0x9da7b2ff));
+
+        var line: [64]u8 = undefined;
+        _ = try self.body.draw(allocator, &self.glyphs, &self.list, try std.fmt.bufPrint(&line, "frames {{d}}", .{{frames}}), b, top + b * 6, scene.rgba(0x9da7b2ff));
+        if (state.resident_bytes) |bytes| {{
+            _ = try self.body.draw(allocator, &self.glyphs, &self.list, try std.fmt.bufPrint(&line, "resident set {{d}} KiB", .{{bytes / 1024}}), b, top + b * 7, scene.rgba(0x9da7b2ff));
+        }}
+        var y: f32 = top + b * 9;
+        while (y < h - b) : (y += b * 3) {{
+            try self.list.rect(allocator, .{{ .x = b, .y = y, .width = w - b * 2, .height = 1 }}, .{{ .fill = scene.rgba(0x1f252bff) }});
+        }}
+
+        try core.chromeScene.titlebar(handle.input, "{product}", &self.body, allocator, &self.glyphs, &self.list);
+        try core.chromeScene.menu(handle.menu, &self.body, allocator, &self.glyphs, &self.list);
+        try handle.presentScene(&self.list, &self.glyphs, scene.rgba(0x14181cff), size, null);
+    }}
+}} else void;
+
+/// `?GpuScreen` where the build can draw on the GPU, nothing where it cannot.
+const GpuSlot = if (core.gles3.available) ?GpuScreen else void;
 
 /// What the screen shows about this process, read rather than assumed.
 const State = struct {{

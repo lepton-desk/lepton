@@ -48,7 +48,11 @@ pub const scene = @import("render/scene.zig");
 pub const atlas = @import("render/atlas.zig");
 /// The native path's GPU drawing: the command list's GLES 3 renderer and its text
 /// (HarfBuzz + FreeType). Linked only into the native render build.
-pub const gles3 = if (@import("build_options").native_render) @import("render/gles3.zig") else struct {};
+pub const gles3 = if (@import("build_options").gpu_scene) @import("render/gles3.zig") else struct {
+    pub const available = false;
+};
+/// The window's titlebar and menu as draw commands, for the GPU path (with `gles3`).
+pub const chromeScene = if (@import("build_options").gpu_scene) @import("window/linux/chrome_scene.zig") else struct {};
 pub const vulkanThreshold = @import("render/gpu/vulkan_threshold.zig");
 pub const window = @import("window/window.zig");
 

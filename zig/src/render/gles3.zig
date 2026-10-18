@@ -15,6 +15,8 @@ const std = @import("std");
 pub const scene = @import("scene.zig");
 pub const atlas = @import("atlas.zig");
 pub const glyph_text = @import("glyph_text.zig");
+/// This build can draw the command list on the GPU (`core.gles3.available`).
+pub const available = true;
 
 const c = @cImport({
     @cInclude("EGL/egl.h");
@@ -443,7 +445,7 @@ test "text is shaped, rasterised once and drawn where the pen put it" {
     const text = @import("glyph_text.zig");
     var path_buffer: [1024]u8 = undefined;
     const path = try text.find("sans", &path_buffer);
-    var font = try text.Font.open(path, 20, 0);
+    var font = try text.Font.open(std.testing.allocator, path, 20, 0);
     defer font.deinit();
     var glyphs = try atlas.Atlas.init(std.testing.allocator);
     defer glyphs.deinit(std.testing.allocator);
@@ -482,6 +484,8 @@ test "text is shaped, rasterised once and drawn where the pen put it" {
     list.clear();
     _ = try font.draw(std.testing.allocator, &glyphs, &list, "Lepton", 6, 40, scene.rgba(0x000000ff));
     renderer.syncAtlas(&glyphs);
+    // Shaped once, kept by its text.
+    try std.testing.expectEqual(@as(u32, 1), font.runs.count());
     try std.testing.expect(first_upload > 0);
     try std.testing.expectEqual(first_upload, renderer.atlas_uploaded);
 }

@@ -64,7 +64,7 @@ pub fn main() !u8 {
     defer window.close();
 
     var path_buffer: [1024]u8 = undefined;
-    var font = try gles3.glyph_text.Font.open(try gles3.glyph_text.find("sans", &path_buffer), 13, 0);
+    var font = try gles3.glyph_text.Font.open(allocator, try gles3.glyph_text.find("sans", &path_buffer), 13, 0);
     defer font.deinit();
     var glyphs = try gles3.atlas.Atlas.init(allocator);
     defer glyphs.deinit(allocator);

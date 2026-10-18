@@ -211,14 +211,16 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // surface, and copies through shared memory when it will not. Both halves are always
     // compiled in — the choice is made at run time and the machine that falls back must
     // not have been built without the other path.
+    const gpu_text = native_render and hasPkgConfig(b, "egl") and hasPkgConfig(b, "freetype2") and
+        hasPkgConfig(b, "harfbuzz") and hasPkgConfig(b, "fontconfig");
     if (native_render and hasPkgConfig(b, "egl")) {
         core.linkSystemLibrary("egl", .{});
         core.linkSystemLibrary("GLESv2", .{});
         core.linkSystemLibrary("wayland-egl", .{});
-        // Text for the draw command list (`render/glyph_text.zig`), when installed: only
-        // what draws text on the GPU needs it, so an application without HarfBuzz still builds.
-        for ([_][]const u8{ "freetype2", "harfbuzz", "fontconfig" }) |library| {
-            if (hasPkgConfig(b, library)) core.linkSystemLibrary(library, .{});
+        // Text for the draw command list (`render/glyph_text.zig`), when all three are
+        // installed: without them the native path draws with the CPU, as before.
+        if (gpu_text) {
+            for ([_][]const u8{ "freetype2", "harfbuzz", "fontconfig" }) |library| core.linkSystemLibrary(library, .{});
         }
     }
 
@@ -285,6 +287,8 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     opts.addOption(bool, "have_wayland", have_wayland);
     opts.addOption(bool, "native_render", native_render);
     opts.addOption(bool, "have_cairo", have_cairo);
+    // The native path can draw its screen as a command list on the GPU (EGL + text libs).
+    opts.addOption(bool, "gpu_scene", gpu_text);
     opts.addOption(bool, "have_wpe", have_wpe);
     opts.addOption(bool, "wpe_platform_abi", use_platform_abi);
     opts.addOption([]const u8, "wpe_backend_library", wpe_backend_library orelse "");
@@ -399,7 +403,7 @@ pub fn build(b: *std.Build) void {
         const gpu_module = b.createModule(.{
             // The presenter, not the renderer: it imports the renderer, so both files'
             // tests run, and the presenter's choice of path is tested where it is made.
-            .root_source_file = b.path("src/render/gpu_tests.zig"),
+            .root_source_file = b.path("src/gpu_tests.zig"),
             .target = target,
             .optimize = .Debug,
             .link_libc = true,
