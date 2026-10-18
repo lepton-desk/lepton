@@ -19,6 +19,7 @@ const build_options = @import("build_options");
 
 const e_get_settings = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "webkit_web_view_get_settings" });
 const e_set_developer_extras = @extern(*const fn (?*anyopaque, c_int) callconv(.c) void, .{ .name = "webkit_settings_set_enable_developer_extras" });
+const e_set_console_to_stdout = @extern(*const fn (?*anyopaque, c_int) callconv(.c) void, .{ .name = "webkit_settings_set_enable_write_console_messages_to_stdout" });
 const e_toggle_inspector = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "webkit_web_view_toggle_inspector" });
 const e_get_wpe_view = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "webkit_web_view_get_wpe_view" });
 const e_event_type = @extern(*const fn (?*anyopaque) callconv(.c) c_int, .{ .name = "wpe_event_get_event_type" });
@@ -81,6 +82,9 @@ pub fn apply(web_view: *anyopaque) void {
     const settings = e_get_settings(web_view) orelse return;
     if (developer_tools) {
         e_set_developer_extras(settings, 1);
+        // The page's `console.*` and uncaught errors in the terminal `lepton dev`/`run`
+        // started from: without it a page that threw left a blank window and no word why.
+        e_set_console_to_stdout(settings, 1);
         // WPE draws no context menu and binds no key to the inspector: both are the
         // embedder's (measured: right-click and Ctrl+Shift+I did nothing).
         if (e_get_wpe_view(web_view)) |view| _ = e_signal_connect(view, "event", @ptrCast(&onEvent), web_view, null, 0);
