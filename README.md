@@ -21,6 +21,21 @@ frontend is a Vite project; Lepton puts it in a native window.
 - WPE WebKit 2.54+ with `wpe-platform` (`pkg-config wpe-webkit-2.0`), libsoup 3
 - Node 20+ and any of npm, pnpm, Yarn or Bun, for the frontend
 
+### Arch Linux
+
+The CLI is packaged for Arch as `lepton-desk` (built from source) and `lepton-desk-bin`
+(the npm binary). Until they are on the AUR (new AUR accounts are closed for now), build
+them from this repository; pacman pulls in Zig and WPE WebKit:
+
+```bash
+git clone https://github.com/lepton-desk/lepton.git
+cd lepton/packaging/aur/lepton-desk-bin && makepkg -si
+```
+
+The command is installed as `lepton-desk` (`lepton-desk new my-app`), because the AUR's
+`lepton` is Dropbox's JPEG compressor and owns `/usr/bin/lepton`. Inside a project the
+`lepton` script runs the project's own CLI from `node_modules`, as with any install.
+
 ## Start
 
 ```bash
