@@ -1,6 +1,6 @@
 {
   "name": "create-lepton-app",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Create a Lepton desktop app: npm create lepton-app, pnpm create lepton-app, yarn create lepton-app, bun create lepton-app.",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -29,7 +29,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@lepton-desk/cli": "0.1.7"
+    "@lepton-desk/cli": "0.1.8"
   },
   "scripts": {
     "test": "node --test test/"

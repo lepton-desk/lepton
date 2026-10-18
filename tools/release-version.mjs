@@ -128,6 +128,12 @@ function bump(version) {
 		/Şu anki sürüm: \*\*[^*]+\*\*/,
 		`Şu anki sürüm: **${version}**`,
 	);
+	// The previous version is the newest one already on npm.
+	replaceOnce(
+		at("docs", "yayin.md"),
+		/\(0\.1\.0–[^ ]+ yayımlandı/,
+		`(0.1.0–${previous} yayımlandı`,
+	);
 	execFileSync("cargo", ["update", "--workspace", "--quiet"], {
 		cwd: root,
 		stdio: "inherit",

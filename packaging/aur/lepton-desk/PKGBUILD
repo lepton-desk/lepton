@@ -1,7 +1,7 @@
 # Maintainer: Lepton <lepton-framework@protonmail.com>
 
 pkgname=lepton-desk
-pkgver=0.1.7
+pkgver=0.1.8
 pkgrel=1
 pkgdesc="Desktop app framework with a Zig core and a web frontend on WPE WebKit"
 arch=('x86_64' 'aarch64')
