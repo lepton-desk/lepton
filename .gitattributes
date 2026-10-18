@@ -2,3 +2,5 @@
 # the templates out with CRLF: `lepton` built there embedded them so, and `zig fmt --check`
 # refused the generated `main.zig` (measured 2026-10-18). Binary files are detected and left alone.
 * text=auto eol=lf
+# Microsoft's header, byte for byte as the package ships it (CRLF), so it matches its source.
+zig/webview2/WebView2.h -text

@@ -572,6 +572,29 @@ pub fn build(b: *std.Build) void {
         webview_check.step.dependOn(generated);
     }
 
+    // The WebView2 probe: Windows only, and on its own — the core does not build there yet
+    // (POSIX IPC, the Linux window layer). `webview2/` holds Microsoft's header.
+    if (target.result.os.tag == .windows) {
+        const webview2_check = b.addExecutable(.{
+            .name = "lepton-webview2-check",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/tools/webview2_check.zig"),
+                .target = target,
+                .optimize = .Debug,
+                .link_libc = true,
+            }),
+        });
+        webview2_check.root_module.addIncludePath(b.path("webview2"));
+        for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi" }) |name| {
+            webview2_check.root_module.linkSystemLibrary(name, .{});
+        }
+        const run_webview2_check = b.addRunArtifact(webview2_check);
+        b.step(
+            "webview2-check",
+            "Put WebView2 in a real Win32 window, load a page and report what reached it",
+        ).dependOn(&run_webview2_check.step);
+    }
+
     // Only built where the engine is linked. A capability report on a build with no
     // engine would report "no pixels reachable" for the uninteresting reason that there
     // is no engine, and that message would be indistinguishable from the real one.
