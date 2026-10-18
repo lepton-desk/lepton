@@ -1,13 +1,12 @@
 # npm yayını: `@lepton-desk/*`
 
-Şu anki sürüm: **0.1.6** (0.1.0–0.1.5 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı: `Cargo.toml`
-`[workspace.package] version`, `packages/api`, `packages/cli` ve `packages/plugin-*`
-ve `packages/create-lepton-app` `package.json` (cli'nin `optionalDependencies`'i ve eklentilerin `peerDependencies`'i dahil);
-platform paketini `stage.mjs` yazar. Sürümü artırınca yeni sürümün şablonunu sakla:
-`crates/template_injector/assets/main.zig` → `assets/history/<sürüm>/main.zig`,
-`lepton-build.zig` → `assets/history/<sürüm>/build.zig`, ve `src/update.rs` `RELEASES`'e ekle
-(`lepton update` bir projenin hangi sürümden kaldığını bunlarla bulur; test, derlenen sürüm
-listede yoksa kırılır).
+Şu anki sürüm: **0.1.7** (0.1.0–0.1.6 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı tek komut: `node tools/release-version.mjs <sürüm>`. `Cargo.toml` (CLI sürümünü
+derlemede buradan okur: `--version`, komut başlıkları, yeni projelerin `@lepton-desk/*` sürümleri),
+`Cargo.lock`, sekiz npm paketinin `version`'ı, `cli`'nin `optionalDependencies`'i, eklentilerin
+`^<sürüm>` `peerDependencies`'i, `create-lepton-app`'in `@lepton-desk/cli`'si, `lepton update`'in
+şablon geçmişi (`assets/history/<sürüm>/` + `RELEASES`), AUR `pkgver`'i ve bu dosyanın sürümü.
+Yayından sonra `node tools/release-version.mjs aur`: `-bin`'in sha512'si npm'den, kaynak paketin
+commit'i HEAD'den, `.SRCINFO`'lar yeniden. Platform paketini `stage.mjs` yazar.
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
 `@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
@@ -89,10 +88,10 @@ npm view @lepton-desk/cli version
 ```
 
 ```bash
-npx @lepton-desk/cli@0.1.6 --version
+npx @lepton-desk/cli@latest --version
 ```
 
-Beklenen: `lepton 0.1.6`.
+Beklenen: `lepton <sürüm>` (yukarıdaki "Şu anki sürüm").
 
 ## 6. Geri alma
 - 72 saat içinde: `npm unpublish @lepton-desk/<paket>@<sürüm>` (aynı sürüm bir daha kullanılamaz).

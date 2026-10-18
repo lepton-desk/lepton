@@ -45,6 +45,11 @@ pub const RELEASES: &[Release] = &[
         entry: include_str!("../assets/history/0.1.6/main.zig"),
         build: include_str!("../assets/history/0.1.6/build.zig"),
     },
+    Release {
+        version: "0.1.7",
+        entry: include_str!("../assets/history/0.1.7/main.zig"),
+        build: include_str!("../assets/history/0.1.7/build.zig"),
+    },
 ];
 
 /// What `lepton.config.json` gives the entry template.

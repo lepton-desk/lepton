@@ -1,7 +1,7 @@
 # Maintainer: Lepton <lepton-framework@protonmail.com>
 
 pkgname=lepton-desk-bin
-pkgver=0.1.6
+pkgver=0.1.7
 pkgrel=1
 pkgdesc="Desktop app framework with a Zig core and a web frontend on WPE WebKit (prebuilt CLI)"
 arch=('x86_64')
@@ -28,7 +28,8 @@ conflicts=('lepton-desk')
 # The binary is published to npm as the CLI's platform package; it is the same file
 # `npm install @lepton-desk/cli` runs.
 source=("cli-linux-x64-${pkgver}.tgz::https://registry.npmjs.org/@lepton-desk/cli-linux-x64/-/cli-linux-x64-${pkgver}.tgz")
-# npm's own integrity for this tarball (sha512), from `npm view @lepton-desk/cli-linux-x64@0.1.6 dist.integrity`.
+# npm's own integrity for this tarball (sha512), from `npm view @lepton-desk/cli-linux-x64@<pkgver>
+# dist.integrity`; `node tools/release-version.mjs aur` writes it after each release.
 sha512sums=('914b457239eda169dcb8808a9afd68aef1763656161be899bd2e01e3804c0b33d20abec674a6cb9132bf967ca7361698f0d0e2467bc2119b53370d1defb120a9')
 options=('!strip' '!debug')
 

@@ -1,0 +1,7 @@
+# What makepkg leaves when a package is built here (README: `makepkg -si`).
+src/
+pkg/
+*.tgz
+*.pkg.tar.zst
+*.log
+lepton-desk/lepton-desk/
