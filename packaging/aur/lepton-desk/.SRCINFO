@@ -1,6 +1,6 @@
 pkgbase = lepton-desk
 	pkgdesc = Desktop app framework with a Zig core and a web frontend on WPE WebKit
-	pkgver = 0.1.7
+	pkgver = 0.1.8
 	pkgrel = 1
 	url = https://github.com/lepton-desk/lepton
 	arch = x86_64
@@ -21,7 +21,7 @@ pkgbase = lepton-desk
 	optdepends = mesa: GPU presentation on the native render path
 	optdepends = harfbuzz: GPU text on the native render path
 	conflicts = lepton-desk-bin
-	source = lepton-desk::git+https://github.com/lepton-desk/lepton.git#commit=0b898dc426cc81881ade15dfe437a06449311d66
+	source = lepton-desk::git+https://github.com/lepton-desk/lepton.git#commit=ffdde83fa5fb33f34cb890fbdb1d7a9a9cd7a61f
 	sha256sums = SKIP
 
 pkgname = lepton-desk

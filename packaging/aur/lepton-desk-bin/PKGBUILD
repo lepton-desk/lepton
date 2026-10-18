@@ -30,7 +30,7 @@ conflicts=('lepton-desk')
 source=("cli-linux-x64-${pkgver}.tgz::https://registry.npmjs.org/@lepton-desk/cli-linux-x64/-/cli-linux-x64-${pkgver}.tgz")
 # npm's own integrity for this tarball (sha512), from `npm view @lepton-desk/cli-linux-x64@<pkgver>
 # dist.integrity`; `node tools/release-version.mjs aur` writes it after each release.
-sha512sums=('9a4ec41ffbfaa6b7eab0f4bafc7dcfdd9cea903fdd12b1214350c086d45358781eabf222db7a8418cc02a7bd79a4140baafd9131fde2afc2d9c849822041219b')
+sha512sums=('4575775f9c9c716b8eb22f1e97bf505b6d06cf5e60bef20b3cb91002ea05e589ea35405cd1ea048c7bd1f4c6c0489dcb3e200a2a91279cbfed1ac8ab4a3efa3f')
 options=('!strip' '!debug')
 
 package() {
