@@ -32,7 +32,7 @@ pub fn stale(root: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = entries
         .flatten()
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_symlink()))
-        .filter_map(|entry| std::fs::canonicalize(entry.path()).ok())
+        .filter_map(|entry| super::resolve(&entry.path()).ok())
         .filter(|target| is_linked_checkout(target) && needs_build(target))
         .collect();
     found.sort();
@@ -247,6 +247,32 @@ mod tests {
             .map_err(|error| fail("set_modified", error))
     }
 
+    /// Links `at` to `target` the way pnpm's `link:` does: a symlink on Unix, a directory
+    /// junction on Windows (no administrator needed, unlike a symlink there).
+    fn link(target: &std::path::Path, at: &std::path::Path) -> Result<(), Failure> {
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(target, at).map_err(|error| fail("symlink", error));
+        // `cmd` reads a `/` inside a path as a switch; rejoining the components gives `\`.
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd")
+            .arg("/c")
+            .arg("mklink")
+            .arg("/J")
+            .arg(at.components().collect::<std::path::PathBuf>())
+            .arg(target.components().collect::<std::path::PathBuf>())
+            .stdout(std::process::Stdio::null())
+            .status()
+            .map_err(|error| fail("mklink /J", error))
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(fail("mklink /J", status))
+                }
+            });
+        made
+    }
+
     /// A project with `@lepton-desk/api` linked to a checkout beside it.
     fn linked(scratch: &Scratch, src_age: u64, dist_age: Option<u64>) -> Result<(), Failure> {
         scratch.write("api/package.json", r#"{"scripts":{"build":"tsc"}}"#)?;
@@ -258,11 +284,10 @@ mod tests {
         }
         std::fs::create_dir_all(scratch.path().join("app/node_modules/@lepton-desk"))
             .map_err(|error| fail("mkdir", error))?;
-        std::os::unix::fs::symlink(
-            scratch.path().join("api"),
-            scratch.path().join("app/node_modules/@lepton-desk/api"),
+        link(
+            &scratch.path().join("api"),
+            &scratch.path().join("app/node_modules/@lepton-desk/api"),
         )
-        .map_err(|error| fail("symlink", error))
     }
 
     #[test]
@@ -323,11 +348,10 @@ mod tests {
         scratch.write(&format!("{store}/src/core.ts"), "export {};\n")?;
         std::fs::create_dir_all(scratch.path().join("app/node_modules/@lepton-desk"))
             .map_err(|error| fail("mkdir", error))?;
-        std::os::unix::fs::symlink(
-            scratch.path().join(store),
-            scratch.path().join("app/node_modules/@lepton-desk/api"),
-        )
-        .map_err(|error| fail("symlink", error))?;
+        link(
+            &scratch.path().join(store),
+            &scratch.path().join("app/node_modules/@lepton-desk/api"),
+        )?;
         assert_eq!(stale(&scratch.path().join("app")).len(), 0);
         Ok(())
     }
@@ -342,11 +366,10 @@ mod tests {
         scratch.write("api/src/core.ts", "export {};\n")?;
         std::fs::create_dir_all(scratch.path().join("app/node_modules/@lepton-desk"))
             .map_err(|error| fail("mkdir", error))?;
-        std::os::unix::fs::symlink(
-            scratch.path().join("api"),
-            scratch.path().join("app/node_modules/@lepton-desk/api"),
+        link(
+            &scratch.path().join("api"),
+            &scratch.path().join("app/node_modules/@lepton-desk/api"),
         )
-        .map_err(|error| fail("symlink", error))
     }
 
     fn has_pnpm() -> bool {

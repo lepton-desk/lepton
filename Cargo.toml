@@ -43,6 +43,10 @@ ctrlc = { version = "3.5", features = ["termination"] }
 # `kill(2)` with a chosen signal, safely. `Child::kill` only sends SIGKILL, which a
 # child cannot pass on to its own children.
 nix = { version = "0.31", default-features = false, features = ["signal"] }
+# Windows has no SIGTERM, and `Child::kill` ends `cmd` but not the node under it (measured
+# 2026-10-18). A job object with kill-on-close ends the whole tree when `lepton` ends, even
+# when it is killed outright (`Stop-Process -Force`, measured) — the kernel closes the handle.
+win32job = "2.0.3"
 
 # `lepton package` writes release archives itself, with no `tar`/`gzip` subprocess: the
 # entries, their order, owners and times are chosen here, so two packages of one build

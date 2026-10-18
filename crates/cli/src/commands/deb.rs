@@ -237,7 +237,8 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-#[cfg(test)]
+// The tests set Unix file modes; packaging runs on Linux only (`package.rs`).
+#[cfg(all(test, unix))]
 mod tests {
     use super::{Package, dpkg_owner, file_name, package_name, version, write};
     use lepton_orchestrator::testing::{Failure, Scratch, fail};

@@ -67,6 +67,14 @@ impl Flags {
 
     /// Builds (unless told not to) and lays out the project rooted at `root`.
     pub fn package_in(&self, root: &Path) -> Outcome {
+        // Every format here is a Linux package of a Linux build; elsewhere it would be a
+        // wrongly named archive of the wrong binary.
+        if !cfg!(target_os = "linux") {
+            return Err(CliError::Invalid(format!(
+                "lepton package builds Linux packages and runs on Linux only for now (this is {})",
+                std::env::consts::OS
+            )));
+        }
         lepton_orchestrator::require_project(root)?;
         // A SIGTERM to `lepton` ends the build or the application it started.
         lepton_orchestrator::supervise::install();
@@ -357,7 +365,8 @@ fn io(path: &Path, verb: &str, error: &std::io::Error) -> CliError {
     CliError::Invalid(format!("could not {verb} {}: {error}", path.display()))
 }
 
-#[cfg(test)]
+// Packaging runs on Linux only (`package_in`).
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{MARKER, Spec, assemble, bundle_name, write_target};
     use lepton_orchestrator::testing::{Failure, Scratch};

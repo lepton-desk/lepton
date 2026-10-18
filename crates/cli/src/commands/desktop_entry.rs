@@ -84,6 +84,10 @@ pub fn register(app_id: &str, name: &str, exec: &Path) -> Result<PathBuf, CliErr
 /// A missing entry costs the application its name in the dock, not its window, so a
 /// failure is reported and the command carries on.
 pub fn announce(app_id: &str, name: &str, exec: &Path) {
+    // XDG desktop entries are a Linux desktop's; Windows and macOS find applications otherwise.
+    if !cfg!(target_os = "linux") {
+        return;
+    }
     match register(app_id, name, exec) {
         Ok(path) => {
             super::report::Report::new().fact("desktop entry", &super::report::home_short(&path))
@@ -125,7 +129,8 @@ fn quote_exec(program: &str) -> String {
     escape_value(&quoted)
 }
 
-#[cfg(test)]
+// The entries and their paths are Linux's (`announce`).
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{applications_dir, entry_text, install};
     use lepton_orchestrator::testing::{Failure, Scratch};

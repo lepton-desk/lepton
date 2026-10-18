@@ -210,7 +210,8 @@ fn u64_at(bytes: &[u8], at: usize) -> Result<u64, &'static str> {
     Ok(u64::from_le_bytes(raw))
 }
 
-#[cfg(test)]
+// The tests read this test binary's own ELF and the system's libc: Linux only.
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{Dependency, locate, needed, needed_in, packages, pacman_owner, unowned};
     use lepton_orchestrator::testing::{Failure, fail};

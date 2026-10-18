@@ -351,7 +351,7 @@ mod naming_tests {
             steps[1]
                 .args
                 .iter()
-                .any(|arg| arg == "-Dfrontend-dist=/project/dist"),
+                .any(|arg| *arg == format!("-Dfrontend-dist={}", root.join("dist").display())),
             "the core must install the bundle: {:?}",
             steps[1].args
         );

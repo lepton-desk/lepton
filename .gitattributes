@@ -1,0 +1,4 @@
+# LF everywhere, on every checkout. Git for Windows ships `core.autocrlf=true`, which wrote
+# the templates out with CRLF: `lepton` built there embedded them so, and `zig fmt --check`
+# refused the generated `main.zig` (measured 2026-10-18). Binary files are detected and left alone.
+* text=auto eol=lf

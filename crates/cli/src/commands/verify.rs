@@ -9,7 +9,6 @@
 //! directory.
 
 use std::io::Read as _;
-use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -210,7 +209,7 @@ pub fn run_and_measure(program: &Path, workdir: &Path) -> Result<Report, CliErro
         std::thread::sleep(Duration::from_millis(20));
     };
     lepton_orchestrator::supervise::untrack(pid);
-    if status.signal().is_none() && status.code() != Some(0) {
+    if signal_of(status).is_none() && status.code() != Some(0) {
         return Err(CliError::Invalid(format!(
             "the application failed on SIGTERM ({}); stderr:\n{}",
             describe(status),
@@ -319,11 +318,23 @@ fn tree_size(dir: &Path) -> Result<u64, CliError> {
 }
 
 fn describe(status: std::process::ExitStatus) -> String {
-    match (status.code(), status.signal()) {
+    match (status.code(), signal_of(status)) {
         (Some(code), _) => format!("exit code {code}"),
         (None, Some(signal)) => format!("signal {signal}"),
         (None, None) => String::from("unknown status"),
     }
+}
+
+#[cfg(unix)]
+fn signal_of(status: std::process::ExitStatus) -> Option<i32> {
+    use std::os::unix::process::ExitStatusExt as _;
+    status.signal()
+}
+
+/// Windows has no signals; `lepton package` refuses to run there (`package.rs`).
+#[cfg(not(unix))]
+fn signal_of(_: std::process::ExitStatus) -> Option<i32> {
+    None
 }
 
 /// The last lines of the application's stderr, for a failure message.
@@ -340,7 +351,8 @@ fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_000_000.0)
 }
 
-#[cfg(test)]
+// Packaging runs on Linux only (`package.rs`).
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{descendants, proportional, resident, run_and_measure, unpack};
     use lepton_orchestrator::testing::{Failure, Scratch, fail};

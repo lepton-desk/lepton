@@ -170,6 +170,20 @@ impl Command {
     }
 }
 
+/// `std::fs::canonicalize`, but `C:\…` rather than `\\?\C:\…` on Windows: the verbatim form
+/// is what `canonicalize` returns there (measured), and it reaches `zig`/`pnpm` arguments and
+/// printed plans. Only a plain drive path is unwrapped; a network or device path is kept.
+pub fn resolve(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let resolved = std::fs::canonicalize(path)?;
+    if cfg!(windows)
+        && let Some(rest) = resolved.to_str().and_then(|text| text.strip_prefix(r"\\?\"))
+        && rest.as_bytes().get(1) == Some(&b':')
+    {
+        return Ok(std::path::PathBuf::from(rest));
+    }
+    Ok(resolved)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{CliError, Command};

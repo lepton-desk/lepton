@@ -454,16 +454,26 @@ pub fn require(chain: &Toolchain, needs: ToolRequirement) -> Result<()> {
 ///
 /// A process killed by a signal has no exit code. Printing `exit 0` for a crash
 /// would be precisely the sort of thing this tool exists to prevent.
-fn describe_status(status: &ExitStatus) -> String {
-    use std::os::unix::process::ExitStatusExt as _;
-
+pub(crate) fn describe_status(status: &ExitStatus) -> String {
     match status.code() {
         Some(code) => code.to_string(),
-        None => match status.signal() {
-            Some(signal) => format!("signal {signal}"),
-            None => "unknown".to_owned(),
-        },
+        None => describe_signal(status),
     }
+}
+
+#[cfg(unix)]
+fn describe_signal(status: &ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt as _;
+    match status.signal() {
+        Some(signal) => format!("signal {signal}"),
+        None => "unknown".to_owned(),
+    }
+}
+
+/// Windows always has a code: a process ended with `TerminateProcess` gets the one it was given.
+#[cfg(not(unix))]
+fn describe_signal(_: &ExitStatus) -> String {
+    "unknown".to_owned()
 }
 
 #[cfg(test)]
@@ -474,18 +484,35 @@ mod tests {
 
     /// `/bin/sh` with one script, which is the shortest way to make a child produce
     /// a known stream, exit code, and side effect without inventing a binary.
+    #[cfg(unix)]
     fn shell(script: &str) -> Step {
         Step::capturing("sh", "sh").args(["-c", script])
     }
 
+    /// `cmd /c` on Windows, which has no `sh`. Its `echo` ends lines with `\r\n`, which is
+    /// what a `.cmd` tool prints there too.
+    #[cfg(windows)]
+    fn shell(script: &str) -> Step {
+        Step::capturing("cmd", "cmd").args(["/c", script])
+    }
+
+    /// The `sh` script on Unix, the `cmd` one on Windows.
+    fn either(unix: &'static str, windows: &'static str) -> &'static str {
+        if cfg!(windows) { windows } else { unix }
+    }
+
     #[test]
     fn a_step_runs_and_returns_its_stdout() -> Result<(), Failure> {
-        let captured = assert_ok!(crate::run(&shell("printf hello")), "the step should run");
+        let captured = assert_ok!(
+            crate::run(&shell(either("printf hello", "echo hello"))),
+            "the step should run"
+        );
 
         assert_eq!(captured.stdout, "hello");
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_step_sets_its_own_variables_and_shows_them() -> Result<(), Failure> {
         let step = shell("printf %s \"$LEPTON_STEP_TEST\"").env("LEPTON_STEP_TEST", "a b");
@@ -503,8 +530,12 @@ mod tests {
     fn a_step_ends_when_its_process_does_even_if_a_child_keeps_the_pipes() -> Result<(), Failure> {
         // A launched browser kept an application's stdout open, and `lepton run` waited on
         // the pipe forever with the application a zombie. The background `sleep` here holds
-        // the pipe the same way, for five seconds.
-        let step = Step::new("sh", "sh").args(["-c", "sleep 5 & echo started"]);
+        // the pipe the same way, for five seconds (`start /b ping` on Windows).
+        let step = if cfg!(windows) {
+            Step::new("cmd", "cmd").args(["/c", "start /b ping -n 6 127.0.0.1 & echo started"])
+        } else {
+            Step::new("sh", "sh").args(["-c", "sleep 5 & echo started"])
+        };
         let began = std::time::Instant::now();
         assert_ok!(crate::run_streaming(&step), "the step should succeed");
         let took = began.elapsed();
@@ -520,7 +551,10 @@ mod tests {
         // Not an `Ok` with the output attached: a caller that ignored the exit code
         // would be reading a failed build's output as if it were good.
         let error = assert_err!(
-            crate::run(&shell("printf 'half a line' >&2; exit 3")),
+            crate::run(&shell(either(
+                "printf 'half a line' >&2; exit 3",
+                "1>&2 echo half a line& exit 3"
+            ))),
             "a failing step must be an error"
         );
 
@@ -536,6 +570,8 @@ mod tests {
         Ok(())
     }
 
+    /// Windows has no signals: a process ended from outside exits with the code it was given.
+    #[cfg(unix)]
     #[test]
     fn a_killed_child_is_reported_without_inventing_an_exit_code() -> Result<(), Failure> {
         // A crash is not `exit 0`, and a status that says "signal 9" is the difference
@@ -564,7 +600,10 @@ mod tests {
         // Merging them would turn a warning into an error, because a caller that
         // checks stderr for content cannot then tell a warning from a failure.
         let captured = assert_ok!(
-            crate::run(&shell("printf out; printf err >&2")),
+            crate::run(&shell(either(
+                "printf out; printf err >&2",
+                "echo out& 1>&2 echo err"
+            ))),
             "the step should run"
         );
 
@@ -578,7 +617,7 @@ mod tests {
         // So that a version string read from a tool compares equal to the version the
         // tool's own documentation prints.
         let captured = assert_ok!(
-            crate::run(&shell("printf '1.2.3\n\n'")),
+            crate::run(&shell(either("printf '1.2.3\n\n'", "echo 1.2.3& echo."))),
             "the step should run"
         );
 
@@ -590,9 +629,12 @@ mod tests {
     fn interior_whitespace_is_left_alone() -> Result<(), Failure> {
         // Only the ends are touched. A tool whose output is a table has interior
         // newlines, and trimming those would destroy the table.
-        let captured = assert_ok!(crate::run(&shell("printf 'a\nb\n'")), "the step should run");
+        let captured = assert_ok!(
+            crate::run(&shell(either("printf 'a\nb\n'", "echo a& echo b"))),
+            "the step should run"
+        );
 
-        assert_eq!(captured.stdout, "a\nb");
+        assert_eq!(captured.stdout, either("a\nb", "a\r\nb"));
         Ok(())
     }
 
@@ -624,7 +666,7 @@ mod tests {
         // The file exists only in the scratch directory, so seeing it is the proof the
         // working directory was applied rather than ignored.
         let captured = assert_ok!(
-            crate::run(&shell("ls marker.txt").in_dir(scratch.path())),
+            crate::run(&shell(either("ls marker.txt", "dir /b marker.txt")).in_dir(scratch.path())),
             "the step should run in the given directory"
         );
 
@@ -638,7 +680,7 @@ mod tests {
         // `setCurrentDir("")` fails with `ENOENT` — which is reported as the program
         // not being found, sending the reader at the toolchain instead.
         let captured = assert_ok!(
-            crate::run(&shell("printf here").in_dir(std::path::PathBuf::from(""))),
+            crate::run(&shell(either("printf here", "echo here")).in_dir(std::path::PathBuf::from(""))),
             "an empty directory should be ignored"
         );
 
@@ -662,7 +704,8 @@ mod tests {
     fn a_streaming_step_reaches_the_terminal_and_returns_nothing() -> Result<(), Failure> {
         // The return type is the assertion: a streaming step produces no `Captured`,
         // because its output was already the developer's to read.
-        let outcome: crate::Result<()> = crate::run_streaming(&shell("printf streamed"));
+        let outcome: crate::Result<()> =
+            crate::run_streaming(&shell(either("printf streamed", "echo streamed")));
 
         assert_ok!(outcome, "a streaming step should succeed");
         Ok(())
@@ -695,6 +738,8 @@ mod tests {
         Ok(())
     }
 
+    /// `echo` is a program on Unix only; on Windows it is a `cmd` built-in.
+    #[cfg(unix)]
     #[test]
     fn arguments_reach_the_child_as_separate_words() -> Result<(), Failure> {
         // No shell, so a name containing a space stays one word. This is what makes a

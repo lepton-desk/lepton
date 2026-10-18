@@ -13,6 +13,8 @@
 use std::fmt;
 use std::process::Command;
 
+use crate::process::describe_status;
+
 /// A tool the CLI needs, and what the machine reported about it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolStatus {
@@ -278,22 +280,6 @@ impl DisplayStatus {
     /// asked — and a caller that renders it must be able to tell which.
     pub fn is_probed(&self) -> bool {
         self.session.is_some() || self.problem.is_some()
-    }
-}
-
-/// Renders an exit status without assuming it is a plain code.
-///
-/// A process killed by a signal has no code, and printing `exit 0` for a crash
-/// would be exactly the kind of lie this tool exists to avoid.
-fn describe_status(status: &std::process::ExitStatus) -> String {
-    use std::os::unix::process::ExitStatusExt as _;
-
-    match status.code() {
-        Some(code) => code.to_string(),
-        None => match status.signal() {
-            Some(signal) => format!("signal {signal}"),
-            None => "unknown".to_owned(),
-        },
     }
 }
 

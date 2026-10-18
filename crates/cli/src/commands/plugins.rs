@@ -66,13 +66,13 @@ pub fn discover(root: &Path) -> Result<Vec<Plugin>, CliError> {
         else {
             continue;
         };
-        let directory = std::fs::canonicalize(&directory).map_err(|error| {
+        let directory = super::resolve(&directory).map_err(|error| {
             CliError::Invalid(format!(
                 "could not resolve {}: {error}",
                 directory.display()
             ))
         })?;
-        let plugin_root = std::fs::canonicalize(directory.join(relative)).map_err(|error| {
+        let plugin_root = super::resolve(&directory.join(relative)).map_err(|error| {
             CliError::Invalid(format!(
                 "{name} declares the plugin \"{relative}\", which could not be found: {error}"
             ))
@@ -313,7 +313,8 @@ mod tests {
             .find(|arg| arg.starts_with("-Dplugins="));
         ensure!(
             option.is_some_and(|arg| arg.starts_with("-Dplugins=lepton_desk_plugin_os=")
-                && arg.ends_with("zig/plugin.zig")),
+                && arg.replace('\\', "/").ends_with("zig/plugin.zig")
+                && !arg.contains(r"\\?\")),
             "core args {:?}",
             steps[1].args
         );

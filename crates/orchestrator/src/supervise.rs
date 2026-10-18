@@ -10,12 +10,19 @@
 //! one is sent **SIGTERM** — not SIGKILL, so a package manager can pass it on to the
 //! server it started — given a moment to go, and then this process exits. SIGKILL to
 //! `lepton` itself cannot be caught; that limit is the kernel's.
+//!
+//! Windows has no SIGTERM. Measured on 2026-10-18 with `cmd /c node`: `Child::kill` ended
+//! `cmd` and left node running; `taskkill /T` without `/F` refuses console processes;
+//! `taskkill /T /F` ended the tree. So a tracked child is ended with its tree there, and
+//! [`install`] also puts `lepton` in a kill-on-close job object, which its children join:
+//! when `lepton` ends — even by `Stop-Process -Force`, which no handler sees — the kernel
+//! closes the job and ends them (measured). `ctrlc` reports Ctrl-C, Ctrl-Break, a closed
+//! console and logoff alike.
 
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
-use nix::sys::signal::{Signal, kill};
-use nix::unistd::Pid;
+use platform::{alive, contain};
 
 /// The exit code after a handled termination signal (128 + SIGINT, by convention).
 pub const INTERRUPTED_EXIT: i32 = 130;
@@ -44,32 +51,92 @@ pub fn untrack(pid: u32) {
         .retain(|&p| p != pid);
 }
 
-/// Sends SIGTERM to `pid`. Gone already is not an error: that is the outcome wanted.
+/// Asks `pid` to end: SIGTERM on Unix, the whole tree on Windows. Gone already is not an
+/// error: that is the outcome wanted.
 pub fn terminate(pid: u32) {
-    if let Ok(raw) = i32::try_from(pid) {
-        let _ = kill(Pid::from_raw(raw), Signal::SIGTERM);
+    platform::terminate(pid);
+}
+
+#[cfg(unix)]
+mod platform {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    pub fn terminate(pid: u32) {
+        if let Ok(raw) = i32::try_from(pid) {
+            let _ = kill(Pid::from_raw(raw), Signal::SIGTERM);
+        }
+    }
+
+    /// Whether `pid` is still running.
+    ///
+    /// Signal 0 alone is not enough: a child that has exited but not been reaped is a zombie,
+    /// and `kill(pid, 0)` still succeeds on it. Measured — the first version waited the full
+    /// grace period for a process that had already gone. The state letter in
+    /// `/proc/<pid>/stat` (after the parenthesised name) says `Z` for those.
+    pub fn alive(pid: u32) -> bool {
+        let Ok(raw) = i32::try_from(pid) else {
+            return false;
+        };
+        if kill(Pid::from_raw(raw), None).is_err() {
+            return false;
+        }
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => stat
+                .rfind(')')
+                .and_then(|end| stat[end + 1..].split_whitespace().next())
+                .is_none_or(|state| state != "Z"),
+            Err(_) => false,
+        }
+    }
+
+    /// Nothing to do: the signal handler is the whole mechanism here.
+    pub fn contain() -> Result<(), String> {
+        Ok(())
     }
 }
 
-/// Whether `pid` is still running.
-///
-/// Signal 0 alone is not enough: a child that has exited but not been reaped is a zombie,
-/// and `kill(pid, 0)` still succeeds on it. Measured — the first version waited the full
-/// grace period for a process that had already gone. The state letter in
-/// `/proc/<pid>/stat` (after the parenthesised name) says `Z` for those.
-fn alive(pid: u32) -> bool {
-    let Ok(raw) = i32::try_from(pid) else {
-        return false;
-    };
-    if kill(Pid::from_raw(raw), None).is_err() {
-        return false;
+#[cfg(windows)]
+mod platform {
+    use std::process::{Command, Stdio};
+    use std::sync::OnceLock;
+
+    /// `/T` takes the tree, `/F` is required for console processes (refused without it).
+    pub fn terminate(pid: u32) {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
-    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-        Ok(stat) => stat
-            .rfind(')')
-            .and_then(|end| stat[end + 1..].split_whitespace().next())
-            .is_none_or(|state| state != "Z"),
-        Err(_) => false,
+
+    /// Whether `pid` is still running, from `tasklist`'s CSV row (its other messages are
+    /// translated; the quoted pid is not).
+    pub fn alive(pid: u32) -> bool {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .is_ok_and(|out| String::from_utf8_lossy(&out.stdout).contains(&format!(",\"{pid}\",")))
+    }
+
+    /// Puts this process in a kill-on-close job; children started afterwards join it. The
+    /// job lives as long as the process: dropping it would close the handle and end us.
+    pub fn contain() -> Result<(), String> {
+        static JOB: OnceLock<win32job::Job> = OnceLock::new();
+        let job = win32job::Job::create().map_err(|error| error.to_string())?;
+        let mut info = job
+            .query_extended_limit_info()
+            .map_err(|error| error.to_string())?;
+        info.limit_kill_on_job_close();
+        job.set_extended_limit_info(&info)
+            .map_err(|error| error.to_string())?;
+        job.assign_current_process()
+            .map_err(|error| error.to_string())?;
+        let _ = JOB.set(job);
+        Ok(())
     }
 }
 
@@ -138,6 +205,10 @@ pub fn run_interrupt_hook() {
 pub fn install() {
     static INSTALLED: OnceLock<()> = OnceLock::new();
     INSTALLED.get_or_init(|| {
+        if let Err(error) = contain() {
+            // Not fatal either: children are still ended on a handled signal.
+            eprintln!("lepton: could not tie child processes to this one: {error}");
+        }
         let outcome = ctrlc::set_handler(|| {
             INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
             let left = terminate_all();
@@ -159,7 +230,6 @@ mod tests {
     use super::{terminate_all, track, untrack};
     use crate::testing::{Failure, fail};
     use crate::{assert_eq, ensure};
-    use std::os::unix::process::ExitStatusExt as _;
     use std::process::Command;
     use std::sync::{Mutex, PoisonError};
 
@@ -167,11 +237,25 @@ mod tests {
     /// otherwise end each other's children when run in parallel.
     static SERIAL: Mutex<()> = Mutex::new(());
 
+    /// A child that waits about 30 s and then ends by itself.
+    fn waiting() -> Command {
+        if cfg!(windows) {
+            let mut command = Command::new("ping");
+            command.args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null());
+            command
+        } else {
+            let mut command = Command::new("sleep");
+            command.arg("30");
+            command
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
     fn a_tracked_child_is_ended_with_sigterm() -> Result<(), Failure> {
+        use std::os::unix::process::ExitStatusExt as _;
         let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut child = Command::new("sleep")
-            .arg("30")
+        let mut child = waiting()
             .spawn()
             .map_err(|error| fail("sleep starts", error))?;
         track(child.id());
@@ -185,6 +269,112 @@ mod tests {
         assert_eq!(left, 0);
         // SIGTERM, not SIGKILL: a package manager must be able to pass it on.
         assert_eq!(status.signal(), Some(15));
+        Ok(())
+    }
+
+    /// `cmd /c ping` is the shape of `pnpm.cmd run dev` → node: ending `cmd` alone left
+    /// the grandchild running (measured), so the grandchild is what is checked.
+    #[cfg(windows)]
+    #[test]
+    fn a_tracked_childs_tree_is_ended() -> Result<(), Failure> {
+        let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut child = Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1 >nul"])
+            .spawn()
+            .map_err(|error| fail("cmd starts", error))?;
+        let Some(grandchild) = child_of(child.id())? else {
+            let _ = child.kill();
+            return Err(fail("ping is started under cmd", "no child process found"));
+        };
+        track(child.id());
+
+        let left = terminate_all();
+        let _ = child.wait();
+        untrack(child.id());
+
+        assert_eq!(left, 0);
+        ensure!(
+            !super::alive(grandchild),
+            "the grandchild must end with the tracked child"
+        );
+        Ok(())
+    }
+
+    /// The first child of `parent`, waited for up to 5 s (Windows has no `/proc` to read).
+    #[cfg(windows)]
+    fn child_of(parent: u32) -> Result<Option<u32>, Failure> {
+        let query =
+            format!("(Get-CimInstance Win32_Process -Filter 'ParentProcessId={parent}').ProcessId");
+        for _ in 0..50 {
+            let out = Command::new("powershell")
+                .args(["-NoProfile", "-Command", &query])
+                .output()
+                .map_err(|error| fail("powershell lists the children", error))?;
+            let found = String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .find_map(|pid| pid.parse::<u32>().ok());
+            if found.is_some() {
+                return Ok(found);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        Ok(None)
+    }
+
+    /// Run as its own process by `a_lepton_killed_outright_takes_its_children_along`: joins
+    /// the job as `install` does, starts a tree, prints its pid and waits to be killed.
+    #[cfg(windows)]
+    #[test]
+    fn contained_helper() -> Result<(), Failure> {
+        if std::env::var_os("LEPTON_CONTAIN_HELPER").is_none() {
+            return Ok(());
+        }
+        super::contain().map_err(|error| fail("joins a kill-on-close job", error))?;
+        let child = Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1 >nul"])
+            .spawn()
+            .map_err(|error| fail("cmd starts", error))?;
+        println!("child {}", child.id());
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        Ok(())
+    }
+
+    /// `TerminateProcess` (`taskkill /F` without `/T`, `Stop-Process -Force`) reaches no
+    /// handler; only the job ends the children then.
+    #[cfg(windows)]
+    #[test]
+    fn a_lepton_killed_outright_takes_its_children_along() -> Result<(), Failure> {
+        use std::io::BufRead as _;
+        let exe = std::env::current_exe().map_err(|error| fail("the test binary", error))?;
+        let mut helper = Command::new(exe)
+            .args(["--exact", "supervise::tests::contained_helper", "--nocapture"])
+            .env("LEPTON_CONTAIN_HELPER", "1")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|error| fail("the helper starts", error))?;
+        let stdout = helper
+            .stdout
+            .take()
+            .ok_or_else(|| fail("the helper's stdout", "not piped"))?;
+        let child = std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+            .find_map(|line| line.strip_prefix("child ").and_then(|pid| pid.parse::<u32>().ok()));
+        let Some(child) = child else {
+            let _ = helper.kill();
+            return Err(fail("the helper reports its child", "no pid printed"));
+        };
+        let grandchild = child_of(child)?;
+
+        let _ = helper.kill(); // TerminateProcess: no handler runs
+        let _ = helper.wait();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        ensure!(!super::alive(child), "cmd must end with the killed process");
+        ensure!(
+            grandchild.is_some_and(|pid| !super::alive(pid)),
+            "ping under cmd must end too: {grandchild:?}"
+        );
         Ok(())
     }
 
@@ -204,8 +394,7 @@ mod tests {
     #[test]
     fn an_untracked_child_is_left_alone() -> Result<(), Failure> {
         let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut child = Command::new("sleep")
-            .arg("30")
+        let mut child = waiting()
             .spawn()
             .map_err(|error| fail("sleep starts", error))?;
         track(child.id());

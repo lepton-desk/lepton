@@ -195,7 +195,8 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-#[cfg(test)]
+// The tests set Unix file modes; packaging runs on Linux only (`package.rs`).
+#[cfg(all(test, unix))]
 mod tests {
     use super::{Package, escape, file_name, pkgver, write};
     use lepton_orchestrator::testing::{Failure, Scratch, fail};

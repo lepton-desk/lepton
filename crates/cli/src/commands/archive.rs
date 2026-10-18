@@ -9,7 +9,6 @@
 //! code wrote and may therefore replace.
 
 use std::io::{Read as _, Write as _};
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
 use sha2::Digest as _;
@@ -234,7 +233,7 @@ fn collect(
                 path,
                 source,
                 directory: false,
-                executable: meta.permissions().mode() & 0o111 != 0,
+                executable: executable(&meta),
             });
         } else {
             return Err(CliError::Invalid(format!(
@@ -246,11 +245,24 @@ fn collect(
     Ok(())
 }
 
+#[cfg(unix)]
+fn executable(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+/// Windows keeps no execute bit; `lepton package` refuses to run there (`package.rs`).
+#[cfg(not(unix))]
+fn executable(_: &std::fs::Metadata) -> bool {
+    false
+}
+
 pub(super) fn io(path: &Path, verb: &str, error: &std::io::Error) -> CliError {
     CliError::Invalid(format!("could not {verb} {}: {error}", path.display()))
 }
 
-#[cfg(test)]
+// The tests set Unix file modes; packaging runs on Linux only (`package.rs`).
+#[cfg(all(test, unix))]
 mod tests {
     use super::{sha256_file, sidecar_of, tar_gz};
     use lepton_orchestrator::testing::{Failure, Scratch, fail};
