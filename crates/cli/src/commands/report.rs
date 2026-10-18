@@ -29,6 +29,9 @@ pub fn label(step: &Step) -> &'static str {
         }
         ("zig", _) => "core",
         (_, Some("--dir")) => "package",
+        (_, Some("install")) => "install",
+        // `lepton update` handing over to the project's newer CLI.
+        (program, Some("update")) if program.ends_with("lepton") => "newer CLI",
         (_, _) if step.args.iter().any(|arg| arg == "dev") => "dev server",
         _ => "frontend",
     }
@@ -236,6 +239,11 @@ mod tests {
         assert_eq!(
             label(&step("pnpm", &["run", "dev", "--port", "5173"])),
             "dev server"
+        );
+        assert_eq!(label(&step("pnpm", &["install"])), "install");
+        assert_eq!(
+            label(&step("/p/node_modules/.bin/lepton", &["update"])),
+            "newer CLI"
         );
         Ok(())
     }

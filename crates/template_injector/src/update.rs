@@ -52,6 +52,33 @@ pub const RELEASES: &[Release] = &[
     },
 ];
 
+/// `tsconfig.json` as a TypeScript project gets it, and as a React one does.
+const SHARED_TSCONFIG: &str = include_str!("../templates/shared-ts/tsconfig.json");
+const REACT_TSCONFIG: &str = include_str!("../templates/react-ts/tsconfig.json");
+
+/// The `tsconfig.json` a React project should have, when its own lacks `jsx`.
+///
+/// Up to 0.1.6 a react-ts project got the shared TypeScript `tsconfig.json`, without
+/// `"jsx": "react-jsx"`, so `tsc --noEmit` failed with TS17004 on every component (fixed
+/// for new projects in 0.1.7, measured again on a 0.1.6 project after `lepton update`).
+/// Untouched, the file becomes React's; edited, only the missing line is added after
+/// `"compilerOptions": {`. `None` when nothing is to change.
+pub fn react_tsconfig(existing: &str, react: bool) -> Option<String> {
+    if !react || existing.contains("\"jsx\"") {
+        return None;
+    }
+    if existing == SHARED_TSCONFIG {
+        return Some(REACT_TSCONFIG.to_owned());
+    }
+    let key = existing.find("\"compilerOptions\"")?;
+    let open = key + existing[key..].find('{')? + 1;
+    Some(format!(
+        "{}\n    \"jsx\": \"react-jsx\",{}",
+        &existing[..open],
+        &existing[open..]
+    ))
+}
+
 /// What `lepton.config.json` gives the entry template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Values {
@@ -225,6 +252,24 @@ mod tests {
         ensure!(
             RELEASES.iter().any(|release| release.version == built),
             "assets/history has no {built}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_react_project_without_jsx_gets_it_and_others_do_not() -> Result<(), Failure> {
+        use super::{REACT_TSCONFIG, SHARED_TSCONFIG, react_tsconfig};
+        assert_eq!(
+            react_tsconfig(SHARED_TSCONFIG, true),
+            Some(REACT_TSCONFIG.to_owned())
+        );
+        assert_eq!(react_tsconfig(SHARED_TSCONFIG, false), None::<String>);
+        assert_eq!(react_tsconfig(REACT_TSCONFIG, true), None::<String>);
+        let edited = "{\n  \"compilerOptions\": {\n    \"strict\": true\n  }\n}\n";
+        let fixed = react_tsconfig(edited, true).ok_or_else(|| fail("a fix", "none"))?;
+        assert_eq!(
+            fixed,
+            "{\n  \"compilerOptions\": {\n    \"jsx\": \"react-jsx\",\n    \"strict\": true\n  }\n}\n"
         );
         Ok(())
     }

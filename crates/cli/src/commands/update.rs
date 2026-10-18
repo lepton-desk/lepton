@@ -6,6 +6,11 @@
 //! `lepton-commands.zig` up to today's template, keeping the developer's edits by a
 //! three-way merge (`lepton_template_injector::update`).
 //!
+//! First the npm side (`update_packages.rs`): the newest `@lepton-desk/cli` on the
+//! registry (or `--to`), the project's `@lepton-desk/*` dependencies moved to it and
+//! installed with its own manager; when that release is newer than this CLI, the newly
+//! installed CLI is run to finish, since the core and templates it writes are its own.
+//!
 //! All or nothing: when a file conflicts, nothing is written but `<file>.merge` beside it,
 //! with the markers, and the command fails — a new core under an old `main.zig` would not
 //! build. A vendored core that is a symbolic link (a project inside this repository) is
@@ -13,11 +18,20 @@
 
 use std::path::{Path, PathBuf};
 
-use lepton_template_injector::update::{Decision, Part, Values, decide};
+use lepton_template_injector::update::{Decision, Part, Values, decide, react_tsconfig};
+
+use lepton_orchestrator::Step;
+use lepton_orchestrator::Toolchain;
 
 use super::build::CORE_DIR;
+use super::package_manager::{self, PackageManager};
 use super::report::{Report, shown};
+use super::update_packages::{self as packages, SCOPE, Version};
 use super::{CliError, Outcome};
+
+/// Set on the newer CLI this one hands over to: the packages are done, only the core and
+/// templates are left.
+const HANDED_OVER: &str = "LEPTON_UPDATE_HANDED_OVER";
 
 /// Flags for `lepton update`.
 #[derive(Debug, Clone, Default, clap::Args)]
@@ -25,6 +39,22 @@ pub struct Flags {
     /// Says what would change and writes nothing.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// The release to update to, instead of the newest on the registry.
+    #[arg(long, value_name = "VERSION")]
+    pub to: Option<String>,
+
+    /// Leaves package.json and node_modules alone: only the core and templates.
+    #[arg(long)]
+    pub no_install: bool,
+}
+
+/// What the npm side left to do.
+enum Next {
+    /// This CLI updates the core and templates.
+    Continue,
+    /// A newer CLI ran and did it.
+    HandedOver,
 }
 
 /// What happens to the vendored core.
@@ -133,6 +163,28 @@ fn vendor_decision(vendor: &Path) -> Result<Vendor, CliError> {
     })
 }
 
+/// Whether the project's package.json depends on React.
+fn uses_react(root: &Path) -> bool {
+    std::fs::read_to_string(root.join("package.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .is_some_and(|json| {
+            ["dependencies", "devDependencies"].iter().any(|section| {
+                json.get(section)
+                    .and_then(|deps| deps.get("react"))
+                    .is_some()
+            })
+        })
+}
+
+/// The project's manager installs what package.json now says, updating its lockfile.
+fn install(root: &Path, manager: PackageManager, report: &Report) -> Result<(), CliError> {
+    let step = Step::new("update", manager.program())
+        .arg("install")
+        .in_dir(root.to_path_buf());
+    report.run(&step).map_err(CliError::from)
+}
+
 fn write(path: &Path, text: &str) -> Result<(), CliError> {
     std::fs::write(path, text).map_err(|error| invalid("write", path, error))
 }
@@ -142,7 +194,108 @@ impl Flags {
         let root = std::env::current_dir().map_err(|error| {
             CliError::Invalid(format!("could not read the working directory: {error}"))
         })?;
-        self.run_in(&root)
+        // Once, before the packages: a CLI handed over to prints its own, with its version.
+        Report::new().header("update");
+        match self.packages(&root)? {
+            Next::HandedOver => Ok(()),
+            Next::Continue => self.run_in(&root),
+        }
+    }
+
+    /// The npm side: dependencies moved to the target release and installed, then the
+    /// installed CLI run when it is newer than this one.
+    fn packages(&self, root: &Path) -> Result<Next, CliError> {
+        if self.no_install || std::env::var_os(HANDED_OVER).is_some() {
+            return Ok(Next::Continue);
+        }
+        let manifest_path = root.join("package.json");
+        let Ok(manifest) = std::fs::read_to_string(&manifest_path) else {
+            return Ok(Next::Continue);
+        };
+        let own = Version::parse(env!("CARGO_PKG_VERSION"))
+            .ok_or_else(|| CliError::Invalid("this CLI's own version does not parse".to_owned()))?;
+        let pnpm = Toolchain::probe_program("pnpm").is_usable();
+        let agent = std::env::var("npm_config_user_agent").ok();
+        let (manager, _) = package_manager::detect(root, agent.as_deref(), pnpm);
+        let report = Report::new();
+
+        let target = match &self.to {
+            Some(text) => {
+                let wanted = Version::parse(text.trim_start_matches('v'))
+                    .ok_or_else(|| CliError::Invalid(format!("--to {text} is not a version")))?;
+                if wanted < own {
+                    return Err(CliError::Invalid(format!(
+                        "--to {wanted} is older than this CLI ({own}); install {SCOPE}cli@{wanted} to go back"
+                    )));
+                }
+                wanted
+            }
+            None => match packages::latest(root, manager) {
+                Some(latest) => {
+                    report.fact("latest", &format!("{latest} (this CLI is {own})"));
+                    latest.max(own.clone())
+                }
+                None => {
+                    report.warn(
+                        "latest",
+                        &format!("the registry did not answer; updating to {own}"),
+                    );
+                    own.clone()
+                }
+            },
+        };
+
+        let (bumped, changes) = packages::bump(&manifest, &target).map_err(CliError::Invalid)?;
+        if changes.is_empty() {
+            report.fact("packages", &format!("{SCOPE}* already at {target}"));
+        }
+        for change in &changes {
+            report.fact(
+                "package",
+                &format!("{}  {} → {}", change.name, change.from, change.to),
+            );
+        }
+        if self.dry_run {
+            if target > own {
+                report.fact(
+                    "then",
+                    &format!("the {target} CLI would update the core and templates"),
+                );
+            }
+            return Ok(Next::Continue);
+        }
+        if !changes.is_empty() {
+            write(&manifest_path, &bumped)?;
+            install(root, manager, &report)?;
+        }
+        if target <= own {
+            return Ok(Next::Continue);
+        }
+        self.hand_over(root, &target, &report)?;
+        Ok(Next::HandedOver)
+    }
+
+    /// Runs the project's newly installed CLI to update the core and templates it carries.
+    fn hand_over(&self, root: &Path, target: &Version, report: &Report) -> Result<(), CliError> {
+        let local = root.join("node_modules/.bin/lepton");
+        let reported = std::process::Command::new(&local)
+            .arg("--version")
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .unwrap_or_default();
+        if reported != format!("lepton {target}") {
+            return Err(CliError::Invalid(format!(
+                "after the install, {} is \"{reported}\", not lepton {target}. With pnpm, a release \
+                 younger than `minimumReleaseAge` (a day by default) is held back when \
+                 `minimumReleaseAgeStrict` is on; run `lepton update` again later, or with --to",
+                shown(&local)
+            )));
+        }
+        let step = Step::new("update", local.display().to_string())
+            .arg("update")
+            .env(HANDED_OVER, "1")
+            .in_dir(root.to_path_buf());
+        report.run(&step).map_err(CliError::from)
     }
 
     pub fn run_in(&self, root: &Path) -> Outcome {
@@ -154,7 +307,6 @@ impl Flags {
             )));
         }
         let report = Report::new();
-        report.header("update");
 
         let mut decisions = Vec::new();
         for part in Part::ALL {
@@ -166,6 +318,10 @@ impl Flags {
             .join(CORE_DIR)
             .join(lepton_core_vendoring::VENDORED_CORE);
         let vendor = vendor_decision(&vendor_dir)?;
+        let tsconfig_path = root.join("tsconfig.json");
+        let tsconfig = std::fs::read_to_string(&tsconfig_path)
+            .ok()
+            .and_then(|text| react_tsconfig(&text, uses_react(root)));
 
         for (part, _, decision) in &decisions {
             let label = match part {
@@ -202,6 +358,13 @@ impl Flags {
             ),
         }
 
+        if tsconfig.is_some() {
+            report.fact(
+                "tsconfig.json",
+                "\"jsx\": \"react-jsx\" added (tsc failed without it)",
+            );
+        }
+
         let conflicts: Vec<_> = decisions
             .iter()
             .filter_map(|(_, path, decision)| match decision {
@@ -230,7 +393,8 @@ impl Flags {
         let changes = decisions
             .iter()
             .any(|(_, _, decision)| *decision != Decision::Current)
-            || matches!(vendor, Vendor::Replace { .. });
+            || matches!(vendor, Vendor::Replace { .. })
+            || tsconfig.is_some();
         if !changes {
             return Ok(());
         }
@@ -245,6 +409,9 @@ impl Flags {
                 | Decision::Merged { text, .. } => write(path, text)?,
                 Decision::Current | Decision::Conflict { .. } => {}
             }
+        }
+        if let Some(text) = &tsconfig {
+            write(&tsconfig_path, text)?;
         }
         if let Vendor::Replace { .. } = vendor {
             if vendor_dir.exists() {
@@ -325,9 +492,12 @@ mod tests {
             matches!(decided(&vendor)?, Vendor::Replace { stale: 1, .. }),
             "the old core is replaced"
         );
-        Flags { dry_run: false }
-            .run_in(scratch.path())
-            .map_err(|error| lepton_orchestrator::testing::fail("an update", error))?;
+        Flags {
+            dry_run: false,
+            ..Flags::default()
+        }
+        .run_in(scratch.path())
+        .map_err(|error| lepton_orchestrator::testing::fail("an update", error))?;
         assert_eq!(
             scratch.read("src-lepton/main.zig")?,
             Part::Entry.current(&values())
@@ -350,7 +520,11 @@ mod tests {
             1,
         );
         scratch.write("src-lepton/main.zig", &edited)?;
-        let outcome = Flags { dry_run: false }.run_in(scratch.path());
+        let outcome = Flags {
+            dry_run: false,
+            ..Flags::default()
+        }
+        .run_in(scratch.path());
         let Err(error) = outcome else {
             return Err(lepton_orchestrator::testing::fail("a refusal", "success"));
         };
@@ -368,9 +542,12 @@ mod tests {
     fn a_dry_run_writes_nothing() -> Result<(), Failure> {
         let scratch = old_project("update-dry")?;
         let before = scratch.read("src-lepton/main.zig")?;
-        Flags { dry_run: true }
-            .run_in(scratch.path())
-            .map_err(|error| lepton_orchestrator::testing::fail("a dry run", error))?;
+        Flags {
+            dry_run: true,
+            ..Flags::default()
+        }
+        .run_in(scratch.path())
+        .map_err(|error| lepton_orchestrator::testing::fail("a dry run", error))?;
         assert_eq!(scratch.read("src-lepton/main.zig")?, before);
         Ok(())
     }

@@ -30,6 +30,7 @@ pub mod report;
 pub mod run;
 pub mod session;
 pub mod update;
+pub mod update_packages;
 pub mod verify;
 
 use std::error::Error;
