@@ -17,63 +17,148 @@ const WaylandWindow = wayland_window.WaylandWindow;
 const Error = wayland_window.Error;
 const Size = window.Size;
 
-/// Allocates the shared-memory buffer a frame is drawn into.
+/// Whether this build can present through the GPU at all. EGL, GLESv2 and wayland-egl
+/// are linked into the core only for the native render path (`build.zig`), so a webview
+/// build that merely *referenced* the presenter failed to link: `window-check` never
+/// presents through it, yet `WaylandWindow.close`'s `gpu.deinit()` alone left ten EGL/GL
+/// symbols undefined (measured 2026-10-19). Compiled out, every frame takes shared memory.
+pub const gpu_present = @import("build_options").native_render;
+
+/// One shared-memory buffer: a memfd mapped here and by the compositor, its pool and its
+/// `wl_buffer`, kept while the window keeps its size.
+///
+/// Measured before this (2026-10-19, `strace -c`, 8 s of a native app with
+/// `LEPTON_PRESENT=shm`): every frame made a new memfd, `ftruncate`, `mmap`, pool and buffer
+/// and threw them away (2301 `memfd_create` in ~7 s), and nothing paced the loop, so it
+/// painted ~300 frames a second for a 60 Hz screen — 9.06 s of CPU in 10 s. The buffer
+/// was also destroyed right after its commit and its memory drawn over by the next frame
+/// while the compositor could still be reading it.
+pub const ShmFrame = struct {
+    fd: linux.fd_t = -1,
+    ptr: ?[*]u8 = null,
+    len: usize = 0,
+    pool: ?*wl.wl_shm_pool = null,
+    buffer: ?*wl.wl_buffer = null,
+    size: Size = .{ .width = 0, .height = 0 },
+    /// Committed and not yet released by the compositor: not to be drawn into.
+    busy: bool = false,
+
+    fn destroy(self: *ShmFrame) void {
+        if (self.buffer) |buffer| wl.wl_buffer_destroy(buffer);
+        if (self.pool) |pool| wl.wl_shm_pool_destroy(pool);
+        if (self.ptr) |ptr| posix.munmap(@as([*]align(4096) const u8, @ptrCast(@alignCast(ptr)))[0..self.len]);
+        if (self.fd >= 0) _ = linux.close(self.fd);
+        self.* = .{};
+    }
+};
+
+/// How long a present waits for the compositor before going ahead: a hidden or minimised
+/// window gets no frame callbacks, and must not stop the loop.
+const pace_limit_ms = 100;
+
+fn onRelease(data: ?*anyopaque, _: ?*wl.wl_buffer) callconv(.c) void {
+    const frame: *ShmFrame = @ptrCast(@alignCast(data orelse return));
+    frame.busy = false;
+}
+
+fn onFrameDone(data: ?*anyopaque, callback: ?*wl.wl_callback, _: u32) callconv(.c) void {
+    const self: *WaylandWindow = @ptrCast(@alignCast(data orelse return));
+    if (callback) |done| wl.wl_callback_destroy(done);
+    self.frame_callback = null;
+}
+
+const buffer_listener = wl.wl_buffer_listener{ .release = onRelease };
+const frame_listener = wl.wl_callback_listener{ .done = onFrameDone };
+
+fn now() std.Io.Clock.Timestamp {
+    return std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .awake);
+}
+
+/// Dispatches the connection until `done` holds or `pace_limit_ms` has passed.
+fn waitUntil(self: *WaylandWindow, comptime done: fn (*WaylandWindow) bool) Error!void {
+    const started = now();
+    while (!done(self)) {
+        const waited = started.durationTo(now()).raw.nanoseconds;
+        const left = pace_limit_ms - @divTrunc(@max(waited, 0), std.time.ns_per_ms);
+        if (left <= 0) return;
+        try self.wait(@intCast(left));
+    }
+}
+
+fn hasFreeFrame(self: *WaylandWindow) bool {
+    return !self.frames[0].busy or !self.frames[1].busy;
+}
+
+fn frameShown(self: *WaylandWindow) bool {
+    return self.frame_callback == null;
+}
+
+/// The memory the next frame is drawn into: a buffer the compositor is not reading,
+/// made again only when the size changed.
 ///
 /// A memfd is used rather than a named shm object: the compositor needs a file
 /// descriptor, not a name, and an anonymous one cannot be reached by another
 /// process on the machine.
 pub fn allocBuffer(self: *WaylandWindow, size: Size, format: window.PixelFormat) Error![*]u8 {
-    self.releaseBuffer();
-
     const bytes = size.frameBytes(format);
     if (bytes == 0) return error.SizeRefused;
-    if (self.shm == null) return error.BufferRefused;
+    const shm = self.shm orelse return error.BufferRefused;
 
+    if (!hasFreeFrame(self)) try waitUntil(self, hasFreeFrame);
+    // Both still held past the limit (a compositor that never releases): the older one
+    // is drawn over rather than the loop stopping.
+    const index: usize = if (!self.frames[0].busy) 0 else if (!self.frames[1].busy) 1 else 0;
+    const frame = &self.frames[index];
+    self.drawing = index;
+    if (frame.ptr != null and frame.size.width == size.width and frame.size.height == size.height) {
+        return frame.ptr orelse error.BufferRefused;
+    }
+
+    frame.destroy();
     const fd = memfd() catch return error.BufferRefused;
     errdefer _ = linux.close(fd);
-
     // `ftruncate` then `mmap`: the compositor maps the same pages this process
     // writes, so a frame reaches the screen without a copy.
     if (linux.ftruncate(fd, @intCast(bytes)) != 0) return error.BufferRefused;
-
     const mapped = posix.mmap(null, bytes, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED }, fd, 0) catch
         return error.BufferRefused;
 
-    self.buffer_fd = fd;
-    self.buffer_ptr = mapped.ptr;
-    self.buffer_len = bytes;
-    return mapped.ptr;
-}
-
-/// Attaches the current buffer to the surface and commits it.
-///
-/// Returns the pool and buffer objects so the caller can destroy them, or null
-/// when the compositor's error is already latched — in which case the frame is
-/// dropped rather than drawn into a surface nobody will show.
-pub fn present(self: *WaylandWindow, size: Size) Error!void {
-    const surface = self.surface orelse return error.DisplayLost;
-    if (self.buffer_ptr == null) return error.BufferRefused;
-    const shm = self.shm orelse return error.BufferRefused;
-
-    const pool = wl.wl_shm_create_pool(shm, self.buffer_fd, @intCast(self.buffer_len));
-    const stride = size.stride(.argb8888);
+    const pool = wl.wl_shm_create_pool(shm, fd, @intCast(bytes));
     const buffer = wl.wl_shm_pool_create_buffer(
         pool,
         0,
         @intCast(size.width),
         @intCast(size.height),
-        @intCast(stride),
+        @intCast(size.stride(format)),
         self.wl_format,
     );
+    frame.* = .{ .fd = fd, .ptr = mapped.ptr, .len = bytes, .pool = pool, .buffer = buffer, .size = size };
+    // The frame's address is final: it lives in the window, which does not move once open.
+    _ = wl.wl_buffer_add_listener(buffer, &buffer_listener, frame);
+    return mapped.ptr;
+}
+
+/// Commits the buffer `allocBuffer` handed out, once the compositor has shown the last
+/// one (its frame callback), so the loop runs at the screen's rate.
+pub fn present(self: *WaylandWindow, size: Size) Error!void {
+    const surface = self.surface orelse return error.DisplayLost;
+    const index = self.drawing orelse return error.BufferRefused;
+    const frame = &self.frames[index];
+    const buffer = frame.buffer orelse return error.BufferRefused;
+    if (frame.size.width != size.width or frame.size.height != size.height) return error.BufferRefused;
+
+    if (!frameShown(self)) try waitUntil(self, frameShown);
+    // A callback still outstanding past the limit is dropped; a new one is asked for.
+    if (self.frame_callback) |stale| wl.wl_callback_destroy(stale);
+    self.frame_callback = wl.wl_surface_frame(surface);
+    if (self.frame_callback) |callback| _ = wl.wl_callback_add_listener(callback, &frame_listener, self);
 
     wl.wl_surface_attach(surface, buffer, 0, 0);
     wl.wl_surface_damage_buffer(surface, 0, 0, @intCast(size.width), @intCast(size.height));
     wl.wl_surface_commit(surface);
-
-    // The pool only has to outlive the buffer's creation; the compositor holds
-    // its own mapping of the pages.
-    wl.wl_shm_pool_destroy(pool);
-    wl.wl_buffer_destroy(buffer);
+    frame.busy = true;
+    self.drawing = null;
+    _ = wl.wl_display_flush(self.display);
 
     if (wl.wl_display_get_error(self.display) != 0) return error.DisplayLost;
 }
@@ -88,26 +173,28 @@ pub fn present(self: *WaylandWindow, size: Size) Error!void {
 pub fn presentPixels(self: *WaylandWindow, pixels: []const u8, frame: Size, format: window.PixelFormat) Error!void {
     // The GPU is the default and shared memory is the fallback, so the question is
     // asked once and the answer decides every frame after it.
-    if (!self.gpu_settled) {
-        self.gpu = presenter.open(
-            @ptrCast(self.display),
-            @ptrCast(self.surface),
-            frame.width,
-            frame.height,
-        );
-        self.gpu_settled = true;
-    }
-    if (self.gpu) |*gpu| {
-        // `arenaAlloc`/`arenaFree` do not apply here: the GPU uploads the caller's
-        // pixels directly, so there is no per-frame copy to make room for and none of
-        // the shm buffer is touched on this path.
-        // The reason the presenter gives is folded into one window error on purpose:
-        // the caller needs to know the GPU path broke, not which of six shader and
-        // surface errors it was, and a wider error set would let every caller grow a
-        // branch for a failure only this path can produce.
-        gpu.present(pixels, frame.width, frame.height) catch return error.GpuRefused;
-        return;
-    }
+    if (comptime gpu_present) {
+        if (!self.gpu_settled) {
+            self.gpu = presenter.open(
+                @ptrCast(self.display),
+                @ptrCast(self.surface),
+                frame.width,
+                frame.height,
+            );
+            self.gpu_settled = true;
+        }
+        if (self.gpu) |*gpu| {
+            // `arenaAlloc`/`arenaFree` do not apply here: the GPU uploads the caller's
+            // pixels directly, so there is no per-frame copy to make room for and none of
+            // the shm buffer is touched on this path.
+            // The reason the presenter gives is folded into one window error on purpose:
+            // the caller needs to know the GPU path broke, not which of six shader and
+            // surface errors it was, and a wider error set would let every caller grow a
+            // branch for a failure only this path can produce.
+            gpu.present(pixels, frame.width, frame.height) catch return error.GpuRefused;
+            return;
+        }
+    } else self.gpu_settled = true;
 
     const target = try self.allocBuffer(frame, format);
 
@@ -134,6 +221,11 @@ pub fn presentScene(
     frame: Size,
     before_swap: ?[]u8,
 ) Error!void {
+    // A build without the GPU presenter has no ES 3 path: the caller's CPU fallback runs.
+    if (comptime !gpu_present) {
+        self.gpu_settled = true;
+        return error.GpuRefused;
+    }
     if (!self.gpu_settled) {
         self.gpu = presenter.open(@ptrCast(self.display), @ptrCast(self.surface), frame.width, frame.height);
         self.gpu_settled = true;
@@ -142,13 +234,12 @@ pub fn presentScene(
     gpu.presentScene(list, glyphs, clear, frame.width, frame.height, before_swap) catch return error.GpuRefused;
 }
 
-/// Unmaps the framebuffer and closes its descriptor.
+/// Releases both shared-memory buffers and any outstanding frame callback.
 pub fn releaseBuffer(self: *WaylandWindow) void {
-    if (self.buffer_ptr) |ptr| posix.munmap(@as([*]align(4096) const u8, @ptrCast(@alignCast(ptr)))[0..self.buffer_len]);
-    if (self.buffer_fd >= 0) _ = linux.close(self.buffer_fd);
-    self.buffer_ptr = null;
-    self.buffer_fd = -1;
-    self.buffer_len = 0;
+    if (self.frame_callback) |callback| wl.wl_callback_destroy(callback);
+    self.frame_callback = null;
+    for (&self.frames) |*frame| frame.destroy();
+    self.drawing = null;
 }
 
 /// An anonymous, close-on-exec file the compositor can map.

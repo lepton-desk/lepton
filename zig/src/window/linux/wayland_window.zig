@@ -138,10 +138,14 @@ pub const WaylandWindow = struct {
     title: [256]u8 = @splat(0),
     title_len: usize = 0,
 
-    /// Backing memory for the current buffer: a memfd the compositor maps.
-    buffer_fd: linux.fd_t = -1,
-    buffer_ptr: ?[*]u8 = null,
-    buffer_len: usize = 0,
+    /// Two shared-memory buffers, kept and reused while the size holds
+    /// (`wayland_present.zig`): one the compositor shows, one the next frame is drawn into.
+    frames: [2]wayland_present.ShmFrame = .{ .{}, .{} },
+    /// The buffer `allocBuffer` handed out, which `present` commits.
+    drawing: ?usize = null,
+    /// The compositor's `wl_surface.frame` callback for the last commit, until it fires:
+    /// the next shared-memory present waits for it, as a GPU swap waits for vsync.
+    frame_callback: ?*wl.wl_callback = null,
 
     allocator: std.mem.Allocator,
 
@@ -242,10 +246,14 @@ pub const WaylandWindow = struct {
         // surface's destruction would leave a live context pointing at a destroyed
         // surface — and, on a machine where the GPU path *was* available, its memory would
         // simply never come back.
-        if (self.gpu) |*gpu| {
-            gpu.deinit();
-            self.gpu = null;
-            self.gpu_settled = true;
+        // Compiled out of builds without the presenter (`wayland_present.gpu_present`):
+        // `self.gpu` is never set there, and this call alone linked EGL into webview tools.
+        if (comptime wayland_present.gpu_present) {
+            if (self.gpu) |*gpu| {
+                gpu.deinit();
+                self.gpu = null;
+                self.gpu_settled = true;
+            }
         }
 
         // The input proxies outlive their usefulness but not the display: libwayland frees
