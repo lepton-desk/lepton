@@ -37,104 +37,104 @@
 export const TOLERANCE_NS = 500000n;
 /** Formats a duration in nanoseconds at the largest unit that keeps it readable. */
 export function duration(nanoseconds) {
-    const units = [
-        [1000000000n, "s"],
-        [1000000n, "ms"],
-        [1000n, "µs"],
-        [1n, "ns"],
-    ];
-    for (const [scale, suffix] of units) {
-        if (nanoseconds >= scale) {
-            return `${trim((nanoseconds * 100n) / scale)} ${suffix}`;
-        }
+  const units = [
+    [1000000000n, "s"],
+    [1000000n, "ms"],
+    [1000n, "µs"],
+    [1n, "ns"],
+  ];
+  for (const [scale, suffix] of units) {
+    if (nanoseconds >= scale) {
+      return `${trim((nanoseconds * 100n) / scale)} ${suffix}`;
     }
-    return "0 ns";
+  }
+  return "0 ns";
 }
 /** Formats a byte count in the largest binary unit that fits three figures. */
 export function bytes(count) {
-    const units = [
-        [1n << 30n, "GiB"],
-        [1n << 20n, "MiB"],
-        [1n << 10n, "KiB"],
-    ];
-    for (const [scale, suffix] of units) {
-        if (count >= scale) {
-            return `${trim((count * 100n) / scale)} ${suffix}`;
-        }
+  const units = [
+    [1n << 30n, "GiB"],
+    [1n << 20n, "MiB"],
+    [1n << 10n, "KiB"],
+  ];
+  for (const [scale, suffix] of units) {
+    if (count >= scale) {
+      return `${trim((count * 100n) / scale)} ${suffix}`;
     }
-    return `${count} B`;
+  }
+  return `${count} B`;
 }
 /** Rounds hundredths to at most one decimal place and drops a trailing `.0`. */
 function trim(hundredths) {
-    // Hundredths: the whole part is a hundredth of it. Dividing by ten instead — as the
-    // first version did — showed every figure on the panel ten times too large (a 67 MiB
-    // process read "672 MiB"), which is the one kind of wrong a measures screen exists
-    // to make impossible.
-    const whole = hundredths / 100n;
-    // One decimal, truncated rather than rounded: the second is noise, and a latency that
-    // reads high is the direction that hides a problem.
-    const tenth = (hundredths % 100n) / 10n;
-    if (tenth === 0n) {
-        return whole.toString();
-    }
-    return `${whole}.${tenth.toString()}`;
+  // Hundredths: the whole part is a hundredth of it. Dividing by ten instead — as the
+  // first version did — showed every figure on the panel ten times too large (a 67 MiB
+  // process read "672 MiB"), which is the one kind of wrong a measures screen exists
+  // to make impossible.
+  const whole = hundredths / 100n;
+  // One decimal, truncated rather than rounded: the second is noise, and a latency that
+  // reads high is the direction that hides a problem.
+  const tenth = (hundredths % 100n) / 10n;
+  if (tenth === 0n) {
+    return whole.toString();
+  }
+  return `${whole}.${tenth.toString()}`;
 }
 /** Which way a value moved, or null when it did not or cannot. */
 export function trend(now, before) {
-    if (before === undefined) {
-        return null;
-    }
-    if (now > before) {
-        return "rising";
-    }
-    if (now < before) {
-        return "falling";
-    }
+  if (before === undefined) {
     return null;
+  }
+  if (now > before) {
+    return "rising";
+  }
+  if (now < before) {
+    return "falling";
+  }
+  return null;
 }
 /** The rows for one reading, in the order the table reads. */
 export function rows(reading, previous) {
-    return [
-        {
-            // Named for what it is: `timestamp_ns` is a monotonic clock reading on the core's
-            // machine, not the time the machine has been up. Calling it uptime would be a
-            // different measurement wearing this one's label.
-            label: "core clock",
-            value: duration(reading.timestampNs),
-            exact: `${reading.timestampNs} ns since boot, monotonic`,
-            // Rises by construction, so the direction is asserted rather than observed — a row
-            // whose arrow disagrees with its number is a number computed wrong.
-            trend: trend(reading.timestampNs, previous?.timestampNs) ?? "rising",
-        },
-        {
-            label: "resident",
-            value: bytes(reading.rssBytes),
-            exact: `${reading.rssBytes} bytes`,
-            trend: trend(reading.rssBytes, previous?.rssBytes),
-        },
-        {
-            label: "ring free",
-            value: `${reading.ringFreeCells} / ${reading.ringCapacityCells}`,
-            exact: `${reading.ringFreeCells} free of ${reading.ringCapacityCells} cells`,
-            trend: null,
-        },
-        {
-            // The only number on this screen that predicts a future problem, so it is the one
-            // that carries the tolerance mark.
-            label: "round trip p50",
-            value: duration(reading.roundTripNs),
-            exact: `${reading.roundTripNs} ns`,
-            trend: trend(reading.roundTripNs, previous?.roundTripNs),
-        },
-        {
-            label: "round trip max",
-            value: duration(reading.roundTripMaxNs),
-            exact: `${reading.roundTripMaxNs} ns`,
-            trend: trend(reading.roundTripMaxNs, previous?.roundTripMaxNs),
-        },
-    ];
+  return [
+    {
+      // Named for what it is: `timestamp_ns` is a monotonic clock reading on the core's
+      // machine, not the time the machine has been up. Calling it uptime would be a
+      // different measurement wearing this one's label.
+      label: "core clock",
+      value: duration(reading.timestampNs),
+      exact: `${reading.timestampNs} ns since boot, monotonic`,
+      // Rises by construction, so the direction is asserted rather than observed — a row
+      // whose arrow disagrees with its number is a number computed wrong.
+      trend: trend(reading.timestampNs, previous?.timestampNs) ?? "rising",
+    },
+    {
+      label: "resident",
+      value: bytes(reading.rssBytes),
+      exact: `${reading.rssBytes} bytes`,
+      trend: trend(reading.rssBytes, previous?.rssBytes),
+    },
+    {
+      label: "ring free",
+      value: `${reading.ringFreeCells} / ${reading.ringCapacityCells}`,
+      exact: `${reading.ringFreeCells} free of ${reading.ringCapacityCells} cells`,
+      trend: null,
+    },
+    {
+      // The only number on this screen that predicts a future problem, so it is the one
+      // that carries the tolerance mark.
+      label: "round trip p50",
+      value: duration(reading.roundTripNs),
+      exact: `${reading.roundTripNs} ns`,
+      trend: trend(reading.roundTripNs, previous?.roundTripNs),
+    },
+    {
+      label: "round trip max",
+      value: duration(reading.roundTripMaxNs),
+      exact: `${reading.roundTripMaxNs} ns`,
+      trend: trend(reading.roundTripMaxNs, previous?.roundTripMaxNs),
+    },
+  ];
 }
 /** Whether a reading is outside the round-trip tolerance. */
 export function exceedsTolerance(reading) {
-    return reading.roundTripNs > TOLERANCE_NS;
+  return reading.roundTripNs > TOLERANCE_NS;
 }

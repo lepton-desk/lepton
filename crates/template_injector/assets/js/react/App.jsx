@@ -4,7 +4,6 @@
 // an edit made here is lost without warning. Running the script in check mode is what
 // keeps the two in step.
 
-import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 /**
  * The measures screen, in React.
  *
@@ -20,6 +19,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
  */
 import { useState } from "react";
 import { exceedsTolerance, rows } from "./measures.js";
+
 /** Shown before the core has published anything.
  *
  * The same furniture, empty, rather than a spinner or zeroes: the layout is known before
@@ -27,17 +27,77 @@ import { exceedsTolerance, rows } from "./measures.js";
  * is true.
  */
 function Waiting() {
-    return (_jsx("div", { className: "forme forme--registered", children: _jsxs("main", { className: "bay", children: [_jsx("h1", { className: "bay__title", children: "this machine" }), _jsxs("table", { className: "measures", children: [_jsx("caption", { children: "waiting for the core" }), _jsx("tbody", { children: _jsx("tr", { children: _jsx("td", { colSpan: 3, children: "no reading yet" }) }) })] })] }) }));
+  return (
+    <div className="forme forme--registered">
+      <main className="bay">
+        <h1 className="bay__title">this machine</h1>
+        <table className="measures">
+          <caption>waiting for the core</caption>
+          <tbody>
+            <tr>
+              <td colSpan={3}>no reading yet</td>
+            </tr>
+          </tbody>
+        </table>
+      </main>
+    </div>
+  );
 }
 /** One row, as a `<tr>`. */
 function Row_({ row, tolerance }) {
-    const cast = tolerance && row.label === "round trip p50" ? (_jsx("span", { className: "out-of-tolerance", children: "out of tolerance" })) : row.trend === "rising" ? ("▲") : row.trend === "falling" ? ("▼") : null;
-    return (_jsxs("tr", { children: [_jsx("th", { scope: "row", children: row.label }), _jsx("td", { className: "measures__value", title: row.exact, children: row.value }), _jsx("td", { className: "measures__cast", children: cast })] }));
+  const cast =
+    tolerance && row.label === "round trip p50" ? (
+      <span className="out-of-tolerance">out of tolerance</span>
+    ) : row.trend === "rising" ? (
+      "▲"
+    ) : row.trend === "falling" ? (
+      "▼"
+    ) : null;
+  return (
+    <tr>
+      <th scope="row">{row.label}</th>
+      <td className="measures__value" title={row.exact}>
+        {row.value}
+      </td>
+      {/* Written as text rather than as a glyph so a screen reader announces it. */}
+      <td className="measures__cast">{cast}</td>
+    </tr>
+  );
 }
 /** The table for one reading. */
-function Measures({ reading, previous, }) {
-    const tolerance = exceedsTolerance(reading);
-    return (_jsxs("div", { className: "forme forme--registered", children: [_jsxs("nav", { className: "rail", "aria-label": "views", children: [_jsx("div", { className: "rail__label", children: "forme" }), _jsx("button", { className: "rail__item", type: "button", "aria-current": "page", children: "measures" })] }), _jsxs("main", { className: "bay", children: [_jsx("h1", { className: "bay__title", children: "this machine" }), _jsxs("table", { className: "measures", children: [_jsx("caption", { children: "read through the shared channel" }), _jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { scope: "col", children: "measure" }), _jsx("th", { scope: "col", children: "value" }), _jsx("th", { scope: "col" })] }) }), _jsx("tbody", { children: rows(reading, previous).map((row) => (_jsx(Row_, { row: row, tolerance: tolerance }, row.label))) })] })] })] }));
+function Measures({ reading, previous }) {
+  const tolerance = exceedsTolerance(reading);
+  return (
+    <div className="forme forme--registered">
+      {/* The rail is here so the layout of a real application is already right: the second
+            item is a button and nothing else changes. */}
+      <nav className="rail" aria-label="views">
+        <div className="rail__label">forme</div>
+        <button className="rail__item" type="button" aria-current="page">
+          measures
+        </button>
+      </nav>
+
+      <main className="bay">
+        <h1 className="bay__title">this machine</h1>
+        <table className="measures">
+          <caption>read through the shared channel</caption>
+          <thead>
+            <tr>
+              <th scope="col">measure</th>
+              <th scope="col">value</th>
+              <th scope="col" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows(reading, previous).map((row) => (
+              <Row_ key={row.label} row={row} tolerance={tolerance} />
+            ))}
+          </tbody>
+        </table>
+      </main>
+    </div>
+  );
 }
 /**
  * The screen.
@@ -48,22 +108,22 @@ function Measures({ reading, previous, }) {
  * repaint for nothing.
  */
 export function App({ reading }) {
-    // Two readings, not one: a trend compares a value against the one before it, and a
-    // state that holds only the current reading would compare it against itself — which
-    // reports no movement for a value that is climbing, the one error a latency panel
-    // cannot afford.
-    //
-    // Advanced during render rather than in an effect on purpose. An effect runs after the
-    // browser has already painted the frame with the stale comparison in it, so the first
-    // paint of every reading would show arrows computed from the wrong pair.
-    const [current, setCurrent] = useState(reading);
-    const [before, setBefore] = useState(null);
-    if (reading !== null && reading !== current) {
-        setBefore(current);
-        setCurrent(reading);
-    }
-    if (current === null) {
-        return _jsx(Waiting, {});
-    }
-    return _jsx(Measures, { reading: current, previous: before });
+  // Two readings, not one: a trend compares a value against the one before it, and a
+  // state that holds only the current reading would compare it against itself — which
+  // reports no movement for a value that is climbing, the one error a latency panel
+  // cannot afford.
+  //
+  // Advanced during render rather than in an effect on purpose. An effect runs after the
+  // browser has already painted the frame with the stale comparison in it, so the first
+  // paint of every reading would show arrows computed from the wrong pair.
+  const [current, setCurrent] = useState(reading);
+  const [before, setBefore] = useState(null);
+  if (reading !== null && reading !== current) {
+    setBefore(current);
+    setCurrent(reading);
+  }
+  if (current === null) {
+    return <Waiting />;
+  }
+  return <Measures reading={current} previous={before} />;
 }

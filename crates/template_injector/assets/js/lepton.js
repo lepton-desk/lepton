@@ -42,16 +42,22 @@
  * numbers on a screen whose whole claim is that they are measured.
  */
 function resolveTransport() {
-    const installed = globalThis.__lepton;
-    if (installed === undefined) {
-        throw new Error("lepton: the native channel is not attached. This file is running outside a Lepton window, where there is no core to read from.");
-    }
-    return installed;
+  const installed = globalThis.__lepton;
+  if (installed === undefined) {
+    throw new Error(
+      "lepton: the native channel is not attached. This file is running outside a Lepton window, where there is no core to read from.",
+    );
+  }
+  return installed;
 }
 const transport = resolveTransport();
 const layout = transport.layout;
 /** A view over the mapping, typed once. */
-const view = new DataView(transport.bytes.buffer, transport.bytes.byteOffset, transport.bytes.byteLength);
+const view = new DataView(
+  transport.bytes.buffer,
+  transport.bytes.byteOffset,
+  transport.bytes.byteLength,
+);
 /**
  * Reads one `MeasureSet` from the frame at `sequence`'s slot.
  *
@@ -61,17 +67,17 @@ const view = new DataView(transport.bytes.buffer, transport.bytes.byteOffset, tr
  * developer read the label and the moment they read the value.
  */
 function readSample(payloadOffset) {
-    const at = layout.sample;
-    return {
-        timestampNs: view.getBigUint64(payloadOffset + at.timestampNs, true),
-        rssBytes: view.getBigUint64(payloadOffset + at.rssBytes, true),
-        heapHighWaterBytes: view.getBigUint64(payloadOffset + at.heapHighWaterBytes, true),
-        heapInUseBytes: view.getBigUint64(payloadOffset + at.heapInUseBytes, true),
-        ringFreeCells: view.getUint32(payloadOffset + at.ringFreeCells, true),
-        ringCapacityCells: view.getUint32(payloadOffset + at.ringCapacityCells, true),
-        roundTripNs: view.getBigUint64(payloadOffset + at.roundTripNs, true),
-        roundTripMaxNs: view.getBigUint64(payloadOffset + at.roundTripMaxNs, true),
-    };
+  const at = layout.sample;
+  return {
+    timestampNs: view.getBigUint64(payloadOffset + at.timestampNs, true),
+    rssBytes: view.getBigUint64(payloadOffset + at.rssBytes, true),
+    heapHighWaterBytes: view.getBigUint64(payloadOffset + at.heapHighWaterBytes, true),
+    heapInUseBytes: view.getBigUint64(payloadOffset + at.heapInUseBytes, true),
+    ringFreeCells: view.getUint32(payloadOffset + at.ringFreeCells, true),
+    ringCapacityCells: view.getUint32(payloadOffset + at.ringCapacityCells, true),
+    roundTripNs: view.getBigUint64(payloadOffset + at.roundTripNs, true),
+    roundTripMaxNs: view.getBigUint64(payloadOffset + at.roundTripMaxNs, true),
+  };
 }
 /**
  * The newest reading, or null when there is not one yet.
@@ -86,95 +92,95 @@ function readSample(payloadOffset) {
  * from an earlier lap, fails that check and is skipped rather than misread.
  */
 function latestSample() {
-    const position = transport.newestSequence();
-    if (position === 0n) {
-        return null;
-    }
-    const count = view.getUint32(layout.cellCountOffset, true);
-    const stride = view.getUint32(layout.cellStrideOffset, true);
-    if (count === 0 || stride === 0) {
-        return null;
-    }
-    const span = BigInt(count);
-    for (let back = 1n; back <= span && back <= position; back += 1n) {
-        const at = position - back;
-        const cell = layout.headerBytes + Number(at % span) * stride;
-        if (view.getBigUint64(cell + layout.cellSeqOffset, true) !== at + 1n) {
-            continue;
-        }
-        const frame = cell + layout.cellHeaderBytes;
-        // Checked rather than assumed: a frame of another kind, or from a core speaking
-        // another protocol, is not read as a sample.
-        if (view.getUint16(frame + layout.wireProtocolOffset, true) !== layout.protocol) {
-            continue;
-        }
-        if (view.getUint16(frame + layout.wireKindOffset, true) !== layout.kindSample) {
-            continue;
-        }
-        return readSample(frame + layout.wireHeaderBytes);
-    }
+  const position = transport.newestSequence();
+  if (position === 0n) {
     return null;
+  }
+  const count = view.getUint32(layout.cellCountOffset, true);
+  const stride = view.getUint32(layout.cellStrideOffset, true);
+  if (count === 0 || stride === 0) {
+    return null;
+  }
+  const span = BigInt(count);
+  for (let back = 1n; back <= span && back <= position; back += 1n) {
+    const at = position - back;
+    const cell = layout.headerBytes + Number(at % span) * stride;
+    if (view.getBigUint64(cell + layout.cellSeqOffset, true) !== at + 1n) {
+      continue;
+    }
+    const frame = cell + layout.cellHeaderBytes;
+    // Checked rather than assumed: a frame of another kind, or from a core speaking
+    // another protocol, is not read as a sample.
+    if (view.getUint16(frame + layout.wireProtocolOffset, true) !== layout.protocol) {
+      continue;
+    }
+    if (view.getUint16(frame + layout.wireKindOffset, true) !== layout.kindSample) {
+      continue;
+    }
+    return readSample(frame + layout.wireHeaderBytes);
+  }
+  return null;
 }
 /** The channel, as the frontend sees it. */
 export const channel = {
-    /**
-     * The newest reading, and whether there is a core attached.
-     *
-     * Both together because a screen needs them in the same breath: a reading with no
-     * core behind it is stale, and showing it as current is the one mistake this
-     * module exists to prevent.
-     */
-    latest() {
-        const sample = latestSample();
-        return {
-            // Null rather than zeroes: a core that has published nothing has measured
-            // nothing, and a zero would be a measurement that does not exist.
-            measures: sample,
-            connected: transport.isConnected() && sample !== null,
-        };
-    },
-    isConnected() {
-        return transport.isConnected();
-    },
-    close() {
-        return transport.close();
-    },
+  /**
+   * The newest reading, and whether there is a core attached.
+   *
+   * Both together because a screen needs them in the same breath: a reading with no
+   * core behind it is stale, and showing it as current is the one mistake this
+   * module exists to prevent.
+   */
+  latest() {
+    const sample = latestSample();
+    return {
+      // Null rather than zeroes: a core that has published nothing has measured
+      // nothing, and a zero would be a measurement that does not exist.
+      measures: sample,
+      connected: transport.isConnected() && sample !== null,
+    };
+  },
+  isConnected() {
+    return transport.isConnected();
+  },
+  close() {
+    return transport.close();
+  },
 };
 /** Readings, as they arrive. */
 export const measures = {
-    subscribe(listener) {
-        // One subscription to the core, however many listeners there are. The core
-        // publishes at its own rate; a fan-out that asked it once per listener would
-        // make the frame rate a function of the subscriber count.
-        const active = new Set();
-        let unsubscribe = null;
-        const start = () => {
-            if (unsubscribe !== null) {
-                return;
-            }
-            unsubscribe = transport.onPublished(() => {
-                const sample = latestSample();
-                if (sample !== null) {
-                    for (const one of active) {
-                        one(sample);
-                    }
-                }
-            });
-        };
-        const stop = () => {
-            if (active.size === 0 && unsubscribe !== null) {
-                unsubscribe();
-                unsubscribe = null;
-            }
-        };
-        const wrapped = (reading) => {
-            listener(reading);
-        };
-        active.add(wrapped);
-        start();
-        return () => {
-            active.delete(wrapped);
-            stop();
-        };
-    },
+  subscribe(listener) {
+    // One subscription to the core, however many listeners there are. The core
+    // publishes at its own rate; a fan-out that asked it once per listener would
+    // make the frame rate a function of the subscriber count.
+    const active = new Set();
+    let unsubscribe = null;
+    const start = () => {
+      if (unsubscribe !== null) {
+        return;
+      }
+      unsubscribe = transport.onPublished(() => {
+        const sample = latestSample();
+        if (sample !== null) {
+          for (const one of active) {
+            one(sample);
+          }
+        }
+      });
+    };
+    const stop = () => {
+      if (active.size === 0 && unsubscribe !== null) {
+        unsubscribe();
+        unsubscribe = null;
+      }
+    };
+    const wrapped = (reading) => {
+      listener(reading);
+    };
+    active.add(wrapped);
+    start();
+    return () => {
+      active.delete(wrapped);
+      stop();
+    };
+  },
 };

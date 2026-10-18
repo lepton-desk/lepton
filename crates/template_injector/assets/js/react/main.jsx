@@ -4,7 +4,6 @@
 // an edit made here is lost without warning. Running the script in check mode is what
 // keeps the two in step.
 
-import { jsx as _jsx } from "react/jsx-runtime";
 /**
  * The React entry point: bind to the channel, render the screen.
  *
@@ -19,6 +18,7 @@ import { App } from "./App.jsx";
 import { channel, measures } from "./lepton.js";
 import "./lepton-sdk.css";
 import { useEffect, useState } from "react";
+
 /**
  * Subscribes to the channel and holds the current reading.
  *
@@ -27,13 +27,17 @@ import { useEffect, useState } from "react";
  * a subscription made outside the tree survives that and leaks a listener per remount.
  */
 function Screen() {
-    const [reading, setReading] = useState(channel.latest().measures);
-    useEffect(() => measures.subscribe(setReading), []);
-    return _jsx(App, { reading: reading });
+  const [reading, setReading] = useState(channel.latest().measures);
+  useEffect(() => measures.subscribe(setReading), []);
+  return <App reading={reading} />;
 }
 const host = document.querySelector("#root");
 if (host === null) {
-    // A missing host is a mistake in `index.html`, and saying so beats a blank window.
-    throw new Error("lepton: no #root element to mount into");
+  // A missing host is a mistake in `index.html`, and saying so beats a blank window.
+  throw new Error("lepton: no #root element to mount into");
 }
-createRoot(host).render(_jsx(StrictMode, { children: _jsx(Screen, {}) }));
+createRoot(host).render(
+  <StrictMode>
+    <Screen />
+  </StrictMode>,
+);

@@ -28,33 +28,48 @@
  * usable as a check as well as a generator.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const assets = resolve(here, "..", "crates", "template_injector", "assets");
+const root = resolve(here, "..");
+const assets = resolve(root, "crates", "template_injector", "assets");
 const generated = resolve(assets, "js");
+/** The Biome every new project runs, at the version `BIOME_VERSION` pins. */
+const biome = resolve(root, "packages", "api", "node_modules", ".bin", "biome");
 
-/** Every source with a JavaScript form, and where that form goes. */
+/**
+ * Every source with a JavaScript form, and where that form goes.
+ *
+ * JSX is kept as JSX: each framework's Vite plugin compiles its own (React's runtime,
+ * Solid's and Preact's are different), so compiling it here once turned react-js's
+ * `App.jsx` into `_jsx(...)` calls nobody would write. A `.vue` or `.svelte` file keeps
+ * its markup; only its `<script lang="ts">` block is turned into JavaScript.
+ */
 const SOURCES = [
   { from: "lepton.ts", to: "lepton.js" },
   { from: "measures.ts", to: "measures.js" },
   { from: "main.ts", to: "main.js" },
   { from: join("react", "App.tsx"), to: join("react", "App.jsx") },
   { from: join("react", "main.tsx"), to: join("react", "main.jsx") },
+  { from: join("solid", "App.tsx"), to: join("solid", "App.jsx") },
+  { from: join("solid", "main.tsx"), to: join("solid", "main.jsx") },
+  { from: join("vue", "main.ts"), to: join("vue", "main.js") },
+  { from: join("vue", "App.vue"), to: join("vue", "App.vue") },
+  { from: join("svelte", "main.ts"), to: join("svelte", "main.js") },
+  { from: join("svelte", "App.svelte"), to: join("svelte", "App.svelte") },
+  { from: join("preact", "App.tsx"), to: join("preact", "App.jsx") },
+  { from: join("preact", "main.tsx"), to: join("preact", "main.jsx") },
+  { from: join("lit", "measures-screen.ts"), to: join("lit", "measures-screen.js") },
+  { from: join("lit", "main.ts"), to: join("lit", "main.js") },
 ];
 
-/** The banner every generated file carries.
- *
- * Present in the output rather than only here because a developer opening
- * `src/lepton.js` in a JavaScript project deserves to know it is generated and from
- * where — otherwise the obvious thing to do is edit it, and the edit vanishes the next
- * time this runs.
- */
-function banner(source) {
-  return [
+const banner = (source) =>
+  [
     "// Generated from `" + source.replaceAll("\\", "/") + "` by tools/transpile-assets.mjs.",
     "//",
     "// Edit the TypeScript source, not this file: this one is rewritten on every run and",
@@ -63,81 +78,123 @@ function banner(source) {
     "",
     "",
   ].join("\n");
+
+const markupBanner = (source) =>
+  "<!-- Generated from `" +
+  source.replaceAll("\\", "/") +
+  "` by tools/transpile-assets.mjs; edit the TypeScript source, not this file. -->\n";
+
+/** TypeScript to JavaScript, JSX and every non-type import kept as written. */
+function transpile(ts, source, fileName) {
+  const output = ts.transpileModule(source, {
+    fileName,
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.Preserve,
+      // An import a component's markup uses is not "unused" to TypeScript's eyes only.
+      verbatimModuleSyntax: true,
+      removeComments: false,
+      newLine: ts.NewLineKind.LineFeed,
+    },
+  }).outputText;
+  // `./lepton.ts` in the source is `./lepton.js` in a JavaScript project.
+  return output.replace(/\.ts"/g, '.js"').replace(/\.tsx"/g, '.jsx"');
+}
+
+/** JavaScript formatted as the projects' Biome formats it, through its stdin. */
+function formatScript(text) {
+  return execFileSync(
+    biome,
+    ["format", "--vcs-enabled=false", `--config-path=${assets}`, "--stdin-file-path=script.js"],
+    { input: text, encoding: "utf8" },
+  );
+}
+
+/**
+ * A `.vue` or `.svelte` file with its `<script lang="ts">` block in JavaScript.
+ *
+ * Biome does not format a component's script block, so the block is formatted on its own
+ * and put back at the indent the source gives it (Svelte's is indented, Vue's is not).
+ */
+function transpileComponent(ts, source, fileName) {
+  const pattern = /(<script\b[^>]*?)\s+lang="ts"([^>]*>)([\s\S]*?)(<\/script>)/;
+  const match = source.match(pattern);
+  if (match === null) throw new Error(`${fileName}: no <script lang="ts"> block`);
+  const [whole, open, close, body, end] = match;
+  const indent = (body.split("\n").find((line) => line.trim() !== "") ?? "").match(/^\s*/)[0];
+  const script = formatScript(transpile(ts, body, `${fileName}.ts`))
+    .split("\n")
+    .map((line) => (line === "" ? line : indent + line))
+    .join("\n");
+  return source.replace(whole, `${open}${close}\n${script}${end}`);
 }
 
 function main() {
   const tscPath = process.argv[2];
   if (tscPath === undefined) {
-    process.stderr.write("usage: transpile-assets.mjs <path-to-typescript>\n");
+    process.stderr.write("usage: transpile-assets.mjs <path-to-typescript> [--check]\n");
     process.exit(2);
   }
-
-  const require = createRequire(import.meta.url);
-  const ts = require(tscPath);
-
+  const ts = createRequire(import.meta.url)(tscPath);
   const check = process.argv.includes("--check");
-  let drifted = 0;
 
-  for (const { from, to } of SOURCES) {
-    const inputPath = join(assets, from);
-    const outputPath = join(generated, to);
-    const source = readFileSync(inputPath, "utf8");
+  // Written to a staging directory and formatted there with the projects' own Biome
+  // settings, so a generated file passes `biome check` in a new project (they did not:
+  // four-space indents and unsorted imports, measured on react-js and vanilla-js).
+  const staging = mkdtempSync(join(tmpdir(), "lepton-transpile-"));
+  try {
+    for (const { from, to } of SOURCES) {
+      const inputPath = join(assets, from);
+      const source = readFileSync(inputPath, "utf8");
+      const component = /\.(vue|svelte)$/.test(from);
+      const contents = component
+        ? markupBanner(from) + transpileComponent(ts, source, inputPath)
+        : banner(from) + transpile(ts, source, inputPath);
+      const stagedPath = join(staging, to);
+      mkdirSync(dirname(stagedPath), { recursive: true });
+      writeFileSync(stagedPath, contents);
+    }
+    execFileSync(
+      biome,
+      ["check", "--write", "--vcs-enabled=false", `--config-path=${assets}`, staging],
+      { stdio: ["ignore", "ignore", "inherit"] },
+    );
 
-    const transpiled = ts.transpileModule(source, {
-      fileName: inputPath,
-      // `.tsx` and `.jsx` are JSX-bearing, so the compiler has to be told which; a `.ts`
-      // file with the same shape of code is not the same language.
-      compilerOptions: {
-        target: ts.ScriptTarget.ES2022,
-        module: ts.ModuleKind.ESNext,
-        jsx: ts.JsxEmit.ReactJSX,
-        // Names go out as written. Shortening them would make the generated file harder
-        // to read against its source, and the point of it is to be read.
-        removeComments: false,
-        newLine: ts.NewLineKind.LineFeed,
-      },
-    });
-
-    // The compiler leaves import specifiers exactly as written, so a `./lepton.ts` in
-    // the source would become a `./lepton.ts` in the JavaScript — pointing at a file the
-    // JavaScript variant does not contain, since it ships `./lepton.js`. Rewritten here
-    // because the generator is the only place that knows both halves of the pair.
-    const output = transpiled.outputText
-      .replace(/\.ts"/g, '.js"')
-      .replace(/\.tsx"/g, '.jsx"');
-
-    const contents = banner(from) + output;
-
+    let drifted = 0;
+    for (const { to } of SOURCES) {
+      const formatted = readFileSync(join(staging, to), "utf8");
+      const outputPath = join(generated, to);
+      if (check) {
+        let existing = null;
+        try {
+          existing = readFileSync(outputPath, "utf8");
+        } catch {
+          // A missing file is drift: the generated form is not on disk yet.
+        }
+        if (existing !== formatted) {
+          process.stderr.write(`stale or missing: ${outputPath}\n`);
+          drifted += 1;
+        }
+        continue;
+      }
+      mkdirSync(dirname(outputPath), { recursive: true });
+      writeFileSync(outputPath, formatted);
+    }
     if (check) {
-      let existing = null;
-      try {
-        existing = readFileSync(outputPath, "utf8");
-      } catch {
-        // A missing file is drift: the generated form is not on disk yet.
+      if (drifted !== 0) {
+        process.stderr.write(
+          `${drifted} generated file(s) differ from their source; run node tools/transpile-assets.mjs <typescript>\n`,
+        );
+        process.exit(1);
       }
-      if (existing !== contents) {
-        process.stderr.write(`stale or missing: ${outputPath}\n`);
-        drifted += 1;
-      }
-      continue;
+      process.stdout.write("generated files match their sources\n");
+      return;
     }
-
-    mkdirSync(dirname(outputPath), { recursive: true });
-    writeFileSync(outputPath, contents);
+    process.stdout.write(`wrote ${SOURCES.length} file(s) to ${generated}\n`);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
   }
-
-  if (check) {
-    if (drifted !== 0) {
-      process.stderr.write(
-        `${drifted} generated file(s) differ from their source; run node tools/transpile-assets.mjs <typescript>\n`,
-      );
-      process.exit(1);
-    }
-    process.stdout.write("generated files match their sources\n");
-    return;
-  }
-
-  process.stdout.write(`wrote ${SOURCES.length} file(s) to ${generated}\n`);
 }
 
 main();

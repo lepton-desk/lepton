@@ -7,7 +7,7 @@ const host = document.querySelector("#root");
 if (host) {
   createRoot(host).render(
     <StrictMode>
-      <p>{{project_name}}</p>
+      <p>{{ project_name }}</p>
     </StrictMode>,
   );
 }

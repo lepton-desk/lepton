@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 // Nothing else is needed. Vite 8 transforms through oxc rather than esbuild, and the
 // React plugin already arranges the automatic JSX runtime — an `esbuild: { jsx }` block

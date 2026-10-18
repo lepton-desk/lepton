@@ -22,8 +22,9 @@
 //! the base must stay a project a developer recognises, and a framework that wrote its
 //! own runtime into `index.html` would make it unrecognisable.
 //!
-//! `shared-ts/` holds what is identical across every TypeScript template, so twelve
-//! templates cannot disagree about a compiler flag.
+//! `shared/` holds what every project gets whatever its language (`.gitignore`), and
+//! `shared-ts/` what is identical across every TypeScript template, so twelve templates
+//! cannot disagree about a compiler flag.
 //!
 //! ## Placeholders
 //!
@@ -88,7 +89,7 @@ pub fn available() -> Vec<String> {
         let Some(first) = entry.split('/').next() else {
             continue;
         };
-        if first == "shared-ts" {
+        if first == "shared-ts" || first == "shared" {
             continue;
         }
         let owned = first.to_owned();
@@ -127,9 +128,17 @@ pub fn write(
     // Two passes: the shared TypeScript layer, then the template, so a per-template file of
     // the same name wins. One pass in the embed's order wrote `react-ts/` before
     // `shared-ts/` (alphabetical), and the shared `tsconfig.json` replaced React's own.
+    // `shared/` goes to every project whatever its language: `.gitignore` lived in
+    // `shared-ts/` alone, so every JavaScript project had none, and `biome check` (its
+    // `biome.json` reads the ignore file) stopped with a configuration error before
+    // checking anything (measured on react-js and vanilla-js, 2026-10-18).
     let shared = template.ends_with("-ts");
     let own = format!("{template}/");
-    let layers = [shared.then_some("shared-ts/"), Some(own.as_str())];
+    let layers = [
+        Some("shared/"),
+        shared.then_some("shared-ts/"),
+        Some(own.as_str()),
+    ];
     for prefix in layers.into_iter().flatten() {
         for (name, relative) in entries() {
             if !name.starts_with(prefix) {
@@ -204,6 +213,23 @@ mod tests {
     use super::{Bindings, available, write};
     use lepton_orchestrator::ensure;
     use lepton_orchestrator::testing::{Failure, Scratch};
+
+    #[test]
+    fn every_template_gets_the_ignore_file_biome_reads() -> Result<(), Failure> {
+        for template in available() {
+            let scratch = Scratch::new(&format!("gitignore-{template}"))?;
+            let bindings = Bindings {
+                project_name: String::from("probe"),
+                app_id: String::from("dev.lepton.probe"),
+                render_mode: String::from("webview"),
+            };
+            write(&template, scratch.path(), &bindings).map_err(|error| {
+                lepton_orchestrator::testing::fail("a written base", format!("{error:?}"))
+            })?;
+            ensure!(scratch.exists(".gitignore"), "{template} has no .gitignore");
+        }
+        Ok(())
+    }
 
     /// Every TypeScript template whose sources hold JSX must tell `tsc` how to read it.
     /// react-ts had no `tsconfig.json` of its own and inherited the shared one, which has
