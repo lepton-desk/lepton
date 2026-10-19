@@ -110,18 +110,24 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // so, so the build continuing is not the build pretending it succeeded.
     const native_render = std.mem.eql(u8, render_choice, "native");
 
+    // Every library below is found by asking this machine's pkg-config, which describes
+    // this machine's Linux libraries. Building for another system (`lepton build --windows`
+    // on Linux) must not link them: the Windows binary was handed WPE, GLib, Cairo, XCB and
+    // Wayland and the link failed on all of them (measured 2026-10-19).
+    const linux = options.target.result.os.tag == .linux;
+
     // XCB's RandR header is a separate library from XCB itself: `xcb/xcb.h` and
     // `xcb/randr.h` live in the same package but the symbols do not, and a link
     // against `xcb` alone leaves the refresh-rate query undefined.
-    const have_xcb = hasPkgConfig(b, "xcb");
-    const have_xcb_randr = hasPkgConfig(b, "xcb-randr");
-    const have_wayland = hasPkgConfig(b, "wayland-client");
+    const have_xcb = linux and hasPkgConfig(b, "xcb");
+    const have_xcb_randr = linux and hasPkgConfig(b, "xcb-randr");
+    const have_wayland = linux and hasPkgConfig(b, "wayland-client");
 
     // The native path's drawing and text. Probed for the same reason the display
     // libraries are: a machine without Cairo still compiles, because a missing text
     // stack is a runtime condition the developer has to be shown rather than a compile
     // error that takes the whole core down with it.
-    const have_cairo = hasPkgConfig(b, "cairo");
+    const have_cairo = linux and hasPkgConfig(b, "cairo");
 
     // WPE WebKit for the webview path. Probed rather than assumed for the same
     // reason the display libraries are: a machine without it still builds the core,
@@ -132,6 +138,8 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // and the reason `-Drender` is resolved here, in the build graph, rather than at
     // run time behind a `switch`.
     const want_webview = !native_render;
+    // WPE is the Linux engine; Windows pages go through WebView2 below.
+    const want_wpe = want_webview and linux;
 
     // Two engine ABIs are in the wild and they are not source compatible.
     //
@@ -147,8 +155,8 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // `-Dwpe-abi=legacy` exists for engines that have only the old one: the platform API
     // is preferred whenever it is there, since staying on the older path by accident
     // would mean a distribution dropping it breaks the build with no change on this side.
-    const have_wpe_platform = want_webview and hasPkgConfig(b, "wpe-platform-2.0");
-    const have_wpe_legacy = want_webview and hasPkgConfig(b, "wpe-1.0");
+    const have_wpe_platform = want_wpe and hasPkgConfig(b, "wpe-platform-2.0");
+    const have_wpe_legacy = want_wpe and hasPkgConfig(b, "wpe-1.0");
     const wpe_abi_choice = b.option(
         []const u8,
         "wpe-abi",
@@ -164,7 +172,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
         std.log.err("lepton: -Dwpe-abi takes auto, platform or legacy, not '{s}'", .{wpe_abi_choice});
         std.process.exit(1);
     };
-    if (want_webview and hasPkgConfig(b, "wpe-webkit-2.0") and !use_platform_abi and !have_wpe_legacy) {
+    if (want_wpe and hasPkgConfig(b, "wpe-webkit-2.0") and !use_platform_abi and !have_wpe_legacy) {
         std.log.err("lepton: -Dwpe-abi=legacy needs libwpe, which is not installed", .{});
         std.process.exit(1);
     }
@@ -174,7 +182,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // installed, as it is after an upgrade from 2.52. Left to the linker this arrives as a
     // wall of undefined symbols that names neither the flag nor the reason, so the engine's
     // own `.pc` file is asked: built with the libwpe API, it requires `wpe-1.0`.
-    if (want_webview and !use_platform_abi and hasPkgConfig(b, "wpe-webkit-2.0") and
+    if (want_wpe and !use_platform_abi and hasPkgConfig(b, "wpe-webkit-2.0") and
         !pkgConfigRequires(b, "wpe-webkit-2.0", "wpe-1.0"))
     {
         std.log.err(
@@ -185,7 +193,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
         );
         std.process.exit(1);
     }
-    const have_wpe = want_webview and hasPkgConfig(b, "wpe-webkit-2.0");
+    const have_wpe = want_wpe and hasPkgConfig(b, "wpe-webkit-2.0");
 
     // Windows pages go through WebView2 (`render/webview/webview2/`): Microsoft's header is
     // vendored in `webview2/` with its licence, the runtime is the one Windows installs, and
@@ -207,7 +215,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // 1.16.1 both ship `libWPEBackend-fdo-1.0.so`. `pkg-config --libs-only-l` is where
     // that ABI is written down, so this reads the packaging instead of guessing at it.
     // Only the libwpe path loads a backend; the platform path has none to find.
-    const wpe_backend_library = if (want_webview and !use_platform_abi) wpeBackendLibrary(b, "wpebackend-fdo-1.0") else null;
+    const wpe_backend_library = if (want_wpe and !use_platform_abi) wpeBackendLibrary(b, "wpebackend-fdo-1.0") else null;
     if (have_wpe and !use_platform_abi and wpe_backend_library == null) {
         std.log.warn(
             "lepton: the web engine is installed but no platform backend was found;" ++
@@ -224,9 +232,9 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // surface, and copies through shared memory when it will not. Both halves are always
     // compiled in — the choice is made at run time and the machine that falls back must
     // not have been built without the other path.
-    const gpu_text = native_render and hasPkgConfig(b, "egl") and hasPkgConfig(b, "freetype2") and
+    const gpu_text = native_render and linux and hasPkgConfig(b, "egl") and hasPkgConfig(b, "freetype2") and
         hasPkgConfig(b, "harfbuzz") and hasPkgConfig(b, "fontconfig");
-    if (native_render and hasPkgConfig(b, "egl")) {
+    if (native_render and linux and hasPkgConfig(b, "egl")) {
         core.linkSystemLibrary("egl", .{});
         core.linkSystemLibrary("GLESv2", .{});
         core.linkSystemLibrary("wayland-egl", .{});
