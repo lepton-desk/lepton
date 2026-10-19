@@ -43,8 +43,10 @@ her komuta `--tag beta`, `1.0.0-rc.N` için `--tag next` (npm 11 ön sürümü e
 Eklentilerin `peerDependencies` (`^<sürüm>`) ve `cli`'nin `optionalDependencies`'i de sürümle birlikte artar.
 
 Yayın iki makineye bölünür; aynı commit'ten (`git pull`). **Önce Windows**, sonra Linux: `cli` iki platform
-paketine, `create-lepton-app` `cli`'ye bağlı. Windows'ta yalnız orada `prepublishOnly` zinciri baştan sona geçen
-paketler yayımlanır; `plugin-os` (`uname`) ve `plugin-fs` (`openat2`) Linux'a özgü Zig taşıdığı için Linux'ta kalır.
+paketine, `create-lepton-app` `cli`'ye bağlı. Eklentilerin dördü de Windows'ta çalışır ve testlerini geçer;
+ama `plugin-os` (`uname` / `RtlGetVersion`) ve `plugin-fs` (`openat2` / `NtCreateFile`) her sistem için ayrı Zig
+taşır ve `prepublishOnly` yalnız yayımlandığı sistemin yarısını test eder — bu yüzden Linux yarısı test edilsin
+diye Linux'tan yayımlanırlar (Windows yarısı Windows'ta `pnpm test` ile).
 Ön kontrol Windows'tan yayımlananları (`from_windows`) "published from Windows" diye geçer.
 
 ### 4a. Windows (`D:/lepton`, PowerShell 5.1 — `&&` yok, komutlar ayrı ya da `;` + `if ($?)`)

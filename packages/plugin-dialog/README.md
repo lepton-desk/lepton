@@ -24,9 +24,12 @@ List the commands in `lepton.config.json`:
 { "permissions": ["dialog.open", "dialog.save"] }
 ```
 
-The dialog is drawn by the desktop through xdg-desktop-portal (`FileChooser`), so it looks
-like the rest of the desktop and the application links no toolkit. Up to eight dialogs may
-be open at once. In a native (non-webview) application both commands reject with `failed`.
+The dialog is the system's own, so it looks like the rest of the desktop and the
+application links no toolkit: on Linux the desktop draws it through xdg-desktop-portal
+(`FileChooser`), on Windows it is the shell's `IFileOpenDialog` / `IFileSaveDialog`.
+`defaultPath` is absolute as the system writes it (`/home/u/Notlar`, `C:\Users\u\Notlar`).
+Up to eight dialogs may be open at once. In a native (non-webview) application both
+commands reject with `failed`.
 
 A chosen path is not thereby readable through `@lepton-desk/plugin-fs`, which still answers
 only inside its own `scope`.

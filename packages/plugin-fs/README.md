@@ -30,13 +30,23 @@ A scope entry is a base directory — `$APPDATA` `$APPCONFIG` `$APPCACHE` `$HOME
 below it. No wildcards, no `..`: a scope that breaks these rules fails the build. Without a
 scope every path is refused.
 
-- `$APPDATA`, `$APPCONFIG`, `$APPCACHE` are `$XDG_*_HOME/<identifier>`, created (mode 0700)
-  on first use. The user directories come from `user-dirs.dirs`, so `$DOCUMENT` is
-  `~/Belgeler` on a Turkish desktop.
+- On Linux `$APPDATA`, `$APPCONFIG`, `$APPCACHE` are `$XDG_*_HOME/<identifier>`, created
+  (mode 0700) on first use. The user directories come from `user-dirs.dirs`, so `$DOCUMENT`
+  is `~/Belgeler` on a Turkish desktop.
+- On Windows `$APPDATA` and `$APPCONFIG` are `%APPDATA%\<identifier>` (as in Tauri),
+  `$APPCACHE` is `%LOCALAPPDATA%\<identifier>\Cache` — not `%LOCALAPPDATA%\<identifier>`
+  itself, which holds WebView2's cookies and storage. The user directories are the shell's
+  Known Folders, so a Documents folder moved to OneDrive is found there. Paths may use `\`
+  or `/` and are matched without case, as NTFS matches them.
 - A path outside every scope directory rejects with `InvokeError` reason `denied` — also
-  one that leaves through a symbolic link. Every path is opened with the kernel's
-  `openat2(RESOLVE_BENEATH)`, so a link inside an allowed directory cannot lead out of it.
+  one that leaves through a link. Every path is opened relative to the scope directory by
+  the kernel — Linux's `openat2(RESOLVE_BENEATH)`, Windows' `NtCreateFile` with
+  `OBJ_DONT_REPARSE` — so a link inside an allowed directory cannot lead out of it. On
+  Windows every junction or symbolic link is refused, also one that stays inside (the
+  kernel cannot tell them apart), and so are names Windows would read differently:
+  `notes.md:hidden` (a stream), `CON`, `NUL`, a name ending in a dot or a space.
   `exists` answers `denied` there too, rather than telling the page what lies outside.
 - One call moves at most 64 KiB; a larger file rejects with reason `too_large`.
 
-Requires `lepton` 0.1.3 or newer (plugin settings) and Linux 5.6 or newer (`openat2`).
+Requires `lepton` 0.1.3 or newer (plugin settings), and Linux 5.6 or newer (`openat2`) or
+Windows 10 1803 or newer (`OBJ_DONT_REPARSE`).

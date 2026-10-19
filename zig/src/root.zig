@@ -26,19 +26,21 @@ pub const ownership = @import("ipc/ownership.zig");
 pub const probe = @import("metrics/probe.zig");
 pub const latency = @import("metrics/latency.zig");
 pub const display = @import("platform/linux/display.zig");
-/// The user's base directories (`$APPDATA`, `$DOCUMENT`, …), for plugins.
-pub const paths = @import("platform/linux/paths.zig");
+/// The user's base directories (`$APPDATA`, `$DOCUMENT`, …), for plugins: XDG on Linux,
+/// Known Folders on Windows.
+pub const paths = if (@import("builtin").os.tag == .windows) @import("platform/windows/paths.zig") else @import("platform/linux/paths.zig");
 /// A plugin's settings from `lepton.config.json`'s `plugins`, read at compile time.
 pub const pluginConfig = @import("plugin_config.zig");
-/// The desktop's file dialogs (xdg-desktop-portal), for `@lepton-desk/plugin-dialog`.
-pub const portal = @import("platform/linux/portal.zig");
+/// The desktop's file dialogs, for `@lepton-desk/plugin-dialog`: xdg-desktop-portal on
+/// Linux, the shell's `IFileOpenDialog` on Windows (one API, so the plugin is one file).
+pub const portal = if (@import("builtin").os.tag == .windows) @import("platform/windows/dialog.zig") else @import("platform/linux/portal.zig");
 /// The application's own systemd scope (`app-<identifier>-<pid>.scope`), entered before
 /// the engine starts so its processes are one application in a task manager.
 pub const scope = @import("platform/linux/scope.zig");
 /// The start-up lines (`  ◆ scope  joined`), coloured as `lepton` colours its own.
 pub const report = @import("report.zig");
 /// Paths the user chose in a dialog, granted at run time and remembered (`plugin-fs` `chosen`).
-pub const grants = @import("platform/linux/grants.zig");
+pub const grants = @import("platform/grants.zig");
 /// SIGTERM, SIGINT and SIGHUP as a request the loop ends on, so the channel is unlinked.
 pub const termination = if (@import("builtin").os.tag == .windows) @import("platform/windows/termination.zig") else @import("platform/linux/termination.zig");
 /// The Vulkan the native GPU renderer requires (the baseline R7 240's set); pure, no driver.

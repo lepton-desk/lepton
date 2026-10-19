@@ -290,6 +290,8 @@ test "configuration names map to bases and back" {
 }
 
 test "this machine's own directories resolve" {
+    // This machine's XDG directories; the Windows half has its own (`windows/paths.zig`).
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
     var out: [std.fs.max_path_bytes]u8 = undefined;
     var scratch: [4096]u8 = undefined;
     const home = try resolve(.home, "style.lepton.test", &out, &scratch);
@@ -299,6 +301,7 @@ test "this machine's own directories resolve" {
 }
 
 test "missing directories are made 0700, existing ones keep their mode" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
     var name: [96]u8 = undefined;
     const base = try std.fmt.bufPrintZ(&name, "/tmp/lepton-paths-test-{d}", .{linux.getpid()});
     var deep: [160]u8 = undefined;

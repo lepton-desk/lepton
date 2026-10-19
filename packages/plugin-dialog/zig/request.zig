@@ -5,6 +5,7 @@
 //!  { [name][pattern count u8] { [pattern] } }`, each string `[length u16 LE][UTF-8]`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const Flag = struct {
     pub const multiple: u8 = 1;
@@ -82,10 +83,26 @@ pub fn decode(argument: []const u8, storage: *Storage) Error!Request {
         storage.filters[index] = .{ .name = name, .patterns = storage.patterns[index][0..pattern_count] };
     }
     if (reader.at != argument.len) return error.Malformed;
-    if (request.current_folder.len > 0 and request.current_folder[0] != '/') return error.Malformed;
+    if (request.current_folder.len > 0 and !isAbsolute(builtin.os.tag == .windows, request.current_folder)) return error.Malformed;
     var decoded = request;
     decoded.filters = storage.filters[0..filter_count];
     return decoded;
+}
+
+/// `/…`, or on Windows a drive and a separator (`C:\…`, `C:/…`).
+fn isAbsolute(windows: bool, path: []const u8) bool {
+    if (!windows) return path[0] == '/';
+    return path.len >= 3 and std.ascii.isAlphabetic(path[0]) and path[1] == ':' and (path[2] == '\\' or path[2] == '/');
+}
+
+test "a starting folder is absolute as the host writes it" {
+    try std.testing.expect(isAbsolute(false, "/home/u"));
+    try std.testing.expect(!isAbsolute(false, "Belgeler"));
+    try std.testing.expect(isAbsolute(true, "C:\\Users\\u\\Documents"));
+    try std.testing.expect(isAbsolute(true, "d:/Notlar"));
+    try std.testing.expect(!isAbsolute(true, "/home/u"));
+    try std.testing.expect(!isAbsolute(true, "\\\\server\\share"));
+    try std.testing.expect(!isAbsolute(true, "C:relative"));
 }
 
 fn put(out: []u8, at: *usize, text: []const u8) void {
@@ -95,6 +112,7 @@ fn put(out: []u8, at: *usize, text: []const u8) void {
 }
 
 test "a request with filters decodes to what the page sent" {
+    const folder = if (builtin.os.tag == .windows) "C:\\Users\\u\\Belgeler" else "/home/u/Belgeler";
     var bytes: [256]u8 = undefined;
     var at: usize = 0;
     bytes[at] = Flag.multiple;
@@ -102,7 +120,7 @@ test "a request with filters decodes to what the page sent" {
     put(&bytes, &at, "Notları aç");
     put(&bytes, &at, "");
     put(&bytes, &at, "");
-    put(&bytes, &at, "/home/u/Belgeler");
+    put(&bytes, &at, folder);
     bytes[at] = 2;
     at += 1;
     put(&bytes, &at, "Metin");
@@ -119,7 +137,7 @@ test "a request with filters decodes to what the page sent" {
     const request = try decode(bytes[0..at], &storage);
     try std.testing.expect(request.multiple and !request.directory);
     try std.testing.expectEqualStrings("Notları aç", request.title);
-    try std.testing.expectEqualStrings("/home/u/Belgeler", request.current_folder);
+    try std.testing.expectEqualStrings(folder, request.current_folder);
     try std.testing.expectEqual(@as(usize, 2), request.filters.len);
     try std.testing.expectEqualStrings("Metin", request.filters[0].name);
     try std.testing.expectEqualStrings("*.md", request.filters[0].patterns[1]);

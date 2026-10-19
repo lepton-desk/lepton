@@ -116,31 +116,40 @@ fn mapFs(err: fs.Error) Registry.HandlerError {
 
 /// An open root and the path below it, for one request.
 const Target = struct {
-    root_fd: i32,
+    root_fd: fs.Handle,
     relative: [:0]const u8,
-    relative_buffer: [std.fs.max_path_bytes]u8,
+    relative_buffer: [path_max]u8,
 
     fn close(target: *const Target) void {
-        _ = std.os.linux.close(target.root_fd);
+        fs.close(target.root_fd);
     }
 };
 
+/// The longest absolute path handled. Not `std.fs.max_path_bytes`: on Windows that is
+/// 96 KiB, and a request holds several such buffers on the stack.
+const path_max = 4096;
+const windows = @import("builtin").os.tag == .windows;
+/// What joins a base directory and the path below it.
+const separator = if (windows) '\\' else '/';
+
 fn open(request: Request, target: *Target) Registry.HandlerError!void {
     var scratch: [4096]u8 = undefined;
-    var absolute_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var absolute_buffer: [path_max]u8 = undefined;
     const absolute = switch (request.base) {
         .none => request.path,
         else => blk: {
-            if (request.path.len > 0 and request.path[0] == '/') return error.Failed;
+            // Below the base: not absolute (`/…`, on Windows also `\…`). A colon on Windows
+            // (`C:\…`, `notes.md:hidden`) is left to `fs.locate`, which denies it.
+            if (request.path.len > 0 and (request.path[0] == '/' or (windows and request.path[0] == '\\'))) return error.Failed;
             const dir = core.paths.resolve(request.base, identifier, &absolute_buffer, &scratch) catch |err| return mapPaths(err);
             if (request.path.len == 0) break :blk dir;
             if (dir.len + 1 + request.path.len > absolute_buffer.len) return error.TooLarge;
-            absolute_buffer[dir.len] = '/';
+            absolute_buffer[dir.len] = separator;
             @memcpy(absolute_buffer[dir.len + 1 ..][0..request.path.len], request.path);
             break :blk absolute_buffer[0 .. dir.len + 1 + request.path.len];
         },
     };
-    var root_buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var root_buffer: [path_max]u8 = undefined;
     inline for (scope) |entry| {
         if (rootOf(entry, &root_buffer, &scratch)) |root| {
             if (fs.locate(&.{root}, absolute, &target.relative_buffer)) |located| {
@@ -170,7 +179,7 @@ fn rootOf(comptime entry: Entry, buffer: []u8, scratch: []u8) core.paths.Error!f
     const dir = try core.paths.resolve(entry.base, identifier, buffer, scratch);
     if (entry.below.len == 0) return .{ .path = dir, .create = entry.base.isOwn() };
     if (dir.len + 1 + entry.below.len > buffer.len) return error.TooLong;
-    buffer[dir.len] = '/';
+    buffer[dir.len] = separator;
     @memcpy(buffer[dir.len + 1 ..][0..entry.below.len], entry.below);
     return .{ .path = buffer[0 .. dir.len + 1 + entry.below.len], .create = entry.base.isOwn() };
 }
@@ -237,19 +246,11 @@ fn rename(argument: []const u8, _: []u8) Registry.HandlerError!usize {
     var to: Target = undefined;
     try open(.{ .base = request.base, .flags = 0, .path = request.body, .body = &.{} }, &to);
     defer to.close();
-    // Same root: the same directory opened twice compares equal by device and inode.
-    if (!sameDirectory(from.root_fd, to.root_fd)) return error.Denied;
+    // Same root: the same directory opened twice compares equal (device and inode; on
+    // Windows volume and file id).
+    if (!fs.sameDirectory(from.root_fd, to.root_fd)) return error.Denied;
     fs.rename(from.root_fd, from.relative, to.relative) catch |err| return mapFs(err);
     return 0;
-}
-
-fn sameDirectory(a: i32, b: i32) bool {
-    const linux = std.os.linux;
-    var first: linux.Statx = undefined;
-    var second: linux.Statx = undefined;
-    if (linux.statx(a, "", linux.AT.EMPTY_PATH, .{ .INO = true }, &first) != 0) return false;
-    if (linux.statx(b, "", linux.AT.EMPTY_PATH, .{ .INO = true }, &second) != 0) return false;
-    return first.ino == second.ino and first.dev_major == second.dev_major and first.dev_minor == second.dev_minor;
 }
 
 fn stat(argument: []const u8, out: []u8) Registry.HandlerError!usize {

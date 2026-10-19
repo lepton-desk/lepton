@@ -8,9 +8,10 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 plugins=(plugin-os plugin-clipboard plugin-fs plugin-dialog)
 packages=(cli-linux-x64 cli-win32-x64 cli api "${plugins[@]}" create-lepton-app)
-# Published from Windows first (docs/yayin.md): the Windows binary, and the packages whose
-# whole prepublish chain passes there. plugin-os and plugin-fs carry Linux-only Zig
-# (`uname`, `openat2`), so they, the Linux binary, `cli` and create-lepton-app go from here.
+# Published from Windows first (docs/yayin.md): the Windows binary, and the packages with
+# no Linux-only half. plugin-os and plugin-fs have one each (`uname`, `openat2`), which
+# their prepublish tests only here, so they, the Linux binary, `cli` and create-lepton-app
+# go from here.
 from_windows=(cli-win32-x64 api plugin-clipboard plugin-dialog)
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'preflight: %s\n' "$*" >&2; exit 1; }

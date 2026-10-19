@@ -21,6 +21,10 @@ Grant what the page uses in `lepton.config.json` — each command by name, no wi
 
 An unlisted command rejects with `InvokeError` reason `denied`.
 
+On Windows `platform()` and `family()` are `"windows"`, `exeExtension()` is `".exe"`,
+`version()` is the kernel's own (`10.0.19045`, from `RtlGetVersion`), `hostname()` the DNS
+host name and `locale()` the user's locale (`GetUserDefaultLocaleName`).
+
 ## How a plugin is put together
 
 The package carries both halves. `package.json` points at the Zig side —

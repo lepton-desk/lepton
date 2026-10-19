@@ -368,7 +368,7 @@ fn settle(slot: *Pending, outcome: Outcome, results: ?*GVariant) void {
     if (connection) |bus| g.unsubscribe(bus, slot.subscription);
     const grant_to_buffer = slot.grant_to;
     const grant_to = grant_to_buffer[0..slot.grant_to_len];
-    const kind: @import("grants.zig").Kind = if (slot.directories) .directory else .file;
+    const kind: @import("../grants.zig").Kind = if (slot.directories) .directory else .file;
     slot.* = .{};
 
     var reply: [invoke.max_reply - 64]u8 = undefined;
@@ -387,7 +387,7 @@ fn settle(slot: *Pending, outcome: Outcome, results: ?*GVariant) void {
                 const bytes = std.mem.span(path);
                 // The user chose it in the desktop's own dialog: granted now, before the page
                 // hears of it, so its first read of the path already succeeds.
-                if (grant_to.len != 0) @import("grants.zig").add(grant_to, kind, bytes);
+                if (grant_to.len != 0) @import("../grants.zig").add(grant_to, kind, bytes);
                 if (len + bytes.len + 1 > reply.len) return later.finish(.too_large, &.{});
                 @memcpy(reply[len..][0..bytes.len], bytes);
                 reply[len + bytes.len] = 0;

@@ -346,6 +346,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
         .platform_module_step = &platform_module.step,
         .protocol_step = if (protocols) |generated| generated.step else null,
         .native_render = native_render,
+        .options = opts,
     };
 }
 
@@ -378,6 +379,9 @@ pub const Configured = struct {
 
     /// Whether the native render path was selected.
     native_render: bool,
+
+    /// The `build_options` the core was given, for a test root that must see the same.
+    options: *std.Build.Step.Options,
 };
 
 pub fn build(b: *std.Build) void {
@@ -405,7 +409,24 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
-    const core_tests = b.addTest(.{ .root_module = core });
+    // On Windows the core root reaches the Linux window and display layers, which do not
+    // build there; `src/windows_tests.zig` is the root of the Windows half instead, with the
+    // same options, header and libraries.
+    const tested = if (target.result.os.tag == .windows) blk: {
+        const windows_tests = b.createModule(.{
+            .root_source_file = b.path("src/windows_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        windows_tests.addOptions("build_options", configured.options);
+        windows_tests.addIncludePath(b.path("webview2"));
+        for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi", "shell32", "dwmapi" }) |library| {
+            windows_tests.linkSystemLibrary(library, .{});
+        }
+        break :blk windows_tests;
+    } else core;
+    const core_tests = b.addTest(.{ .root_module = tested });
     const run_core_tests = b.addRunArtifact(core_tests);
 
     if (configured.protocol_step) |generated| {
