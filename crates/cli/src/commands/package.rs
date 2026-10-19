@@ -5,7 +5,11 @@
 //! frontend from its own location (`<exe>/../share/<name>/dist`), so the same tree runs
 //! unpacked anywhere, from `~/.local`, or from `/usr`. Packaging is therefore a copy, not
 //! a rewrite: the build's tree plus the desktop entry a shell needs to show the
-//! application by name, into `src-lepton/bundle/<name>-<version>-linux-<arch>/`.
+//! application by name, into `src-lepton/bundle/<name>-<version>-<os>-<arch>/`.
+//!
+//! On Windows the tree is `bin\<name>.exe` and `share\<name>\dist`, with no desktop
+//! entry, and the format is a `.zip` (`zip.rs`); the Arch and Debian formats are Linux
+//! packages and are refused there before anything is built (`platform::packages_as`).
 //!
 //! Written in Rust, file by file, with no `tar` or package-manager subprocess: what goes
 //! into a release is decided in one place, and every file in it is one this code chose.
@@ -67,18 +71,16 @@ impl Flags {
 
     /// Builds (unless told not to) and lays out the project rooted at `root`.
     pub fn package_in(&self, root: &Path) -> Outcome {
-        // Every format here is a Linux package of a Linux build; elsewhere it would be a
-        // wrongly named archive of the wrong binary.
-        if !cfg!(target_os = "linux") {
-            return Err(CliError::Invalid(format!(
-                "lepton package builds Linux packages and runs on Linux only for now (this is {})",
-                std::env::consts::OS
-            )));
-        }
         lepton_orchestrator::require_project(root)?;
         // A SIGTERM to `lepton` ends the build or the application it started.
         lepton_orchestrator::supervise::install();
         let manifest = read_manifest(root)?;
+        // Refused before the build, not after it: a format this system cannot make is a
+        // mistake in the configuration, and a minute of compiling would only delay it.
+        let formats = read_bundle(root)?;
+        for target in &formats.targets {
+            crate::platform::packages_as(*target).map_err(CliError::Invalid)?;
+        }
 
         if !self.no_build {
             let build = super::build::Flags {
@@ -101,9 +103,14 @@ impl Flags {
         let report = super::report::Report::new();
         report.fact("packaged", &super::report::shown(&bundle));
 
-        let depends = report_dependencies(&bundle.join("bin").join(&spec.binary));
+        // ELF `DT_NEEDED` and the distribution's owners: a Linux question. A Windows build
+        // needs only system DLLs and the WebView2 runtime (`lepton info`).
+        let depends = if cfg!(target_os = "linux") {
+            report_dependencies(&bundle.join("bin").join(&spec.binary))
+        } else {
+            Vec::new()
+        };
 
-        let formats = read_bundle(root)?;
         let mut written = Vec::with_capacity(formats.targets.len());
         for target in &formats.targets {
             let (artifact, line) = write_target(&spec, &bundle, *target, &depends, &formats)?;
@@ -207,6 +214,24 @@ pub fn write_target(
                 format!("{}  {} bytes  sha256 {digest}", out.display(), size),
             ))
         }
+        BundleTarget::Zip => {
+            let name = bundle_name(spec);
+            let out = spec.out.join(format!("{name}.zip"));
+            let digest = super::zip::write(
+                bundle,
+                &name,
+                &[MARKER],
+                &out,
+                super::archive::release_time(),
+            )?;
+            let size = std::fs::metadata(&out)
+                .map_err(|error| io(&out, "inspect", &error))?
+                .len();
+            Ok((
+                out.clone(),
+                format!("{}  {} bytes  sha256 {digest}", out.display(), size),
+            ))
+        }
         BundleTarget::Arch => {
             if depends.is_empty() {
                 // A package that declares nothing installs on a machine that cannot run it.
@@ -264,13 +289,13 @@ pub fn write_target(
     }
 }
 
-/// The bundle's directory name: `<binary>-<version>-linux-<arch>`.
+/// The bundle's directory name: `<binary>-<version>-<os>-<arch>`.
 pub fn bundle_name(spec: &Spec) -> String {
     format!(
         "{}-{}-{}-{}",
         spec.binary,
         spec.version,
-        std::env::consts::OS,
+        crate::platform::bundle_os(),
         std::env::consts::ARCH
     )
 }
@@ -280,7 +305,8 @@ pub fn bundle_name(spec: &Spec) -> String {
 /// A previous bundle of the same name is replaced only when it carries [`MARKER`]: a
 /// directory this command did not write is never deleted on its behalf.
 pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
-    let program = spec.prefix.join("bin").join(&spec.binary);
+    let executable = crate::platform::executable(&spec.binary);
+    let program = spec.prefix.join("bin").join(&executable);
     if !program.is_file() {
         return Err(CliError::Invalid(format!(
             "no built executable at {}; run `lepton build` first or drop --no-build",
@@ -302,19 +328,23 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
     // `fs::copy` carries the permission bits, so the executable stays executable.
     let bin = bundle.join("bin");
     make_dir(&bin)?;
-    copy_file(&program, &bin.join(&spec.binary))?;
+    copy_file(&program, &bin.join(&executable))?;
 
     let share = spec.prefix.join("share").join(&spec.binary);
     if share.is_dir() {
         copy_tree(&share, &bundle.join("share").join(&spec.binary))?;
     }
 
-    let applications = bundle.join("share").join("applications");
-    // A bare `Exec`: installed, the binary is on `PATH`; the entry is for an install, not
-    // for this directory.
-    let entry =
-        super::desktop_entry::entry_text(&spec.app_id, &spec.product, Path::new(&spec.binary));
-    super::desktop_entry::install(&applications, &spec.app_id, &entry)?;
+    // A desktop entry is a Linux desktop's way to name an application; Windows has none in
+    // a portable tree (a Start menu entry belongs to an installer, MSI).
+    if cfg!(target_os = "linux") {
+        let applications = bundle.join("share").join("applications");
+        // A bare `Exec`: installed, the binary is on `PATH`; the entry is for an install,
+        // not for this directory.
+        let entry =
+            super::desktop_entry::entry_text(&spec.app_id, &spec.product, Path::new(&spec.binary));
+        super::desktop_entry::install(&applications, &spec.app_id, &entry)?;
+    }
 
     write(&bundle.join(MARKER), &format!("{}\n", bundle_name(spec)))?;
     Ok(bundle)
@@ -586,6 +616,56 @@ mod tests {
             "a link must not be followed into a release"
         );
         assert_contains!(&error.to_string(), "not a regular file");
+        Ok(())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::{MARKER, Spec, assemble, bundle_name};
+    use lepton_orchestrator::testing::{Failure, Scratch};
+    use lepton_orchestrator::{assert_eq, assert_ok, ensure};
+
+    #[test]
+    fn a_windows_bundle_holds_the_exe_and_the_frontend_and_no_desktop_entry() -> Result<(), Failure>
+    {
+        let scratch = Scratch::new("package-windows")?;
+        scratch.write("zig-out/bin/notes.exe", "MZ")?;
+        scratch.write("zig-out/bin/notes.pdb", "debug info stays out")?;
+        scratch.write("zig-out/share/notes/dist/index.html", "<p>notes</p>")?;
+        let spec = Spec {
+            prefix: scratch.path().join("zig-out"),
+            binary: String::from("notes"),
+            app_id: String::from("style.lepton.notes"),
+            product: String::from("Notes"),
+            version: String::from("1.2.3"),
+            out: scratch.path().join("bundle"),
+        };
+        assert_eq!(
+            bundle_name(&spec),
+            format!("notes-1.2.3-windows-{}", std::env::consts::ARCH)
+        );
+        let bundle = assert_ok!(assemble(&spec), "assembles");
+        ensure!(
+            bundle.join("bin/notes.exe").is_file(),
+            "the program is in bin"
+        );
+        ensure!(
+            !bundle.join("bin/notes.pdb").exists(),
+            "debug info is not shipped"
+        );
+        ensure!(
+            bundle.join("share/notes/dist/index.html").is_file(),
+            "the frontend is beside it"
+        );
+        ensure!(
+            !bundle.join("share/applications").exists(),
+            "no desktop entry on Windows"
+        );
+        ensure!(
+            bundle.join(MARKER).is_file(),
+            "the bundle is marked as this command's"
+        );
         Ok(())
     }
 }

@@ -163,20 +163,15 @@ pub fn record_environment(file: &Path, unmasked: bool) -> Vec<(&'static str, Str
 /// The variables that make the application replay `file` — in the core, or with its
 /// page — with every directory a command could write to inside `home`.
 pub fn replay_environment(file: &Path, home: &Path, page: bool) -> Vec<(&'static str, String)> {
-    let at = |name: &str| home.join(name).display().to_string();
     let variable = if page {
         "LEPTON_REPLAY_PAGE"
     } else {
         "LEPTON_REPLAY"
     };
-    vec![
-        (variable, file.display().to_string()),
-        ("HOME", home.display().to_string()),
-        ("XDG_DATA_HOME", at(".local/share")),
-        ("XDG_CONFIG_HOME", at(".config")),
-        ("XDG_CACHE_HOME", at(".cache")),
-        ("XDG_STATE_HOME", at(".local/state")),
-    ]
+    // The system's own list (`HOME` + XDG, or the Windows profile folders).
+    let mut env = vec![(variable, file.display().to_string())];
+    env.extend(crate::platform::isolated_home(home));
+    env
 }
 
 fn print_launch(built: &Built, env: &[(&str, String)]) {
@@ -243,9 +238,13 @@ impl ReplayFlags {
             print_launch(&built, &env);
             return Ok(());
         }
-        std::fs::create_dir_all(&home).map_err(|error| {
-            CliError::Invalid(format!("could not create {}: {error}", home.display()))
-        })?;
+        // Made, not only named: WebView2 does not create `%LOCALAPPDATA%` itself.
+        for dir in std::iter::once(home.clone()).chain(crate::platform::isolated_directories(&home))
+        {
+            std::fs::create_dir_all(&dir).map_err(|error| {
+                CliError::Invalid(format!("could not create {}: {error}", dir.display()))
+            })?;
+        }
         let replayed = super::launch::launch_with("replay", &built.bin, &built.binary, &env);
         let _ = std::fs::remove_dir_all(&home);
         replayed.map_err(verdict)
@@ -319,9 +318,14 @@ mod tests {
                 );
             }
         }
-        for needed in ["HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"] {
+        let needed: &[&str] = if cfg!(windows) {
+            &["USERPROFILE", "APPDATA", "LOCALAPPDATA"]
+        } else {
+            &["HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"]
+        };
+        for needed in needed {
             ensure!(
-                env.iter().any(|(name, _)| *name == needed),
+                env.iter().any(|(name, _)| name == needed),
                 "{needed} is not set"
             );
         }

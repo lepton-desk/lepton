@@ -32,6 +32,11 @@ pub mod session;
 pub mod update;
 pub mod update_packages;
 pub mod verify;
+#[cfg(unix)]
+pub mod verify_linux;
+#[cfg(windows)]
+pub mod verify_windows;
+pub mod zip;
 
 use std::error::Error;
 use std::fmt::Display;

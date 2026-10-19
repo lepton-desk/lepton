@@ -23,5 +23,9 @@ lepton-core-vendoring = { path = "../core_vendoring" }
 lepton-orchestrator = { path = "../orchestrator" }
 lepton-template-injector = { path = "../template_injector" }
 
+# `lepton package --verify` on Windows: the application's process tree as a job object.
+[target.'cfg(windows)'.dependencies]
+win32job = { workspace = true }
+
 [lints]
 workspace = true

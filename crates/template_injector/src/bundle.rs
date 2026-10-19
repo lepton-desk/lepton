@@ -4,8 +4,8 @@
 //! Every format packages the same tree — the build's `zig-out` prefix — so the section
 //! only names formats; it never describes contents. The list is explicit and ordered:
 //! a release is reproducible only when what it produces is written down, so a missing
-//! section means the one format that needs nothing from the machine (`tar.gz`), never
-//! "whatever this machine can make".
+//! section means the one format that needs nothing from the machine — `tar.gz` on Linux,
+//! `zip` on Windows — never "whatever this machine can make".
 
 use serde_json::Value;
 
@@ -22,11 +22,13 @@ pub enum BundleTarget {
     Arch,
     /// A Debian package (`.deb`).
     Deb,
+    /// `<name>-<version>-windows-<arch>.zip`: the install prefix, for Windows.
+    Zip,
 }
 
 impl BundleTarget {
     /// Every format, in the spelling the configuration uses.
-    pub const ALL: [Self; 3] = [Self::TarGz, Self::Arch, Self::Deb];
+    pub const ALL: [Self; 4] = [Self::TarGz, Self::Arch, Self::Deb, Self::Zip];
 
     /// The spelling in `bundle.targets`.
     pub fn name(self) -> &'static str {
@@ -34,7 +36,13 @@ impl BundleTarget {
             Self::TarGz => "tar.gz",
             Self::Arch => "arch",
             Self::Deb => "deb",
+            Self::Zip => "zip",
         }
+    }
+
+    /// Whether the format is a Linux package (Arch, Debian): only a Linux build can be one.
+    pub fn linux_only(self) -> bool {
+        matches!(self, Self::Arch | Self::Deb)
     }
 
     pub fn parse(text: &str) -> Option<Self> {
@@ -59,7 +67,11 @@ pub struct Bundle {
 impl Default for Bundle {
     fn default() -> Self {
         Self {
-            targets: vec![BundleTarget::TarGz],
+            targets: vec![if cfg!(windows) {
+                BundleTarget::Zip
+            } else {
+                BundleTarget::TarGz
+            }],
             maintainer: None,
             deb_depends: None,
         }
@@ -153,10 +165,15 @@ mod tests {
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok};
 
     #[test]
-    fn no_section_means_a_tarball() -> Result<(), Failure> {
+    fn no_section_means_the_hosts_plain_archive() -> Result<(), Failure> {
         let bundle = assert_ok!(parse_bundle(r#"{"productName":"Notes"}"#), "parses");
         assert_eq!(bundle, Bundle::default());
-        assert_eq!(bundle.targets, vec![BundleTarget::TarGz]);
+        let expected = if cfg!(windows) {
+            BundleTarget::Zip
+        } else {
+            BundleTarget::TarGz
+        };
+        assert_eq!(bundle.targets, vec![expected]);
         Ok(())
     }
 
@@ -180,7 +197,7 @@ mod tests {
             "unknown format"
         );
         assert_contains!(&error.reason, "\"appimage\"");
-        assert_contains!(&error.reason, "tar.gz, arch, deb");
+        assert_contains!(&error.reason, "tar.gz, arch, deb, zip");
         Ok(())
     }
 

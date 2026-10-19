@@ -7,10 +7,13 @@
 //! end, with every process it started, within [`GRACE`]. Running from the unpacked tree
 //! also proves the binary finds its frontend relative to itself, not from the build
 //! directory.
+//!
+//! Windows runs the same check its own way (`verify_windows.rs`): a job object for the
+//! tree, the private working set for memory, `WM_CLOSE` for the end.
 
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lepton_template_injector::BundleTarget;
 
@@ -21,7 +24,6 @@ use super::archive::io;
 pub const SETTLE: Duration = Duration::from_secs(3);
 /// How long it may take to end after SIGTERM, children included.
 pub const GRACE: Duration = Duration::from_secs(5);
-const SAMPLE: Duration = Duration::from_millis(200);
 
 /// What one run measured.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +45,17 @@ pub struct Report {
 
 impl Report {
     pub fn summary(&self) -> String {
+        if cfg!(windows) {
+            return format!(
+                "ok: up {:.1} s, {} process(es), app peak working set {}, tree private working set {}, unpacked {}, closed in {:.2} s",
+                SETTLE.as_secs_f64(),
+                self.processes,
+                megabytes(self.peak_app),
+                megabytes(self.peak_tree),
+                megabytes(self.unpacked),
+                self.closed_in.as_secs_f64()
+            );
+        }
         format!(
             "ok: up {:.1} s, {} process(es), app RSS {}, tree PSS {}, unpacked {}, closed in {:.2} s",
             SETTLE.as_secs_f64(),
@@ -57,15 +70,17 @@ impl Report {
 
 /// Unpacks `artifact`, runs the application from it, and removes the directory again.
 pub fn verify(artifact: &Path, target: BundleTarget, binary: &str) -> Result<Report, CliError> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
-        return Err(CliError::Invalid(String::from(
-            "--verify opens the application's window and needs a graphical session (WAYLAND_DISPLAY or DISPLAY)",
-        )));
-    }
+    crate::platform::graphical_session().map_err(|why| {
+        CliError::Invalid(format!("--verify opens the application's window and {why}"))
+    })?;
     let scratch = fresh_dir(target)?;
     let result = unpack(artifact, target, &scratch).and_then(|prefix| {
         let unpacked = tree_size(&scratch)?;
-        let mut report = run_and_measure(&prefix.join("bin").join(binary), &scratch)?;
+        let program = prefix.join("bin").join(crate::platform::executable(binary));
+        #[cfg(windows)]
+        let mut report = super::verify_windows::run_and_measure(&program, &scratch)?;
+        #[cfg(unix)]
+        let mut report = super::verify_linux::run_and_measure(&program, &scratch)?;
         report.unpacked = unpacked;
         Ok(report)
     });
@@ -113,6 +128,17 @@ pub fn unpack(artifact: &Path, target: BundleTarget, into: &Path) -> Result<Path
             extract(decoder, artifact, into)?;
             Ok(into.join("usr"))
         }
+        BundleTarget::Zip => {
+            super::zip::unpack(artifact, into)?;
+            let top = artifact
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_suffix(".zip"))
+                .ok_or_else(|| {
+                    CliError::Invalid(format!("{} is not a .zip", artifact.display()))
+                })?;
+            Ok(into.join(top))
+        }
         BundleTarget::Deb => {
             let mut bytes = Vec::new();
             std::io::BufReader::new(file)
@@ -137,171 +163,6 @@ fn extract(reader: impl std::io::Read, artifact: &Path, into: &Path) -> Result<(
         .map_err(|error| io(artifact, "unpack", &error))
 }
 
-/// Starts `program`, requires it to stay up for [`SETTLE`] while sampling memory, then
-/// ends it with SIGTERM and requires it and its descendants gone within [`GRACE`].
-pub fn run_and_measure(program: &Path, workdir: &Path) -> Result<Report, CliError> {
-    if !program.is_file() {
-        return Err(CliError::Invalid(format!(
-            "the package has no executable at {}",
-            program.strip_prefix(workdir).unwrap_or(program).display()
-        )));
-    }
-    let log_path = workdir.join(".verify-stderr");
-    let log = std::fs::File::create(&log_path).map_err(|error| io(&log_path, "create", &error))?;
-    let mut child = std::process::Command::new(program)
-        .current_dir(workdir)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(log)
-        .spawn()
-        .map_err(|error| io(program, "start", &error))?;
-    let pid = child.id();
-    lepton_orchestrator::supervise::track(pid);
-
-    let mut report = Report {
-        unpacked: 0,
-        peak_app: 0,
-        peak_tree: 0,
-        processes: 0,
-        closed_in: Duration::ZERO,
-    };
-    let mut seen = Vec::new();
-    let started = Instant::now();
-    while started.elapsed() < SETTLE {
-        if let Ok(Some(status)) = child.try_wait() {
-            lepton_orchestrator::supervise::untrack(pid);
-            return Err(CliError::Invalid(format!(
-                "the application ended after {:.1} s ({}); stderr:\n{}",
-                started.elapsed().as_secs_f64(),
-                describe(status),
-                tail(&log_path)
-            )));
-        }
-        let tree = descendants(pid);
-        report.peak_app = report.peak_app.max(resident(pid));
-        report.peak_tree = report
-            .peak_tree
-            .max(tree.iter().map(|&p| proportional(p)).sum::<u64>());
-        report.processes = report.processes.max(tree.len());
-        for p in tree {
-            if !seen.contains(&p) {
-                seen.push(p);
-            }
-        }
-        std::thread::sleep(SAMPLE);
-    }
-
-    lepton_orchestrator::supervise::terminate(pid);
-    let asked = Instant::now();
-    let status = loop {
-        if let Ok(Some(status)) = child.try_wait() {
-            break status;
-        }
-        if asked.elapsed() > GRACE {
-            let _ = child.kill();
-            let _ = child.wait();
-            lepton_orchestrator::supervise::untrack(pid);
-            return Err(CliError::Invalid(format!(
-                "the application did not end within {:.0} s of SIGTERM",
-                GRACE.as_secs_f64()
-            )));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    lepton_orchestrator::supervise::untrack(pid);
-    if signal_of(status).is_none() && status.code() != Some(0) {
-        return Err(CliError::Invalid(format!(
-            "the application failed on SIGTERM ({}); stderr:\n{}",
-            describe(status),
-            tail(&log_path)
-        )));
-    }
-
-    // Children must follow the application out; one that does not is an orphan the user
-    // would find in their task manager.
-    let leftovers = loop {
-        let left: Vec<u32> = seen
-            .iter()
-            .copied()
-            .filter(|&p| p != pid && running(p))
-            .collect();
-        if left.is_empty() || asked.elapsed() > GRACE {
-            break left;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    report.closed_in = asked.elapsed();
-    if !leftovers.is_empty() {
-        for &p in &leftovers {
-            lepton_orchestrator::supervise::terminate(p);
-        }
-        return Err(CliError::Invalid(format!(
-            "{} process(es) outlived the application: {:?}",
-            leftovers.len(),
-            leftovers
-        )));
-    }
-    Ok(report)
-}
-
-/// `pid` and every process below it, from `/proc/<pid>/task/<tid>/children`.
-pub fn descendants(pid: u32) -> Vec<u32> {
-    let mut all = vec![pid];
-    let mut index = 0;
-    while let Some(&current) = all.get(index) {
-        index += 1;
-        let Ok(tasks) = std::fs::read_dir(format!("/proc/{current}/task")) else {
-            continue;
-        };
-        for task in tasks.flatten() {
-            let Ok(text) = std::fs::read_to_string(task.path().join("children")) else {
-                continue;
-            };
-            for child in text.split_whitespace().filter_map(|p| p.parse().ok()) {
-                if !all.contains(&child) {
-                    all.push(child);
-                }
-            }
-        }
-    }
-    all
-}
-
-/// `VmRSS` of `pid` in bytes; 0 when it is gone.
-pub fn resident(pid: u32) -> u64 {
-    std::fs::read_to_string(format!("/proc/{pid}/status"))
-        .ok()
-        .and_then(|text| {
-            text.lines()
-                .find_map(|line| line.strip_prefix("VmRSS:"))
-                .and_then(|value| value.split_whitespace().next())
-                .and_then(|kib| kib.parse::<u64>().ok())
-        })
-        .map_or(0, |kib| kib * 1024)
-}
-
-/// `Pss` of `pid` in bytes from `/proc/<pid>/smaps_rollup`; 0 when it is gone.
-pub fn proportional(pid: u32) -> u64 {
-    std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup"))
-        .ok()
-        .and_then(|text| {
-            text.lines()
-                .find_map(|line| line.strip_prefix("Pss:"))
-                .and_then(|value| value.split_whitespace().next())
-                .and_then(|kib| kib.parse::<u64>().ok())
-        })
-        .map_or(0, |kib| kib * 1024)
-}
-
-/// Whether `pid` exists and is not a zombie.
-fn running(pid: u32) -> bool {
-    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
-        stat.rsplit_once(')')
-            .and_then(|(_, rest)| rest.split_whitespace().next())
-            .is_some_and(|state| state != "Z")
-    })
-}
-
 fn tree_size(dir: &Path) -> Result<u64, CliError> {
     let mut total = 0;
     let listing = std::fs::read_dir(dir).map_err(|error| io(dir, "list", &error))?;
@@ -317,28 +178,8 @@ fn tree_size(dir: &Path) -> Result<u64, CliError> {
     Ok(total)
 }
 
-fn describe(status: std::process::ExitStatus) -> String {
-    match (status.code(), signal_of(status)) {
-        (Some(code), _) => format!("exit code {code}"),
-        (None, Some(signal)) => format!("signal {signal}"),
-        (None, None) => String::from("unknown status"),
-    }
-}
-
-#[cfg(unix)]
-fn signal_of(status: std::process::ExitStatus) -> Option<i32> {
-    use std::os::unix::process::ExitStatusExt as _;
-    status.signal()
-}
-
-/// Windows has no signals; `lepton package` refuses to run there (`package.rs`).
-#[cfg(not(unix))]
-fn signal_of(_: std::process::ExitStatus) -> Option<i32> {
-    None
-}
-
 /// The last lines of the application's stderr, for a failure message.
-fn tail(path: &Path) -> String {
+pub(super) fn tail(path: &Path) -> String {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let lines: Vec<&str> = text.lines().collect();
     lines
@@ -347,14 +188,15 @@ fn tail(path: &Path) -> String {
         .join("\n")
 }
 
-fn megabytes(bytes: u64) -> String {
+pub(super) fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_000_000.0)
 }
 
 // Packaging runs on Linux only (`package.rs`).
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use super::{descendants, proportional, resident, run_and_measure, unpack};
+    use super::super::verify_linux::{descendants, proportional, resident, run_and_measure};
+    use super::unpack;
     use lepton_orchestrator::testing::{Failure, Scratch, fail};
     use lepton_orchestrator::{assert_contains, assert_err, assert_ok, ensure};
     use lepton_template_injector::BundleTarget;

@@ -10,6 +10,7 @@
 //! developer with a backtrace and no idea which step failed.
 
 mod commands;
+mod platform;
 mod style;
 
 use std::process::ExitCode;

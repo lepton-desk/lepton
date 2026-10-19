@@ -83,8 +83,12 @@ pub fn shown(path: &std::path::Path) -> String {
 
 /// [`shown`] for a line that holds paths among other words.
 pub fn shown_text(text: &str) -> String {
+    // `/` and, on Windows, `\`: a path the CLI joined carries the system's separator.
     let relative = match std::env::current_dir() {
-        Ok(here) => text.replace(&format!("{}/", here.display()), ""),
+        Ok(here) => text.replace(&format!("{}/", here.display()), "").replace(
+            &format!("{}{}", here.display(), std::path::MAIN_SEPARATOR),
+            "",
+        ),
         Err(_) => text.to_owned(),
     };
     home_text(&relative)
@@ -92,9 +96,9 @@ pub fn shown_text(text: &str) -> String {
 
 /// [`home_short`] for a line that holds paths among other words.
 pub fn home_text(text: &str) -> String {
-    match std::env::var("HOME") {
-        Ok(home) if home.len() > 1 => text.replace(&home, "~"),
-        _ => text.to_owned(),
+    match crate::platform::home() {
+        Some(home) => text.replace(home.to_string_lossy().as_ref(), "~"),
+        None => text.to_owned(),
     }
 }
 
