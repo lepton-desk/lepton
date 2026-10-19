@@ -381,6 +381,16 @@ impl Flags {
                 }
                 written.push(shown(&merge));
             }
+            // A dry run wrote no .merge, so it says what the update would write rather than
+            // pointing at a file that is not there (it did, measured on 2026-10-19).
+            if self.dry_run {
+                return Err(CliError::Invalid(format!(
+                    "an update would stop here: your edits overlap the template's. It would write \
+                     {} with markers (`ours` is yours, `theirs` the new template) and change \
+                     nothing else; this dry run wrote nothing",
+                    written.join(", ")
+                )));
+            }
             return Err(CliError::Invalid(format!(
                 "nothing was updated: your edits overlap the template's. {} {} the merge with \
                  markers (`ours` is yours, `theirs` the new template); resolve it into the file, \
@@ -549,6 +559,38 @@ mod tests {
         .run_in(scratch.path())
         .map_err(|error| lepton_orchestrator::testing::fail("a dry run", error))?;
         assert_eq!(scratch.read("src-lepton/main.zig")?, before);
+        Ok(())
+    }
+
+    #[test]
+    fn a_dry_run_with_a_conflict_names_no_file_it_did_not_write() -> Result<(), Failure> {
+        let scratch = old_project("update-dry-conflict")?;
+        let edited = scratch.read("src-lepton/main.zig")?.replacen(
+            "while (!view.bridge.close_requested and !view.closed) {",
+            "while (!view.bridge.close_requested and !view.closed and !quit) {",
+            1,
+        );
+        scratch.write("src-lepton/main.zig", &edited)?;
+        let outcome = Flags {
+            dry_run: true,
+            ..Flags::default()
+        }
+        .run_in(scratch.path());
+        let Err(error) = outcome else {
+            return Err(lepton_orchestrator::testing::fail("a refusal", "success"));
+        };
+        let text = error.to_string();
+        assert_contains!(&text, "would write");
+        assert_contains!(&text, "wrote nothing");
+        ensure!(
+            !text.contains(" holds "),
+            "no claim that a .merge holds anything: {text}"
+        );
+        ensure!(
+            !scratch.exists("src-lepton/main.zig.merge"),
+            "the dry run wrote no merge file"
+        );
+        assert_eq!(scratch.read("src-lepton/main.zig")?, edited);
         Ok(())
     }
 }
