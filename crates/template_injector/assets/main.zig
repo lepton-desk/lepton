@@ -22,7 +22,13 @@
 //! engine changes.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const core = @import("lepton_core");
+
+/// Windows runs the page in WebView2 (a Win32 window, Windows' own frame); Linux in WPE
+/// WebKit. The Linux-only steps below — the display server probe, the systemd scope,
+/// `/proc/self/exe` — are left out at compile time on Windows.
+const windows = builtin.os.tag == .windows;
 
 /// The built frontend, relative to the project root.
 ///
@@ -96,9 +102,12 @@ pub fn main() !void {{
     // channel leaves `/dev/shm` with the process instead of staying behind.
     core.termination.catchSignals();
 
-    const display = core.display.Display.probe(core.display.processGetenv, null) catch |err| {{
-        std.debug.print("no display server: {{t}}\n", .{{err}});
-        return err;
+    const session: []const u8 = if (comptime windows) "win32" else probed: {{
+        const display = core.display.Display.probe(core.display.processGetenv, null) catch |err| {{
+            std.debug.print("no display server: {{t}}\n", .{{err}});
+            return err;
+        }};
+        break :probed @tagName(display.session);
     }};
 
     // Two completely different programs, chosen at compile time rather than at run time.
@@ -113,7 +122,8 @@ pub fn main() !void {{
         // reason rather than degraded into a blank window: saying so is more use than an
         // empty frame.
         std.debug.print(
-            "this build cannot load pages: no web engine is installed. install WPE WebKit" ++
+            "this build cannot load pages: no web engine is installed. install " ++
+                (if (windows) "the WebView2 runtime" else "WPE WebKit") ++
                 " or build with --target native to run {product}\n",
             .{{}},
         );
@@ -138,8 +148,12 @@ pub fn main() !void {{
     // the application moves into its own `app-{identifier}-<pid>.scope` first and a task
     // manager shows the core and every WebKit process as {product} — not as part of the
     // terminal or editor that started it. Left where it is without systemd.
-    const scoped = core.scope.enter("{identifier}", "{product}");
-    core.report.fact("scope", if (scoped == .unavailable) .warn else .good, "{{t}}", .{{scoped}});
+    // Windows needs no such step: WebView2's processes are this process's children, and
+    // Task Manager groups them under it.
+    if (comptime !windows) {{
+        const scoped = core.scope.enter("{identifier}", "{product}");
+        core.report.fact("scope", if (scoped == .unavailable) .warn else .good, "{{t}}", .{{scoped}});
+    }}
 
     var view = core.render.WebView.open() catch |err| {{
         std.debug.print("the engine refused to start: {{t}}\n", .{{err}});
@@ -176,7 +190,9 @@ pub fn main() !void {{
 
     if (std.mem.startsWith(u8, address, "file://")) {{
         view.bridge.serveFrom(address["file://".len..]);
-        view.load("lepton://localhost/");
+        // The core's own origin: `lepton://localhost/`, or the `lepton.localhost` host the
+        // WebView2 view answers on Windows (`transport.core_origin`).
+        view.load(core.webviewTransport.core_origin ++ "/");
     }} else {{
         // The dev server's page reads the ring cross-origin from `lepton://localhost`;
         // the bridge names exactly this origin in its answers, never a wildcard.
@@ -189,7 +205,7 @@ pub fn main() !void {{
     // The size is printed from the value the engine was given rather than from a second
     // copy baked in at substitution time, so the two cannot drift apart.
     core.report.fact("window", .plain, "{product} · {{s}} · {{d}}×{{d}}", .{{
-        @tagName(display.session),
+        session,
         size.width,
         size.height,
     }});
@@ -301,7 +317,23 @@ fn frontendAddress(allocator: std.mem.Allocator, io: std.Io) ![:0]const u8 {{
     // its working directory — so its frontend is found from where the binary *is*, not
     // from where it was started. `zig-out` is laid out the same way by the build.
     var exe_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    if (readSelfExe(exe_buffer[0..])) |link| {{
+    if (comptime windows) {{
+        // `<prefix>\bin\<name>.exe` beside `<prefix>\share\<name>\dist`, as on Linux.
+        if (std.process.executablePath(io, &exe_buffer)) |len| {{
+            const exe = exe_buffer[0..len];
+            const bin_dir = std.fs.path.dirname(exe) orelse "";
+            const prefix = std.fs.path.dirname(bin_dir) orelse "";
+            const directory = try std.fs.path.join(allocator, &.{{ prefix, "share", std.fs.path.stem(exe), frontend }});
+            defer allocator.free(directory);
+            const index = try std.fs.path.join(allocator, &.{{ directory, "index.html" }});
+            defer allocator.free(index);
+            if (prefix.len != 0) {{
+                if (std.Io.Dir.accessAbsolute(io, index, .{{}})) |_| {{
+                    return std.fmt.allocPrintSentinel(allocator, "file://{{s}}", .{{directory}}, 0);
+                }} else |_| {{}}
+            }}
+        }} else |_| {{}}
+    }} else if (readSelfExe(exe_buffer[0..])) |link| {{
         const bin_dir = std.fs.path.dirname(link) orelse "";
         const prefix = std.fs.path.dirname(bin_dir) orelse "";
         const name = std.fs.path.basename(link);
@@ -660,6 +692,9 @@ fn openWindow(allocator: std.mem.Allocator, request: core.window.Request) !Opene
 /// happened before this, measured.
 fn claimOwnDataDirectory() void {{
     if (core.render.use_application_directories("{identifier}")) return;
+    // Windows: `%LOCALAPPDATA%` is set for every signed-in user; without it the engine
+    // keeps its own default, `<exe>.WebView2` beside the executable.
+    if (comptime windows) return;
 
     // No `HOME`: a service unit, a sandbox, a container. Beside the executable is the one
     // place a self-contained bundle can rely on being able to write, and for a portable

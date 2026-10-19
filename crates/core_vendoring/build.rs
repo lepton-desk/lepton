@@ -11,12 +11,12 @@
 //!
 //! ## What is carried
 //!
-//! Three roots: the build file, `src`, and `protocols`. Anything else in the core's
+//! Four roots: the build file, `src`, `protocols` and `webview2` (Microsoft's header). Anything else in the core's
 //! directory is a build artefact or an editor's scratch file, and shipping one would
 //! mean every project's vendor directory grows with the size of the repository's
 //! cache.
 //!
-//! The three roots are named rather than derived from "everything here", because
+//! The roots are named rather than derived from "everything here", because
 //! `zig-cache` and `.zig-cache` differ by a dot and by three releases, and a rule
 //! that tries to exclude both will eventually exclude a source directory by mistake.
 //! A new *root* is one line in [`ROOTS`]; a new *file* inside a root needs nothing,
@@ -36,13 +36,16 @@ use std::path::{Path, PathBuf};
 
 /// The roots carried into a scaffolded project.
 ///
-/// A file, then two directories. Written in this order because a project reads its
+/// A file, then three directories. Written in this order because a project reads its
 /// build file before anything it names exists, and a vendored core that arrives in
 /// alphabetical order makes the directory listing look like it is missing something.
 const ROOTS: &[(&str, Root)] = &[
     ("build.zig", Root::File),
     ("src", Root::Tree),
     ("protocols", Root::Tree),
+    // Microsoft's WebView2 header and its licence: the Windows webview path compiles
+    // against it (`src/render/webview/webview2/c.zig`).
+    ("webview2", Root::Tree),
 ];
 
 /// Which of the two shapes a root has.

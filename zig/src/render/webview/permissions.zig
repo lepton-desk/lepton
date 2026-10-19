@@ -152,6 +152,19 @@ pub fn setPolicies(text: []const u8) void {
     current = Policies.parse(text);
 }
 
+/// The policy for a request of `kinds`: an empty list (a kind this core does not know)
+/// is denied, like an unlisted one. Shared with WebView2 (`webview2/permissions.zig`).
+pub fn policyFor(kinds: []const Kind) Policy {
+    return if (kinds.len == 0) .deny else current.forAll(kinds);
+}
+
+/// `ask`'s next id, never 0 (a timer carries it as its data pointer).
+pub fn nextId() u32 {
+    const id = next_id;
+    next_id = if (next_id == std.math.maxInt(u32)) 1 else next_id + 1;
+    return id;
+}
+
 /// Answers this view's permission requests and queries; `ask`s go through `owner`.
 pub fn watch(web_view: *anyopaque, owner: *Bridge) void {
     bridge = owner;

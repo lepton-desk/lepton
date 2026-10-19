@@ -14,7 +14,8 @@
 const std = @import("std");
 
 /// The host the frontend is served on. Any other host on the scheme is the IPC channel.
-pub const host = "localhost";
+/// On Windows the frontend and the channel share `lepton.localhost` (`webview2/view.zig`).
+pub const host = if (@import("builtin").os.tag == .windows) "lepton.localhost" else "localhost";
 
 /// The longest path this module will build. Paths past it are refused, not truncated.
 pub const max_path = 4096;
@@ -49,11 +50,30 @@ pub fn resolve(root: []const u8, request_path: []const u8, out: []u8) Refusal![:
         }
         try writer.put("/");
         try writer.put(segment);
+        if (windows and !windowsSafe(segment)) return error.NotConfined;
         wrote_any = true;
         last_was_empty = false;
     }
     if (!wrote_any or last_was_empty) try writer.put("/index.html");
     return writer.finish();
+}
+
+const windows = @import("builtin").os.tag == .windows;
+
+/// Whether a path segment names an ordinary file on Windows: no `:` (a drive, or an
+/// alternate data stream — `index.html:secret`), and not a device (`CON`, `NUL`,
+/// `COM1`…, with or without an extension), which `CreateFileW` opens instead of a file.
+fn windowsSafe(segment: []const u8) bool {
+    if (std.mem.indexOfScalar(u8, segment, ':') != null) return false;
+    const stem_end = std.mem.indexOfScalar(u8, segment, '.') orelse segment.len;
+    const stem = std.mem.trimEnd(u8, segment[0..stem_end], " ");
+    const devices = [_][]const u8{ "con", "prn", "aux", "nul", "conin$", "conout$" };
+    for (devices) |device| {
+        if (std.ascii.eqlIgnoreCase(stem, device)) return false;
+    }
+    if (stem.len == 4 and (std.ascii.startsWithIgnoreCase(stem, "com") or std.ascii.startsWithIgnoreCase(stem, "lpt")) and
+        std.ascii.isDigit(stem[3])) return false;
+    return true;
 }
 
 /// The content type for a file, by extension. Unknown types are served as bytes rather
@@ -94,6 +114,7 @@ pub const Loaded = struct {
 
 /// Reads the file at `path` in full. `null` when it cannot be opened or read.
 pub fn load(path: [:0]const u8) ?Loaded {
+    if (windows) return loadWindows(path);
     const fd = std.c.open(path.ptr, .{ .ACCMODE = .RDONLY, .CLOEXEC = true });
     if (fd < 0) return null;
     defer _ = std.c.close(fd);
@@ -117,6 +138,59 @@ pub fn load(path: [:0]const u8) ?Loaded {
         }
         if (got == 0) break;
         len += @intCast(got);
+    }
+    return .{ .bytes = buffer, .len = len };
+}
+
+extern "kernel32" fn CreateFileW(
+    name: [*:0]const u16,
+    access: u32,
+    share: u32,
+    security: ?*anyopaque,
+    disposition: u32,
+    flags: u32,
+    template: ?*anyopaque,
+) callconv(.winapi) ?*anyopaque;
+extern "kernel32" fn ReadFile(file: *anyopaque, buffer: [*]u8, len: u32, read: *u32, overlapped: ?*anyopaque) callconv(.winapi) c_int;
+extern "kernel32" fn CloseHandle(handle: *anyopaque) callconv(.winapi) c_int;
+extern "kernel32" fn GetFileType(file: *anyopaque) callconv(.winapi) u32;
+
+/// `load` on Windows: the UTF-8 path as UTF-16 (forward slashes are accepted), opened
+/// for reading and shared, and refused unless it is a disk file.
+fn loadWindows(path: [:0]const u8) ?Loaded {
+    var wide: [max_path:0]u16 = undefined;
+    const units = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], path) catch return null;
+    wide[units] = 0;
+    const generic_read: u32 = 0x80000000;
+    const share_read_write: u32 = 0x1 | 0x2;
+    const open_existing: u32 = 3;
+    const invalid: usize = std.math.maxInt(usize);
+    const handle = CreateFileW(&wide, generic_read, share_read_write, null, open_existing, 0x80, null) orelse return null;
+    if (@intFromPtr(handle) == invalid) return null;
+    defer _ = CloseHandle(handle);
+    const file_type_disk: u32 = 1;
+    if (GetFileType(handle) != file_type_disk) return null;
+
+    var capacity: usize = 16 * 1024;
+    var buffer: [*]u8 = @ptrCast(std.c.malloc(capacity) orelse return null);
+    var len: usize = 0;
+    while (true) {
+        if (len == capacity) {
+            capacity *= 2;
+            const grown = std.c.realloc(buffer, capacity) orelse {
+                std.c.free(buffer);
+                return null;
+            };
+            buffer = @ptrCast(grown);
+        }
+        var got: u32 = 0;
+        const asked: u32 = @intCast(@min(capacity - len, std.math.maxInt(u32)));
+        if (ReadFile(handle, buffer + len, asked, &got, null) == 0) {
+            std.c.free(buffer);
+            return null;
+        }
+        if (got == 0) break;
+        len += got;
     }
     return .{ .bytes = buffer, .len = len };
 }
@@ -210,6 +284,7 @@ test "the types a Vite bundle needs are named" {
 }
 
 test "a real file is read whole, and a missing one is not" {
+    if (windows) return loadsOnWindows();
     var name_buffer: [64]u8 = undefined;
     const name = try std.fmt.bufPrintZ(&name_buffer, "/tmp/lepton-assets-{d}.bin", .{std.c.getpid()});
     const fd = std.c.open(name.ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true, .CLOEXEC = true }, @as(std.c.mode_t, 0o600));
@@ -226,4 +301,27 @@ test "a real file is read whole, and a missing one is not" {
     try std.testing.expectEqualSlices(u8, &payload, loaded.bytes[0..loaded.len]);
 
     try std.testing.expect(load("/tmp/lepton-assets-does-not-exist") == null);
+}
+
+/// The same, through `CreateFileW`: a file in a test directory, its path in forward
+/// slashes as `resolve` builds it, and a device name refused even if asked directly.
+fn loadsOnWindows() !void {
+    const io = std.testing.io;
+    var dir = std.testing.tmpDir(.{});
+    defer dir.cleanup();
+    var payload: [40 * 1024]u8 = undefined;
+    for (&payload, 0..) |*byte, i| byte.* = @truncate(i * 7);
+    try dir.dir.writeFile(io, .{ .sub_path = "bundle.bin", .data = &payload });
+    var root_buffer: [max_path]u8 = undefined;
+    const root_len = try dir.dir.realPath(io, &root_buffer);
+    var path_buffer: [max_path]u8 = undefined;
+    const path = try resolve(root_buffer[0..root_len], "/bundle.bin", &path_buffer);
+
+    const loaded = load(path) orelse return error.TestUnexpectedResult;
+    defer std.c.free(loaded.bytes);
+    try std.testing.expectEqualSlices(u8, &payload, loaded.bytes[0..loaded.len]);
+    try std.testing.expect(load(try resolve(root_buffer[0..root_len], "/absent.bin", &path_buffer)) == null);
+    try std.testing.expectError(error.NotConfined, resolve(root_buffer[0..root_len], "/nul.txt", &path_buffer));
+    try std.testing.expectError(error.NotConfined, resolve(root_buffer[0..root_len], "/index.html:stream", &path_buffer));
+    try std.testing.expectError(error.NotConfined, resolve(root_buffer[0..root_len], "/COM1", &path_buffer));
 }

@@ -168,10 +168,12 @@ impl Flags {
             Platform::Windows
         } else if self.macos {
             Platform::MacOs
-        } else {
-            // `--servo` requires `--linux`, which clap already enforced; the host is
-            // therefore Linux whenever this branch is reached with servo set.
+        } else if self.linux {
             Platform::Linux
+        } else {
+            // Nothing named: this machine. It once fell to Linux here, so a plain
+            // `lepton build` on Windows passed `-Dtarget=x86_64-linux-gnu` (measured).
+            Platform::host()
         }
     }
 
@@ -579,7 +581,13 @@ mod tests {
     fn no_platform_flag_means_the_host() -> Result<(), Failure> {
         // Cross-compiling unasked produces a binary that cannot run here, and a
         // developer would rather be told to name the platform.
-        assert_eq!(Flags::default().platform(), Platform::Linux);
+        assert_eq!(Flags::default().platform(), Platform::host());
+
+        let linux = Flags {
+            linux: true,
+            ..Flags::default()
+        };
+        assert_eq!(linux.platform(), Platform::Linux);
 
         let windows = Flags {
             windows: true,

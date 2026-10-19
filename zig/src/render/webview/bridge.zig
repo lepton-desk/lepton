@@ -40,60 +40,8 @@ const record = @import("record.zig");
 const page_replay = @import("page_replay.zig");
 const wire = @import("../../ipc/wire.zig");
 
-/// The engine functions this bridge uses.
-///
-/// Declared rather than imported: GLib's headers expand to `_Pragma`, which translate-c
-/// cannot read, and every signature below is transcribed from the installed header.
-const e_register_scheme = @extern(
-    *const fn (?*anyopaque, [*:0]const u8, SchemeCallback, ?*anyopaque, ?*anyopaque) callconv(.c) void,
-    .{ .name = "webkit_web_context_register_uri_scheme" },
-);
-const e_request_uri = @extern(
-    *const fn (?*anyopaque) callconv(.c) ?[*:0]const u8,
-    .{ .name = "webkit_uri_scheme_request_get_uri" },
-);
-const e_request_path = @extern(
-    *const fn (?*anyopaque) callconv(.c) ?[*:0]const u8,
-    .{ .name = "webkit_uri_scheme_request_get_path" },
-);
-
-const e_security_manager = @extern(
-    *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
-    .{ .name = "webkit_web_context_get_security_manager" },
-);
-const e_register_secure = @extern(
-    *const fn (?*anyopaque, [*:0]const u8) callconv(.c) void,
-    .{ .name = "webkit_security_manager_register_uri_scheme_as_secure" },
-);
-const e_register_cors_enabled = @extern(
-    *const fn (?*anyopaque, [*:0]const u8) callconv(.c) void,
-    .{ .name = "webkit_security_manager_register_uri_scheme_as_cors_enabled" },
-);
-
-// `invoke` reads the request body (WPE 2.40+; transfer full, nullable).
-const e_request_method = @extern(
-    *const fn (?*anyopaque) callconv(.c) ?[*:0]const u8,
-    .{ .name = "webkit_uri_scheme_request_get_http_method" },
-);
-const e_request_body = @extern(
-    *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
-    .{ .name = "webkit_uri_scheme_request_get_http_body" },
-);
-const e_stream_read_all = @extern(
-    *const fn (?*anyopaque, [*]u8, usize, *usize, ?*anyopaque, ?*?*anyopaque) callconv(.c) c_int,
-    .{ .name = "g_input_stream_read_all" },
-);
-const e_unref = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_object_unref" });
-const e_ref = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "g_object_ref" });
-const e_free_error = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_error_free" });
-/// One-shot: the callback returns 0. (A repeating timeout added mid-dispatch was seen not
-/// to re-arm — `wpe_abi.zig`; a page replay's delayed answer fires once.)
-const e_timeout_add = @extern(
-    *const fn (c_uint, *const fn (?*anyopaque) callconv(.c) c_int, ?*anyopaque) callconv(.c) c_uint,
-    .{ .name = "g_timeout_add" },
-);
-
-const SchemeCallback = *const fn (?*anyopaque, ?*anyopaque) callconv(.c) void;
+/// The engine's request object: WebKit's or WebView2's, the same calls on both.
+const engine = @import("request.zig");
 
 /// The scheme the page addresses the core on. Short on purpose: it appears in every
 /// request the page makes and in every string in the frontend that builds one.
@@ -221,7 +169,7 @@ pub const Bridge = struct {
             if (newest == after) continue;
             slot.* = null;
             self.sendRegion(waiting, after);
-            e_unref(waiting);
+            engine.unref(waiting);
         }
     }
 
@@ -229,7 +177,7 @@ pub const Bridge = struct {
     /// when there are any, otherwise held until `published`. With every slot taken, the
     /// oldest hold is answered empty — the page asks again — and released.
     fn answerRegion(self: *Bridge, request: ?*anyopaque) void {
-        const uri = if (e_request_uri(request)) |raw| std.mem.span(raw) else "";
+        const uri = engine.uri(request);
         const after = events.afterOf(uri);
         if (after == 0 or region.position(self.region) != after) {
             self.sendRegion(request, after);
@@ -242,10 +190,10 @@ pub const Bridge = struct {
             self.region_evict = (i + 1) % max_region_held;
             const stale = self.region_held[i].?;
             _ = respond.bytes(stale, "", 0, null, "application/octet-stream", self.origin());
-            e_unref(stale);
+            engine.unref(stale);
             break :evict i;
         };
-        self.region_held[index] = e_ref(request);
+        self.region_held[index] = engine.ref(request);
         self.region_after[index] = after;
     }
 
@@ -278,27 +226,23 @@ pub const Bridge = struct {
         @memcpy(self.asset_root[0..self.asset_root_len], root[0..self.asset_root_len]);
     }
 
-    /// Registers `lepton://` against `context`, for *this* bridge.
+    /// Registers `lepton://` against `context`, for *this* bridge (WPE; WebView2's view
+    /// delivers its requests itself).
     ///
     /// Takes the pointer rather than returning a value, and that is the whole reason:
     /// WebKit holds the user-data pointer until the context is dropped, so registering the
     /// address of a local here and handing back a copy would leave the engine calling a
     /// returned frame — which reads as a bridge that never receives anything, forever.
-    ///
-    /// `context` is the one the *view* uses rather than the default: a view carries its
-    /// own context, and a scheme registered only on the default would leave this view
-    /// unable to resolve it.
-    pub fn attach(self: *Bridge, context: ?*anyopaque) void {
-        e_register_scheme(context, scheme, &onRequest, self, null);
-        // A secure, CORS-enabled scheme is what lets a document *served* from it be a real
-        // origin: secure-context APIs, module scripts with `crossorigin`, and `fetch` back
-        // to the core. The earlier finding "no API makes a custom scheme local or secure"
-        // searched `web_context`/`web_view`/`website_data_manager` only; the API lives on
-        // `WebKitSecurityManager` (`WebKitSecurityManager.h`, WPE 2.54.1).
-        if (e_security_manager(context)) |manager| {
-            e_register_secure(manager, scheme);
-            e_register_cors_enabled(manager, scheme);
-        }
+    pub const attach = if (@TypeOf(engine.attach) == void) {} else attachToContext;
+
+    fn attachToContext(self: *Bridge, context: ?*anyopaque) void {
+        engine.attach(Bridge, self, context, scheme);
+    }
+
+    /// Answers one request the engine delivered.
+    pub fn deliver(self: *Bridge, request: ?*anyopaque) void {
+        registered = self;
+        self.answer(request);
     }
 
     /// Sets what the next requests are answered with.
@@ -316,7 +260,7 @@ pub const Bridge = struct {
     /// Answers a frontend request with the file it names, read whole into a buffer the
     /// engine frees (libc `free`) when its stream is done.
     fn serveAsset(self: *Bridge, request: ?*anyopaque) void {
-        const raw_path = if (e_request_path(request)) |raw| std.mem.span(raw) else "/";
+        const raw_path = engine.path(request) orelse "/";
         var path_buffer: [assets.max_path]u8 = undefined;
         const file = assets.resolve(self.asset_root[0..self.asset_root_len], raw_path, &path_buffer) catch {
             self.counters.refused += 1;
@@ -325,7 +269,7 @@ pub const Bridge = struct {
         };
         const loaded = assets.load(file) orelse {
             self.counters.refused += 1;
-            refuse(request, "no such file in the frontend");
+            respond.missing(request, "no such file in the frontend");
             return;
         };
         if (!respond.bytes(request, loaded.bytes, loaded.len, std.c.free, assets.mimeFor(file), self.origin())) {
@@ -349,7 +293,7 @@ pub const Bridge = struct {
         if (self.held) |waiting| {
             self.held = null;
             self.sendEvents(waiting, self.held_after);
-            e_unref(waiting);
+            engine.unref(waiting);
         }
         return number;
     }
@@ -359,7 +303,7 @@ pub const Bridge = struct {
     /// the previous was abandoned (the page aborts after `events.hold_ms`): it is answered
     /// empty and released, never left referenced.
     fn answerEvents(self: *Bridge, request: ?*anyopaque) void {
-        const uri = if (e_request_uri(request)) |raw| std.mem.span(raw) else "";
+        const uri = engine.uri(request);
         if (events.wantsLatest(uri)) {
             const raw = std.c.malloc(8) orelse {
                 respond.refuse(request, "no memory for the answer");
@@ -374,13 +318,13 @@ pub const Bridge = struct {
         if (self.held) |stale| {
             self.held = null;
             _ = respond.bytes(stale, "", 0, null, "application/octet-stream", self.origin());
-            e_unref(stale);
+            engine.unref(stale);
         }
         if (self.events.hasAfter(after)) {
             self.sendEvents(request, after);
             return;
         }
-        self.held = e_ref(request);
+        self.held = engine.ref(request);
         self.held_after = after;
     }
 
@@ -406,26 +350,19 @@ pub const Bridge = struct {
     /// request may arrive before the first response is consumed, so a buffer kept here
     /// could be overwritten under the engine.
     fn answerInvoke(self: *Bridge, request: ?*anyopaque) void {
-        const method = if (e_request_method(request)) |raw| std.mem.span(raw) else "";
-        if (!std.mem.eql(u8, method, "POST")) {
+        if (!std.mem.eql(u8, engine.method(request), "POST")) {
             self.counters.refused += 1;
             respond.refuse(request, "invoke takes a POST");
             return;
         }
-        const stream = e_request_body(request) orelse {
+        const read = engine.body(request, &self.request_frame) catch |failure| {
             self.counters.refused += 1;
-            respond.refuse(request, "invoke needs a request frame as its body");
+            respond.refuse(request, switch (failure) {
+                error.Missing => "invoke needs a request frame as its body",
+                error.Unreadable => "the request body could not be read",
+            });
             return;
         };
-        defer e_unref(stream);
-        var read: usize = 0;
-        var failure: ?*anyopaque = null;
-        if (e_stream_read_all(stream, &self.request_frame, self.request_frame.len, &read, null, &failure) == 0) {
-            if (failure) |owned| e_free_error(owned);
-            self.counters.refused += 1;
-            respond.refuse(request, "the request body could not be read");
-            return;
-        }
         if (read > invoke.max_request) {
             self.counters.refused += 1;
             respond.refuse(request, "the request frame is larger than invoke accepts");
@@ -455,7 +392,7 @@ pub const Bridge = struct {
             };
             // Held before the command runs: one that fails at once calls `finish` while
             // it is still running, and that answer must find the request already here.
-            self.later[index].request = e_ref(request);
+            self.later[index].request = engine.ref(request);
         }
         const begun = if (self.recorder) |*recorder| recorder.now() else 0;
         self.handling = true;
@@ -579,9 +516,9 @@ pub const Bridge = struct {
             .name = name,
             .started = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .awake),
         };
-        self.later[index].request = e_ref(request);
+        self.later[index].request = engine.ref(request);
         const ms: c_uint = @intCast(@min(recorded.delay_ns / std.time.ns_per_ms, std.math.maxInt(c_uint)));
-        _ = e_timeout_add(ms, &Owed.fire, owed);
+        engine.timeoutOnce(ms, &Owed.fire, owed);
         return true;
     }
 
@@ -599,7 +536,7 @@ pub const Bridge = struct {
     /// Drops a slot's hold on a request no command took.
     fn release(self: *Bridge, index: u16) void {
         const held = &self.later[index];
-        if (held.request) |request| e_unref(request);
+        if (held.request) |request| engine.unref(request);
         held.request = null;
         held.generation +%= 1;
     }
@@ -615,7 +552,7 @@ pub const Bridge = struct {
         held.request = null;
         held.private = false;
         held.generation +%= 1;
-        defer e_unref(request);
+        defer engine.unref(request);
         const raw = std.c.malloc(invoke.max_reply) orelse {
             respond.refuse(request, "no memory for the reply");
             return;
@@ -639,8 +576,7 @@ pub const Bridge = struct {
 
         // The transport's two paths come first, on any host: they are the core's, and a
         // frontend file of the same name must not shadow them.
-        if (e_request_path(request)) |raw| {
-            const path = std.mem.span(raw);
+        if (engine.path(request)) |path| {
             if (std.mem.eql(u8, path, transport.region_path) and self.region.len != 0) {
                 self.answerRegion(request);
                 return;
@@ -662,16 +598,13 @@ pub const Bridge = struct {
         }
 
         if (self.asset_root_len != 0) {
-            if (e_request_uri(request)) |uri| {
-                if (std.mem.eql(u8, hostOf(std.mem.span(uri)), assets.host)) {
-                    self.serveAsset(request);
-                    return;
-                }
+            if (std.mem.eql(u8, hostOf(engine.uri(request)), assets.host)) {
+                self.serveAsset(request);
+                return;
             }
         }
 
-        if (e_request_path(request)) |raw| {
-            const text = std.mem.span(raw);
+        if (engine.path(request)) |text| {
             self.path_len = @min(text.len, self.path.len);
             @memcpy(self.path[0..self.path_len], text[0..self.path_len]);
         }
@@ -710,12 +643,6 @@ fn refuse(request: ?*anyopaque, message: [*:0]const u8) void {
     respond.refuse(request, message);
 }
 
-fn onRequest(request: ?*anyopaque, user_data: ?*anyopaque) callconv(.c) void {
-    const bridge: *Bridge = @ptrCast(@alignCast(user_data.?));
-    registered = bridge;
-    bridge.answer(request);
-}
-
 test "every request path the bridge answers is compiled" {
     // Zig analyses only what is referenced: `answerInvoke` once carried a field the
     // struct did not have and every test still passed, because nothing reached it. The
@@ -733,7 +660,7 @@ test "every request path the bridge answers is compiled" {
     _ = &Bridge.answerRegion;
     _ = &Bridge.published;
     _ = &Bridge.emit;
-    _ = &onRequest;
+    _ = &Bridge.deliver;
 }
 
 test "a bridge answers the body it was given" {

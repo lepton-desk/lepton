@@ -31,7 +31,9 @@ pub const close_path = "/__lepton/close";
 /// Absolute, on the core's own origin. Same-origin for a packaged page (served from
 /// `lepton://localhost/`); a cross-origin read for a page served by the dev server,
 /// which the bridge allows for that one origin (`Bridge.allowOriginOf`).
-pub const core_origin = "lepton://localhost";
+/// Windows: `http://lepton.localhost`, which the WebView2 view filters and answers
+/// (`webview2/view.zig`) — WebView2 takes no custom scheme without its loader.
+pub const core_origin = if (@import("builtin").os.tag == .windows) "http://lepton.localhost" else "lepton://localhost";
 
 /// How long the page waits before asking again after a failed read, in milliseconds:
 /// the core is gone or going, and asking at once would spin.

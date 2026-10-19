@@ -180,9 +180,9 @@ pub fn find_application(bin: &Path) -> Result<PathBuf, CliError> {
             CliError::Invalid(format!("could not list {}: {error}", bin.display()))
         })?;
         let path = entry.path();
-        // No extension and a regular file: on Linux and macOS that is the executable;
-        // debug-info sidecars (`.pdb`, `.dSYM`) carry an extension and are skipped.
-        if path.extension().is_none() && path.is_file() {
+        // No extension (Linux, macOS) or `.exe` (Windows), and a regular file: that is the
+        // executable; debug-info sidecars (`.pdb`, `.dSYM`) are skipped.
+        if is_executable_name(&path) && path.is_file() {
             found.push(path);
         }
     }
@@ -209,6 +209,16 @@ pub fn find_application(bin: &Path) -> Result<PathBuf, CliError> {
     }
 }
 
+/// Whether `path`'s name is an executable's on this system.
+fn is_executable_name(path: &Path) -> bool {
+    match std::env::consts::EXE_EXTENSION {
+        "" => path.extension().is_none(),
+        wanted => path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case(wanted)),
+    }
+}
+
 /// Starts the application in the foreground and waits until its window closes.
 ///
 /// The executable is looked up by the name the build was given; `find_application`'s
@@ -225,7 +235,7 @@ pub fn launch_with(
     binary: &str,
     env: &[(&str, String)],
 ) -> Outcome {
-    let named = bin.join(binary);
+    let named = bin.join(format!("{binary}{}", std::env::consts::EXE_SUFFIX));
     let program = if named.is_file() {
         named
     } else {
@@ -246,12 +256,17 @@ pub fn launch_with(
 mod tests {
     use super::find_application;
     use lepton_orchestrator::testing::{Failure, Scratch};
+
+    /// `bin/<name>`, with `.exe` on Windows.
+    fn exe(name: &str) -> String {
+        format!("bin/{name}{}", std::env::consts::EXE_SUFFIX)
+    }
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok};
 
     #[test]
     fn the_extensionless_file_is_the_application() -> Result<(), Failure> {
         let scratch = Scratch::new("launch-one")?;
-        scratch.write("bin/app", "")?;
+        scratch.write(&exe("app"), "")?;
         scratch.write("bin/app.pdb", "")?;
 
         let found = assert_ok!(
@@ -259,7 +274,7 @@ mod tests {
             "one executable should be found"
         );
 
-        assert_eq!(found, scratch.path().join("bin").join("app"));
+        assert_eq!(found, scratch.path().join(exe("app")));
         Ok(())
     }
 
@@ -268,7 +283,7 @@ mod tests {
         // `zig-out/bin` can hold a directory of the same shape as a binary name
         // (a macOS bundle's parent, a leftover cache); starting it fails far from here.
         let scratch = Scratch::new("launch-dir")?;
-        scratch.write("bin/app", "")?;
+        scratch.write(&exe("app"), "")?;
         scratch.write("bin/nested/keep", "")?;
 
         let found = assert_ok!(
@@ -276,15 +291,15 @@ mod tests {
             "the directory should be skipped"
         );
 
-        assert_eq!(found, scratch.path().join("bin").join("app"));
+        assert_eq!(found, scratch.path().join(exe("app")));
         Ok(())
     }
 
     #[test]
     fn two_executables_are_refused_by_name() -> Result<(), Failure> {
         let scratch = Scratch::new("launch-two")?;
-        scratch.write("bin/app", "")?;
-        scratch.write("bin/old-name", "")?;
+        scratch.write(&exe("app"), "")?;
+        scratch.write(&exe("old-name"), "")?;
 
         let error = assert_err!(
             find_application(&scratch.path().join("bin")),

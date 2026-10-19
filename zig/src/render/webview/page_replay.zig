@@ -51,16 +51,14 @@ pub const Call = struct {
     used: bool = false,
 };
 
-/// One-shot, as in `bridge.zig`: the callback returns 0.
-const e_timeout_add = @extern(
-    *const fn (c_uint, *const fn (?*anyopaque) callconv(.c) c_int, ?*anyopaque) callconv(.c) c_uint,
-    .{ .name = "g_timeout_add" },
-);
+/// One-shot timers on the engine's loop: GLib's on WPE, `SetTimer` on WebView2.
+const engine = @import("request.zig");
 
-/// GLib is linked: a webview build (`scope.zig` asks the same).
+/// An engine with a loop is linked: a WPE webview build (`scope.zig` asks the same), or
+/// a WebView2 one.
 const engine_linked = blk: {
     const options = @import("build_options");
-    break :blk options.have_wpe and options.wpe_platform_abi and !options.native_render;
+    break :blk (options.have_wpe and options.wpe_platform_abi and !options.native_render) or options.have_webview2;
 };
 
 /// Quiet time after the last recorded call before a `--close` run ends.
@@ -204,13 +202,13 @@ pub const Script = struct {
     /// `LEPTON_REPLAY_PAGE_CLOSE=1`: sets `flag` when the recording has been played (see
     /// the top of this file). `flag` must live as long as the run.
     pub fn closeWhenDone(self: *Script, flag: *bool) void {
-        // GLib's timeouts exist only where the engine is linked.
+        // The engine's timers exist only where the engine is linked.
         if (comptime !engine_linked) return;
         const asked = std.c.getenv("LEPTON_REPLAY_PAGE_CLOSE") orelse return;
         if (asked[0] == 0 or asked[0] == '0') return;
         self.close = flag;
         const ceiling = self.length_ns / std.time.ns_per_ms + ceiling_margin_ms;
-        _ = e_timeout_add(@intCast(@min(ceiling, std.math.maxInt(c_uint))), &endRun, flag);
+        engine.timeoutOnce(@intCast(@min(ceiling, std.math.maxInt(c_uint))), &endRun, flag);
         self.closeIfDone();
     }
 
@@ -219,7 +217,7 @@ pub const Script = struct {
         const flag = self.close orelse return;
         if (self.closing or self.missing() != 0) return;
         self.closing = true;
-        _ = e_timeout_add(quiet_ms, &endRun, flag);
+        engine.timeoutOnce(quiet_ms, &endRun, flag);
     }
 
     pub fn deinit(self: *Script) void {

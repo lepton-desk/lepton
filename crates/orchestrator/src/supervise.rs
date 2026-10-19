@@ -241,7 +241,9 @@ mod tests {
     fn waiting() -> Command {
         if cfg!(windows) {
             let mut command = Command::new("ping");
-            command.args(["-n", "30", "127.0.0.1"]).stdout(std::process::Stdio::null());
+            command
+                .args(["-n", "30", "127.0.0.1"])
+                .stdout(std::process::Stdio::null());
             command
         } else {
             let mut command = Command::new("sleep");
@@ -347,7 +349,11 @@ mod tests {
         use std::io::BufRead as _;
         let exe = std::env::current_exe().map_err(|error| fail("the test binary", error))?;
         let mut helper = Command::new(exe)
-            .args(["--exact", "supervise::tests::contained_helper", "--nocapture"])
+            .args([
+                "--exact",
+                "supervise::tests::contained_helper",
+                "--nocapture",
+            ])
             .env("LEPTON_CONTAIN_HELPER", "1")
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -359,7 +365,10 @@ mod tests {
         let child = std::io::BufReader::new(stdout)
             .lines()
             .map_while(Result::ok)
-            .find_map(|line| line.strip_prefix("child ").and_then(|pid| pid.parse::<u32>().ok()));
+            .find_map(|line| {
+                line.strip_prefix("child ")
+                    .and_then(|pid| pid.parse::<u32>().ok())
+            });
         let Some(child) = child else {
             let _ = helper.kill();
             return Err(fail("the helper reports its child", "no pid printed"));

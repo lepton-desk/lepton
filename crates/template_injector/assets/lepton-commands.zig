@@ -12,10 +12,6 @@ const core = @import("lepton_core");
 
 pub fn main() !void {
     const text = comptime core.webviewDeclarations.file(app.commands, app.events);
-    var sent: usize = 0;
-    while (sent < text.len) {
-        const wrote = std.c.write(1, text[sent..].ptr, text.len - sent);
-        if (wrote <= 0) return error.WriteFailed;
-        sent += @intCast(wrote);
-    }
+    // Through `std.Io`, which writes the same bytes on Linux and Windows.
+    try std.Io.File.stdout().writeStreamingAll(std.Io.Threaded.global_single_threaded.io(), text);
 }

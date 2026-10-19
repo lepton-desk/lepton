@@ -176,7 +176,9 @@ impl Command {
 pub fn resolve(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
     let resolved = std::fs::canonicalize(path)?;
     if cfg!(windows)
-        && let Some(rest) = resolved.to_str().and_then(|text| text.strip_prefix(r"\\?\"))
+        && let Some(rest) = resolved
+            .to_str()
+            .and_then(|text| text.strip_prefix(r"\\?\"))
         && rest.as_bytes().get(1) == Some(&b':')
     {
         return Ok(std::path::PathBuf::from(rest));

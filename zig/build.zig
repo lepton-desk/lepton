@@ -187,6 +187,19 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     }
     const have_wpe = want_webview and hasPkgConfig(b, "wpe-webkit-2.0");
 
+    // Windows pages go through WebView2 (`render/webview/webview2/`): Microsoft's header is
+    // vendored in `webview2/` with its licence, the runtime is the one Windows installs, and
+    // its loader DLL is not shipped — the runtime is found in the registry
+    // (`webview2/runtime.zig`). The rest is system DLLs every Windows has.
+    const windows = options.target.result.os.tag == .windows;
+    const have_webview2 = want_webview and windows;
+    if (have_webview2) {
+        core.addIncludePath(b.path(b.pathJoin(&.{ options.root, "webview2" })));
+        for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi", "shell32", "dwmapi" }) |library| {
+            core.linkSystemLibrary(library, .{});
+        }
+    }
+
     // The platform backend's library name, taken from its own `.pc` file rather than
     // assembled from a version convention. `wpe_loader_init` hands its argument
     // straight to `dlopen`, and the file it must open is named after the backend's
@@ -290,6 +303,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // The native path can draw its screen as a command list on the GPU (EGL + text libs).
     opts.addOption(bool, "gpu_scene", gpu_text);
     opts.addOption(bool, "have_wpe", have_wpe);
+    opts.addOption(bool, "have_webview2", have_webview2);
     opts.addOption(bool, "wpe_platform_abi", use_platform_abi);
     opts.addOption([]const u8, "wpe_backend_library", wpe_backend_library orelse "");
 
@@ -308,7 +322,8 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
             .link_libc = true,
         }),
     });
-    b.installArtifact(platform_module);
+    // WPE's display module; Windows has no WPE to load it.
+    if (!windows) b.installArtifact(platform_module);
 
     // The file name and the install prefix are recorded; the build cache path is not.
     // A cache path is the kind of path that works on the machine that built the project

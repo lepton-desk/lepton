@@ -110,7 +110,13 @@ impl Toolchain {
             // Unprobed, not headless: this layer cannot answer the question without
             // guessing, and a report that guesses wrong is worse than one that says
             // it did not look.
-            display: DisplayStatus::unprobed(),
+            // Windows has one desktop protocol, Win32, in every signed-in session: nothing
+            // to probe and nothing to guess.
+            display: if cfg!(windows) {
+                DisplayStatus::win32()
+            } else {
+                DisplayStatus::unprobed()
+            },
         }
     }
 
@@ -230,7 +236,7 @@ fn probe(name: &'static str, args: &[&str]) -> ToolStatus {
 /// changed its socket name.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DisplayStatus {
-    /// `wayland`, `x11`, or `none`.
+    /// `wayland`, `x11`, `win32`, or `none`.
     pub session: Option<String>,
     /// Screen width in pixels, when the server reported it.
     pub width: Option<u32>,
@@ -264,6 +270,16 @@ impl DisplayStatus {
     pub fn unprobed() -> Self {
         Self {
             session: None,
+            width: None,
+            height: None,
+            problem: None,
+        }
+    }
+
+    /// The Windows desktop: always Win32.
+    pub fn win32() -> Self {
+        Self {
+            session: Some(String::from("win32")),
             width: None,
             height: None,
             problem: None,

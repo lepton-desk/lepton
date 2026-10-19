@@ -164,6 +164,13 @@ pub fn build(b: *std.Build) !void {
         exe.step.dependOn(generated);
     }
 
+    // Windows: a release build is a GUI program, so starting it from Explorer or a
+    // shortcut opens no console window beside it. Debug keeps the console for the core's
+    // report lines; `lepton run` reads them from the pipes either way.
+    if (target.result.os.tag == .windows and optimize != .Debug) {
+        exe.subsystem = .windows;
+    }
+
     b.installArtifact(exe);
 
     // The TypeScript names of `main.zig`'s commands, regenerated on every build and

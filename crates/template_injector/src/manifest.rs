@@ -413,7 +413,10 @@ mod tests {
                 );
             }
             let parsed = crate::permissions::parse_permissions(&text);
-            ensure!(parsed.is_ok(), "plugins {plugins:?}: permissions do not parse");
+            ensure!(
+                parsed.is_ok(),
+                "plugins {plugins:?}: permissions do not parse"
+            );
         }
         Ok(())
     }

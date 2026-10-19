@@ -382,12 +382,10 @@ fn entry_extension(manifest: &Manifest) -> &'static str {
     match manifest.target {
         crate::manifest::Target::React
         | crate::manifest::Target::Solid
-        | crate::manifest::Target::Preact => {
-            match manifest.language {
-                crate::manifest::Language::TypeScript => "tsx",
-                crate::manifest::Language::JavaScript => "jsx",
-            }
-        }
+        | crate::manifest::Target::Preact => match manifest.language {
+            crate::manifest::Language::TypeScript => "tsx",
+            crate::manifest::Language::JavaScript => "jsx",
+        },
         _ => manifest.language.extension(),
     }
 }

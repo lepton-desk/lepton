@@ -169,6 +169,9 @@ pub fn runFromEnvironment(allocator: std.mem.Allocator, registry: *const invoke.
 }
 
 pub fn readWhole(allocator: std.mem.Allocator, path: [*:0]const u8) ?[]u8 {
+    if (@import("builtin").os.tag == .windows) {
+        return std.Io.Dir.cwd().readFileAlloc(io(), std.mem.span(path), allocator, .limited(1 << 30)) catch null;
+    }
     const linux = std.os.linux;
     var info: linux.Statx = undefined;
     if (linux.statx(linux.AT.FDCWD, path, 0, .{ .SIZE = true }, &info) != 0) return null;

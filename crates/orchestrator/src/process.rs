@@ -680,7 +680,9 @@ mod tests {
         // `setCurrentDir("")` fails with `ENOENT` — which is reported as the program
         // not being found, sending the reader at the toolchain instead.
         let captured = assert_ok!(
-            crate::run(&shell(either("printf here", "echo here")).in_dir(std::path::PathBuf::from(""))),
+            crate::run(
+                &shell(either("printf here", "echo here")).in_dir(std::path::PathBuf::from(""))
+            ),
             "an empty directory should be ignored"
         );
 

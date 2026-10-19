@@ -14,6 +14,7 @@
 const std = @import("std");
 const posix = std.posix;
 const linux = std.os.linux;
+const windows = @import("builtin").os.tag == .windows;
 
 /// Bytes per page, the unit the kernel reports memory in.
 pub const page_bytes = std.heap.page_size_min;
@@ -84,6 +85,7 @@ pub const Probe = struct {
 /// `/proc/self/statm`'s second field is the resident set in pages — the same
 /// number a system monitor shows, read where the kernel writes it.
 pub fn residentSetBytes() Error!u64 {
+    if (windows) return windowsMemory.workingSet() orelse error.StatsUnavailable;
     var buf: [128]u8 = undefined;
     const line = try readStatm(&buf);
 
@@ -123,6 +125,7 @@ const mallinfo2 = @extern(*const fn () callconv(.c) MallInfo2, .{ .name = "malli
 /// libc, so this is the heap that matters in a webview process — not the Zig
 /// allocator's share of it. `mmap`-served blocks (`hblkhd`) count in both figures.
 pub fn heapBytes() Heap {
+    if (windows) return windowsMemory.heap();
     const info = mallinfo2();
     return .{
         .in_use = info.uordblks + info.hblkhd,
@@ -165,3 +168,47 @@ fn durationNanos(d: std.Io.Clock.Duration) u64 {
 test {
     _ = @import("probe_test.zig");
 }
+
+/// Windows: the working set (`GetProcessMemoryInfo`, what Task Manager's "Memory" column
+/// is built on) and the process heap's own summary (`HeapSummary`, Windows 10) — the heap
+/// the C runtime allocates from.
+const windowsMemory = struct {
+    const Counters = extern struct {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set: usize,
+        working_set: usize,
+        quota_peak_paged_pool: usize,
+        quota_paged_pool: usize,
+        quota_peak_non_paged_pool: usize,
+        quota_non_paged_pool: usize,
+        pagefile: usize,
+        peak_pagefile: usize,
+    };
+    const Summary = extern struct {
+        cb: u32,
+        allocated: usize,
+        committed: usize,
+        reserved: usize,
+        max_reserve: usize,
+    };
+    extern "kernel32" fn GetCurrentProcess() callconv(.winapi) *anyopaque;
+    extern "kernel32" fn K32GetProcessMemoryInfo(process: *anyopaque, counters: *Counters, size: u32) callconv(.winapi) c_int;
+    extern "kernel32" fn GetProcessHeap() callconv(.winapi) ?*anyopaque;
+    extern "kernel32" fn HeapSummary(heap: *anyopaque, flags: u32, summary: *Summary) callconv(.winapi) c_int;
+
+    fn workingSet() ?u64 {
+        var counters: Counters = undefined;
+        counters.cb = @sizeOf(Counters);
+        if (K32GetProcessMemoryInfo(GetCurrentProcess(), &counters, @sizeOf(Counters)) == 0) return null;
+        return counters.working_set;
+    }
+
+    fn heap() Heap {
+        const process_heap = GetProcessHeap() orelse return .{ .in_use = 0, .reserved = 0 };
+        var summary: Summary = undefined;
+        summary.cb = @sizeOf(Summary);
+        if (HeapSummary(process_heap, 0, &summary) == 0) return .{ .in_use = 0, .reserved = 0 };
+        return .{ .in_use = summary.allocated, .reserved = summary.committed };
+    }
+};

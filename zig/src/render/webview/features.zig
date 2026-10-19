@@ -225,6 +225,9 @@ pub fn isExternal(uri: []const u8) bool {
     for (local) |name| {
         if (std.ascii.eqlIgnoreCase(host, name)) return false;
     }
+    // `*.localhost` is this machine too (RFC 6761) — `lepton.localhost`, the page's own
+    // host on Windows, among them.
+    if (host.len > ".localhost".len and std.ascii.endsWithIgnoreCase(host, ".localhost")) return false;
     return true;
 }
 

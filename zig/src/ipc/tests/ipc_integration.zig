@@ -33,10 +33,10 @@ const Pair = struct {
 };
 
 /// A name unique to this process and test, so concurrent runs cannot collide.
-/// The pid is real: `std.os.linux.getpid()`.
+/// The pid is real: `getpid` on Linux, `GetCurrentProcessId` on Windows.
 fn uniqueName(tag: []const u8) ![]u8 {
     return std.fmt.allocPrint(testing.allocator, "/lepton-test-{d}-{s}", .{
-        std.os.linux.getpid(),
+        if (@import("builtin").os.tag == .windows) std.os.windows.GetCurrentProcessId() else std.os.linux.getpid(),
         tag,
     });
 }

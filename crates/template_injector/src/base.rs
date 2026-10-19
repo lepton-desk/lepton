@@ -244,8 +244,9 @@ mod tests {
         };
         for template in available().iter().filter(|name| name.ends_with("-ts")) {
             let scratch = Scratch::new(&format!("base-{template}"))?;
-            let written = write(template, scratch.path(), &bindings)
-                .map_err(|error| lepton_orchestrator::testing::fail("the template is written", format!("{error:?}")))?;
+            let written = write(template, scratch.path(), &bindings).map_err(|error| {
+                lepton_orchestrator::testing::fail("the template is written", format!("{error:?}"))
+            })?;
             if !written.iter().any(|path| path.ends_with(".tsx")) {
                 continue;
             }

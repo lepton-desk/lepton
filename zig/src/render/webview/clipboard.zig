@@ -11,6 +11,9 @@
 //! other applications paste, and what they copy is read here. Both directions are
 //! synchronous in WPE (`WPEClipboard.h`, 2.54). The compositor only tells a focused client
 //! about the selection, so an unfocused window reads what it last saw.
+//!
+//! Windows: the system clipboard through Win32 (`platform/windows/clipboard.zig`), which
+//! every Windows build can reach.
 
 const std = @import("std");
 const build_options = @import("build_options");
@@ -19,7 +22,10 @@ const registry = @import("registry.zig");
 const HandlerError = registry.HandlerError;
 
 /// Whether this build can reach the clipboard at all.
-pub const available = build_options.have_wpe and build_options.wpe_platform_abi and !build_options.native_render;
+pub const available = windows or (build_options.have_wpe and build_options.wpe_platform_abi and !build_options.native_render);
+
+const windows = @import("builtin").os.tag == .windows;
+const win32 = @import("../../platform/windows/clipboard.zig");
 
 /// Text formats in the order they are asked for. Wayland applications offer several;
 /// `text/plain` without a charset is not guaranteed to be UTF-8, so it comes second.
@@ -47,6 +53,7 @@ fn clipboard() ?*anyopaque {
 /// How many times the clipboard has changed, as WPE counts; -1 without a clipboard.
 pub fn changeCount() i64 {
     if (comptime !available) return -1;
+    if (comptime windows) return win32.changeCount();
     const board = clipboard() orelse return -1;
     return e_clipboard_get_change_count(board);
 }
@@ -64,6 +71,7 @@ pub fn chooseFormat(offered: []const []const u8) ?[]const u8 {
 /// The clipboard's text, written into the front of `out`; 0 bytes when it holds no text.
 pub fn readText(out: []u8) HandlerError!usize {
     if (comptime !available) return error.Failed;
+    if (comptime windows) return win32.readText(out);
     const board = clipboard() orelse return error.Failed;
     const formats = e_clipboard_get_formats(board) orelse return 0;
     var offered: [32][]const u8 = undefined;
@@ -91,6 +99,7 @@ pub fn writeText(text: []const u8) HandlerError!void {
     // The page's text may hold a NUL; the clipboard's C string would end there silently.
     if (std.mem.indexOfScalar(u8, text, 0) != null) return error.Failed;
     if (!std.unicode.utf8ValidateSlice(text)) return error.Failed;
+    if (comptime windows) return win32.writeText(text);
     const board = clipboard() orelse return error.Failed;
     const copy = e_strndup(text.ptr, text.len) orelse return error.Failed;
     defer e_free(copy);

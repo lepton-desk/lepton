@@ -97,8 +97,7 @@ fn require_support(root: &Path, needs: Needs) -> Result<(), CliError> {
         .join("src/render/webview/record.zig");
     if !core.is_file() {
         return Err(CliError::Invalid(
-            "this project's core predates recordings; run `lepton update`"
-                .to_owned(),
+            "this project's core predates recordings; run `lepton update`".to_owned(),
         ));
     }
     let main = std::fs::read_to_string(root.join(CORE_DIR).join("main.zig")).unwrap_or_default();

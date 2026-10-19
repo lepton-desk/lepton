@@ -40,7 +40,7 @@ pub const report = @import("report.zig");
 /// Paths the user chose in a dialog, granted at run time and remembered (`plugin-fs` `chosen`).
 pub const grants = @import("platform/linux/grants.zig");
 /// SIGTERM, SIGINT and SIGHUP as a request the loop ends on, so the channel is unlinked.
-pub const termination = @import("platform/linux/termination.zig");
+pub const termination = if (@import("builtin").os.tag == .windows) @import("platform/windows/termination.zig") else @import("platform/linux/termination.zig");
 /// The Vulkan the native GPU renderer requires (the baseline R7 240's set); pure, no driver.
 /// The draw command list every GPU backend reads (64 bytes a shape); pure, no driver.
 pub const scene = @import("render/scene.zig");

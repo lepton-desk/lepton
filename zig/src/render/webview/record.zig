@@ -96,9 +96,13 @@ fn io() std.Io {
     return std.Io.Threaded.global_single_threaded.io();
 }
 
+/// Windows writes through `std.Io.File` (no POSIX `open`); the file is the user's own,
+/// in a directory they named, and private by the profile's own permissions.
+const windows = @import("builtin").os.tag == .windows;
+
 /// Appends records to an open file.
 pub const Recorder = struct {
-    fd: std.c.fd_t,
+    fd: if (windows) std.Io.File else std.c.fd_t,
     unmasked: bool,
     started: std.Io.Clock.Timestamp,
     /// Set by the first write that failed; nothing more is written after it, so the
@@ -107,6 +111,16 @@ pub const Recorder = struct {
 
     /// Creates (or empties) `path`, `0600`, and writes the file header.
     pub fn create(path: [*:0]const u8, unmasked: bool) ?Recorder {
+        if (windows) {
+            const file = std.Io.Dir.cwd().createFile(io(), std.mem.span(path), .{ .truncate = true }) catch return null;
+            var recorder: Recorder = .{ .fd = file, .unmasked = unmasked, .started = std.Io.Clock.Timestamp.now(io(), .awake) };
+            const header: FileHeader = .{};
+            if (!recorder.writeAll(std.mem.asBytes(&header))) {
+                recorder.close();
+                return null;
+            }
+            return recorder;
+        }
         const fd = std.c.open(path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true, .CLOEXEC = true }, @as(std.c.mode_t, 0o600));
         if (fd < 0) return null;
         // An existing file keeps its mode through `O_CREAT`; a recording is private either way.
@@ -169,6 +183,10 @@ pub const Recorder = struct {
     }
 
     fn writeAll(self: *Recorder, bytes: []const u8) bool {
+        if (windows) {
+            self.fd.writeStreamingAll(io(), bytes) catch return false;
+            return true;
+        }
         var sent: usize = 0;
         while (sent < bytes.len) {
             const wrote = std.c.write(self.fd, bytes[sent..].ptr, bytes.len - sent);
@@ -179,6 +197,10 @@ pub const Recorder = struct {
     }
 
     pub fn close(self: *Recorder) void {
+        if (windows) {
+            self.fd.close(io());
+            return;
+        }
         _ = std.c.close(self.fd);
         self.fd = -1;
     }

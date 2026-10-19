@@ -12,8 +12,21 @@
 //! Arch and openSUSE Tumbleweed carried 2.54.1, Debian 2.54.1 only in testing and
 //! unstable (trixie 2.48.3), Ubuntu nothing after 22.04, and Fedora had retired the
 //! package.
+//!
+//! On Windows the engine is WebView2: the runtime Windows installs, found where the core
+//! finds it (`EdgeUpdate\ClientState\{F3017226-…}` → `EBWebView`, machine-wide then
+//! per-user; `zig/src/render/webview/webview2/runtime.zig`), read with `reg query`.
 
 use std::process::Command;
+
+/// The WebView2 runtime's registry keys (stable channel): machine-wide, then per-user.
+const WEBVIEW2_KEYS: [&str; 2] = [
+    r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    r"HKCU\Software\Microsoft\EdgeUpdate\ClientState\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+];
+
+/// Where Microsoft hands out the Evergreen runtime.
+const WEBVIEW2_DOWNLOAD: &str = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
 /// The version WPEPlatform became stable in, which the core's platform path is written for.
 const MINIMUM: (u32, u32) = (2, 54);
@@ -29,11 +42,23 @@ pub struct Engine {
     pub legacy: bool,
     pub cairo: bool,
     pub xcb: bool,
+    /// Windows: the WebView2 runtime's version, when one is installed.
+    pub webview2: Option<String>,
 }
 
 impl Engine {
     /// Reads this machine.
     pub fn probe() -> Self {
+        if cfg!(windows) {
+            return Self {
+                webkit: None,
+                platform: false,
+                legacy: false,
+                cairo: false,
+                xcb: false,
+                webview2: webview2_version(),
+            };
+        }
         let webkit =
             pkg_config(&["--modversion", "wpe-webkit-2.0"]).map(|out| out.trim().to_owned());
         let legacy = webkit.is_some()
@@ -49,16 +74,28 @@ impl Engine {
             legacy,
             cairo: exists("cairo"),
             xcb: exists("xcb"),
+            webview2: None,
         }
     }
 
     /// Whether a webview build can link here.
     pub fn ready(&self) -> bool {
+        if cfg!(windows) {
+            return self.webview2.is_some();
+        }
         self.webkit.is_some() && (self.platform || self.legacy) && self.cairo && self.xcb
     }
 
     /// The rows `lepton info` prints, label then value.
     pub fn rows(&self) -> Vec<(&'static str, String)> {
+        if cfg!(windows) {
+            return vec![(
+                "WebView2",
+                self.webview2
+                    .clone()
+                    .unwrap_or_else(|| String::from("not installed")),
+            )];
+        }
         let found = |present: bool, missing: &str| {
             if present {
                 String::from("present")
@@ -92,7 +129,7 @@ impl Engine {
     /// The same facts as JSON fields, for `lepton info --json`.
     pub fn json(&self) -> String {
         format!(
-            "{{\"webkit\": {}, \"platform\": {}, \"legacy\": {}, \"cairo\": {}, \"xcb\": {}, \"ready\": {}}}",
+            "{{\"webkit\": {}, \"platform\": {}, \"legacy\": {}, \"cairo\": {}, \"xcb\": {}, \"webview2\": {}, \"ready\": {}}}",
             self.webkit.as_deref().map_or_else(
                 || String::from("null"),
                 lepton_template_injector::manifest::json_string
@@ -101,6 +138,10 @@ impl Engine {
             self.legacy,
             self.cairo,
             self.xcb,
+            self.webview2.as_deref().map_or_else(
+                || String::from("null"),
+                lepton_template_injector::manifest::json_string
+            ),
             self.ready()
         )
     }
@@ -251,6 +292,13 @@ fn new_enough(version: &str) -> bool {
 /// The lines that say what to do, for `lepton info` and a blocked build alike: short,
 /// with the one command to run when there is one, and the native path either way.
 pub fn advice(offer: Option<&Offer>) -> Vec<String> {
+    if cfg!(windows) {
+        return vec![
+            String::from("Install the WebView2 Runtime (Evergreen) from Microsoft:"),
+            format!("  {WEBVIEW2_DOWNLOAD}"),
+            String::from("Windows 11 and an up-to-date Windows 10 already have it."),
+        ];
+    }
     let native = String::from("Or leave the engine out for now: `--native` draws without one.");
     match offer {
         Some(Offer {
@@ -319,9 +367,37 @@ pub fn ensure() -> Result<(), super::CliError> {
             }
         }
     }
-    Err(super::CliError::Invalid(String::from(
-        "the webview path needs WPE WebKit; install it as above, or build with --native",
-    )))
+    Err(super::CliError::Invalid(String::from(if cfg!(windows) {
+        "the webview path needs the WebView2 runtime; install it as above"
+    } else {
+        "the webview path needs WPE WebKit; install it as above, or build with --native"
+    })))
+}
+
+/// The installed WebView2 runtime's version: the last component of its `EBWebView` path.
+fn webview2_version() -> Option<String> {
+    WEBVIEW2_KEYS.iter().find_map(|key| {
+        let output = Command::new("reg")
+            .args(["query", key, "/v", "EBWebView"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        version_from_reg(&String::from_utf8_lossy(&output.stdout))
+    })
+}
+
+/// `    EBWebView    REG_SZ    C:\…\Application\155.0.4283.62` → `155.0.4283.62`.
+fn version_from_reg(text: &str) -> Option<String> {
+    let line = text.lines().find(|line| line.contains("REG_SZ"))?;
+    let path = line.split("REG_SZ").nth(1)?.trim();
+    let version = path.rsplit('\\').next()?;
+    version
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_digit())
+        .then(|| version.to_owned())
 }
 
 fn exists(package: &str) -> bool {
@@ -342,7 +418,22 @@ fn pkg_config(args: &[&str]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Family, Offer, advice, family, new_enough};
+    #[cfg(not(windows))]
+    use super::Offer;
+    use super::{Family, advice, family, new_enough, version_from_reg};
+
+    #[test]
+    fn the_webview2_version_is_the_last_component_of_its_path() {
+        // `reg query … /v EBWebView` as it printed on Windows 10 22H2 (2026-10-19).
+        let printed = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\ClientState\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}\r\n    EBWebView    REG_SZ    C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\155.0.4283.62\r\n\r\n";
+        assert_eq!(version_from_reg(printed).as_deref(), Some("155.0.4283.62"));
+        assert_eq!(
+            version_from_reg(
+                "ERROR: The system was unable to find the specified registry key or value."
+            ),
+            None
+        );
+    }
 
     #[test]
     fn systems_are_read_from_id_and_id_like() {
@@ -371,6 +462,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn windows_advice_names_the_runtime_and_where_it_comes_from() {
+        let text = advice(None).join("\n");
+        assert!(text.contains("WebView2 Runtime"), "{text}");
+        assert!(text.contains(super::WEBVIEW2_DOWNLOAD), "{text}");
+        assert!(
+            !text.contains("--native"),
+            "no native path on Windows yet: {text}"
+        );
+    }
+
+    /// The distribution package managers' advice; Windows has its own (above).
+    #[test]
+    #[cfg(not(windows))]
     fn advice_names_the_command_only_when_there_is_one() {
         let arch = Offer {
             system: String::from("EndeavourOS"),

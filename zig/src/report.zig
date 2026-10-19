@@ -40,12 +40,19 @@ fn truthy(name: [*:0]const u8) bool {
 /// Decided once: the environment does not change while the application runs.
 var decided: ?bool = null;
 
+fn stderrIsTerminal() bool {
+    if (@import("builtin").os.tag != .windows) return std.c.isatty(2) != 0;
+    // A console (Windows 10 consoles take ANSI colour once virtual terminal processing is
+    // on, which Windows Terminal and the IDE terminals have by default).
+    return std.Io.File.stderr().isTty(std.Io.Threaded.global_single_threaded.io()) catch false;
+}
+
 pub fn colour() bool {
     if (decided) |known| return known;
     const on = if (std.c.getenv("NO_COLOR")) |value|
         std.mem.span(value).len == 0
     else
-        truthy("FORCE_COLOR") or truthy("CLICOLOR_FORCE") or std.c.isatty(2) != 0;
+        truthy("FORCE_COLOR") or truthy("CLICOLOR_FORCE") or stderrIsTerminal();
     decided = on;
     return on;
 }
