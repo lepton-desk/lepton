@@ -76,10 +76,11 @@ export function coloured(env, terminal) {
  * can build and run a webview project.
  *
  * @param {string} json  the output of `lepton info --json`
+ * @param {string} [platform]  the system it ran on: Windows' engine is WebView2, not WPE
  * @returns {string[]}
  */
-export function missing(json) {
-  /** @type {{ tools?: { name: string, problem: unknown }[], engine?: { webkit: string | null, platform: boolean, legacy: boolean, cairo: boolean, xcb: boolean, ready: boolean } }} */
+export function missing(json, platform = process.platform) {
+  /** @type {{ tools?: { name: string, problem: unknown }[], engine?: { webkit: string | null, platform: boolean, legacy: boolean, cairo: boolean, xcb: boolean, webview2?: string | null, ready: boolean } }} */
   let report;
   try {
     report = JSON.parse(json);
@@ -100,6 +101,14 @@ export function missing(json) {
     !Array.isArray(engine) &&
     !engine.ready
   ) {
+    if (platform === "win32") {
+      // On Windows the page runs in WebView2, which Windows 10 and 11 install; the core
+      // finds the runtime itself (`render/webview/webview2/runtime.zig`).
+      lines.push(
+        "WebView2 runtime: not found (install it from https://developer.microsoft.com/microsoft-edge/webview2/)",
+      );
+      return lines;
+    }
     if (engine.webkit === null)
       lines.push("WPE WebKit: not installed (`lepton info` says how to get it)");
     else if (!engine.platform && !engine.legacy)

@@ -9,7 +9,8 @@
  * the `◉ lepton new · v0.1.7` header, the `@lepton-desk/*` versions a new project gets), so
  * that file is the source. What cannot read it is written here:
  *
- * - every npm package's `version`, `@lepton-desk/cli`'s exact `cli-linux-x64` dependency,
+ * - every npm package's `version`, `@lepton-desk/cli`'s exact `cli-linux-x64` and
+ *   `cli-win32-x64` dependencies,
  *   each plugin's `^<version>` peer on `@lepton-desk/api` (`^0.1.6` does not admit
  *   `0.2.0-beta.1`) and `create-lepton-app`'s exact `@lepton-desk/cli`;
  * - `lepton update`'s template history: the templates this version ships, copied to
@@ -41,6 +42,7 @@ const npmPackages = [
 	"api",
 	"cli",
 	"cli-linux-x64",
+	"cli-win32-x64",
 	...plugins,
 	"create-lepton-app",
 ];
@@ -96,7 +98,8 @@ function bump(version) {
 		editPackage(name, (manifest) => {
 			manifest.version = version;
 			if (name === "cli")
-				manifest.optionalDependencies["@lepton-desk/cli-linux-x64"] = version;
+				for (const platform of ["cli-linux-x64", "cli-win32-x64"])
+					manifest.optionalDependencies[`@lepton-desk/${platform}`] = version;
 			if (name === "create-lepton-app")
 				manifest.dependencies["@lepton-desk/cli"] = version;
 			if (plugins.includes(name))
@@ -117,10 +120,15 @@ function bump(version) {
 		`$1\n    Release {\n        version: "${version}",\n        entry: include_str!("../assets/history/${version}/main.zig"),\n        build: include_str!("../assets/history/${version}/build.zig"),\n    },$2`,
 	);
 
-	for (const name of ["lepton-desk", "lepton-desk-bin"]) {
-		const path = at("packaging", "aur", name, "PKGBUILD");
-		replaceOnce(path, /^pkgver=.*$/m, `pkgver=${version}`);
-		replaceOnce(path, /^pkgrel=.*$/m, "pkgrel=1");
+	// The AUR packages follow releases only: pacman refuses a `-` in `pkgver`, and a beta
+	// would reach everyone who installed the stable package.
+	const prerelease = version.includes("-");
+	if (!prerelease) {
+		for (const name of ["lepton-desk", "lepton-desk-bin"]) {
+			const path = at("packaging", "aur", name, "PKGBUILD");
+			replaceOnce(path, /^pkgver=.*$/m, `pkgver=${version}`);
+			replaceOnce(path, /^pkgrel=.*$/m, "pkgrel=1");
+		}
 	}
 
 	replaceOnce(
@@ -141,8 +149,10 @@ function bump(version) {
 
 	console.log(`release-version: ${previous} -> ${version}`);
 	console.log(
-		"  Cargo.toml, Cargo.lock, 8 npm packages, template history, AUR pkgver, docs/yayin.md",
+		`  Cargo.toml, Cargo.lock, ${npmPackages.length} npm packages, template history, ${prerelease ? "" : "AUR pkgver, "}docs/yayin.md`,
 	);
+	if (prerelease)
+		console.log("  AUR left at the last release: a prerelease is not packaged there");
 	console.log(
 		"  next: tools/npm-preflight.sh, commit, publish, then `node tools/release-version.mjs aur`",
 	);
@@ -151,6 +161,8 @@ function bump(version) {
 /** After publishing: the AUR packages point at the published binary and the release commit. */
 function aur() {
 	const version = cargoVersion();
+	if (version.includes("-"))
+		fail(`${version} is a prerelease; the AUR packages follow releases only`);
 	const integrity = execFileSync(
 		"npm",
 		["view", `@lepton-desk/cli-linux-x64@${version}`, "dist.integrity"],

@@ -7,7 +7,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 plugins=(plugin-os plugin-clipboard plugin-fs plugin-dialog)
-packages=(cli-linux-x64 cli api "${plugins[@]}" create-lepton-app)
+packages=(cli-linux-x64 cli-win32-x64 cli api "${plugins[@]}" create-lepton-app)
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'preflight: %s\n' "$*" >&2; exit 1; }
 
@@ -25,8 +25,12 @@ for plugin in "${plugins[@]}"; do
   # `^0.1.6` does not admit `0.2.0-beta.1`: a plugin must name the API it ships with.
   [ "$peer" = "^$version" ] || fail "packages/$plugin wants @lepton-desk/api $peer, not ^$version"
 done
-platform="$(node -p "require('$root/packages/cli/package.json').optionalDependencies['@lepton-desk/cli-linux-x64']")"
-[ "$platform" = "$version" ] || fail "@lepton-desk/cli wants cli-linux-x64 $platform, not $version"
+for platform in cli-linux-x64 cli-win32-x64; do
+  wanted="$(node -p "require('$root/packages/cli/package.json').optionalDependencies['@lepton-desk/$platform']")"
+  [ "$wanted" = "$version" ] || fail "@lepton-desk/cli wants $platform $wanted, not $version"
+  have="$(node -p "require('$root/packages/$platform/package.json').version")"
+  [ "$have" = "$version" ] || fail "packages/$platform is $have, the CLI is $version"
+done
 echo "all at $version"
 
 step "dist-tag"
@@ -44,6 +48,11 @@ step "not already published"
 for package in "${packages[@]}"; do
   name="$(node -p "require('$root/packages/$package/package.json').name" 2>/dev/null || echo "@lepton-desk/$package")"
   if published="$(npm view "$name@$version" version 2>/dev/null)" && [ -n "$published" ]; then
+    # The Windows binary goes out first, from Windows; the rest follow from here.
+    if [ "$package" = cli-win32-x64 ]; then
+      echo "$name@$version: published from Windows"
+      continue
+    fi
     fail "$name@$version is already on npm; bump the version"
   fi
   echo "$name@$version: free"
@@ -85,6 +94,18 @@ for package in "${packages[@]}"; do
   echo "-- $package"
   (cd "$root/packages/$package" && npm pack --dry-run 2>&1 | grep -E 'npm notice ([0-9.]+[kMG]?B |package size|total files)')
 done
+
+# The Windows binary is built and staged on Windows (MSVC): `cargo build --release --bin
+# lepton`, then `node packages/cli/scripts/stage.mjs` there. It is published before
+# @lepton-desk/cli, which names it, like the Linux one.
+step "the win32-x64 binary"
+if [ -f "$root/packages/cli-win32-x64/bin/lepton.exe" ]; then
+  echo "staged here"
+elif [ "$(npm view "@lepton-desk/cli-win32-x64@$version" version 2>/dev/null)" = "$version" ]; then
+  echo "already on npm"
+else
+  fail "@lepton-desk/cli-win32-x64@$version is neither staged here nor on npm: on Windows, run \`cargo build --release --bin lepton\` and \`node packages/cli/scripts/stage.mjs\`, then publish it there before @lepton-desk/cli (docs/yayin.md)"
+fi
 
 if [ "$tag" = latest ]; then
   printf '\npreflight: ready to publish %s (npm publish)\n' "$version"

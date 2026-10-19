@@ -44,6 +44,16 @@ impl Version {
             pre,
         })
     }
+
+    /// The npm dist-tag this version is published under, as `tools/npm-preflight.sh`
+    /// chooses it: `beta` for `-beta.N`, `next` for `-rc.N`, `latest` otherwise.
+    pub fn dist_tag(&self) -> &'static str {
+        match self.pre.as_deref() {
+            Some(pre) if pre.starts_with("beta") => "beta",
+            Some(pre) if pre.starts_with("rc") => "next",
+            _ => "latest",
+        }
+    }
 }
 
 impl std::fmt::Display for Version {
@@ -178,10 +188,12 @@ pub fn version_in(output: &str) -> Option<Version> {
         .find_map(|line| Version::parse(line.trim_matches('"')))
 }
 
-/// The newest `@lepton-desk/cli` on the registry the project installs from, asked through
-/// its own manager (so `.npmrc` registries apply), then npm; `None` when neither answers.
-pub fn latest(root: &Path, manager: PackageManager) -> Option<Version> {
-    let package = format!("{SCOPE}cli");
+/// The `@lepton-desk/cli` under `tag` on the registry the project installs from, asked
+/// through its own manager (so `.npmrc` registries apply), then npm; `None` when neither
+/// answers. `latest` is the release; a beta CLI also asks `beta`, or a project on
+/// `0.1.9-beta.0` would never hear of `0.1.9-beta.1` (`latest` stays at the last release).
+pub fn latest(root: &Path, manager: PackageManager, tag: &str) -> Option<Version> {
+    let package = format!("{SCOPE}cli@{tag}");
     let mut attempts: Vec<(&str, Vec<String>)> = vec![match manager {
         PackageManager::Npm | PackageManager::Pnpm => (
             manager.program(),
@@ -230,6 +242,14 @@ mod tests {
 
     fn version(text: &str) -> Result<Version, Failure> {
         Version::parse(text).ok_or_else(|| fail("a version", text))
+    }
+
+    #[test]
+    fn a_prerelease_names_the_tag_it_is_published_under() -> Result<(), Failure> {
+        assert_eq!(version("0.1.9-beta.0")?.dist_tag(), "beta");
+        assert_eq!(version("1.0.0-rc.2")?.dist_tag(), "next");
+        assert_eq!(version("0.1.8")?.dist_tag(), "latest");
+        Ok(())
     }
 
     #[test]

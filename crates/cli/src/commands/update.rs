@@ -232,7 +232,12 @@ impl Flags {
                 }
                 wanted
             }
-            None => match packages::latest(root, manager) {
+            None => match [own.dist_tag(), "latest"]
+                .into_iter()
+                .take(if own.dist_tag() == "latest" { 1 } else { 2 })
+                .filter_map(|tag| packages::latest(root, manager, tag))
+                .max()
+            {
                 Some(latest) => {
                     report.fact("latest", &format!("{latest} (this CLI is {own})"));
                     latest.max(own.clone())

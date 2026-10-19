@@ -1,0 +1,25 @@
+{
+  "name": "@lepton-desk/cli-win32-x64",
+  "version": "0.1.8",
+  "description": "The Lepton CLI binary for win32-x64. Installed by @lepton-desk/cli; not used directly.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lepton-desk/lepton.git",
+    "directory": "packages/cli-win32-x64"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin",
+    "LICENSE*"
+  ],
+  "preferUnplugged": true,
+  "publishConfig": {
+    "access": "public"
+  }
+}

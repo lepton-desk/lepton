@@ -2,13 +2,13 @@
 
 Şu anki sürüm: **0.1.8** (0.1.0–0.1.7 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı tek komut: `node tools/release-version.mjs <sürüm>`. `Cargo.toml` (CLI sürümünü
 derlemede buradan okur: `--version`, komut başlıkları, yeni projelerin `@lepton-desk/*` sürümleri),
-`Cargo.lock`, sekiz npm paketinin `version`'ı, `cli`'nin `optionalDependencies`'i, eklentilerin
+`Cargo.lock`, dokuz npm paketinin `version`'ı, `cli`'nin `optionalDependencies`'i (iki platform paketi), eklentilerin
 `^<sürüm>` `peerDependencies`'i, `create-lepton-app`'in `@lepton-desk/cli`'si, `lepton update`'in
-şablon geçmişi (`assets/history/<sürüm>/` + `RELEASES`), AUR `pkgver`'i ve bu dosyanın sürümü.
+şablon geçmişi (`assets/history/<sürüm>/` + `RELEASES`), AUR `pkgver`'i (yalnız kararlı sürümde; ön sürüm AUR'a gitmez) ve bu dosyanın sürümü.
 Yayından sonra `node tools/release-version.mjs aur`: `-bin`'in sha512'si npm'den, kaynak paketin
 commit'i HEAD'den, `.SRCINFO`'lar yeniden. Platform paketini `stage.mjs` yazar.
 
-Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
+Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-win32-x64` (**Windows'ta**, aşağıda) → `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
 `@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
 
 ## 1. Sizin kararınız gerekenler (ön kontrol bunlarsız geçmez)
@@ -41,6 +41,18 @@ npm whoami
 Ön kontrolün son satırı dist-tag'i söyler: düz sürüm `npm publish` (`latest`); `0.2.0-beta.N` için
 her komuta `--tag beta`, `1.0.0-rc.N` için `--tag next` (npm 11 ön sürümü etiketsiz yayımlamaz).
 Eklentilerin `peerDependencies` (`^<sürüm>`) ve `cli`'nin `optionalDependencies`'i de sürümle birlikte artar.
+
+Önce Windows'ta (dual-boot, `D:\lepton`; `git pull` ile aynı commit), PowerShell'de:
+
+```
+cargo build --release --bin lepton
+node packages/cli/scripts/stage.mjs
+cd packages/cli-win32-x64; npm pack --dry-run; npm publish --tag beta
+```
+
+`stage.mjs` ikilinin `lepton --version`'ının paket sürümüyle aynı olduğunu denetler. Lisans
+metinleri Linux'taki ön kontrolde kopyalanır; Windows klonunda yoksa kökteki `LICENSE-*`'ı pakete
+kopyalayın. Sonra Linux'ta ön kontrol bu paketi "already on npm" diye geçer.
 
 ```bash
 cd packages/cli-linux-x64 && npm publish

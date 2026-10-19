@@ -1,7 +1,7 @@
 // The launcher against real programs: the shipped `lepton` binary (via LEPTON_BINARY) and,
 // for signals, a real `sleep`. Nothing is stood in for.
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -69,12 +69,30 @@ test("the package's version is the CLI's", () => {
 
 test("every optional dependency is a platform package that has been staged", () => {
   // Publishing a pointer to a package that does not exist makes every install 404 on it.
+  // A package is staged on its own system (the Windows one on Windows, with `lepton.exe`)
+  // and published from there first, so from another system it must already be on npm.
   const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   for (const name of Object.keys(manifest.optionalDependencies)) {
     const dir = new URL(`../../${name.replace("@lepton-desk/", "")}/`, import.meta.url);
     const staged = JSON.parse(readFileSync(new URL("package.json", dir), "utf8"));
     assert.equal(staged.name, name);
     assert.equal(staged.version, manifest.version);
-    assert.ok(existsSync(new URL("bin/lepton", dir)), `${name} has its binary`);
+    const executable = staged.os.includes("win32") ? "lepton.exe" : "lepton";
+    if (existsSync(new URL(`bin/${executable}`, dir))) continue;
+    const published = (() => {
+      try {
+        return execFileSync("npm", ["view", `${name}@${manifest.version}`, "version"], {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+      } catch {
+        return "";
+      }
+    })();
+    assert.equal(
+      published,
+      manifest.version,
+      `${name} has no bin/${executable} here and ${manifest.version} is not on npm: stage and publish it on its own system first (docs/yayin.md)`,
+    );
   }
 });

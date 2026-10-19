@@ -20,7 +20,8 @@
     "node": ">=20"
   },
   "optionalDependencies": {
-    "@lepton-desk/cli-linux-x64": "0.1.8"
+    "@lepton-desk/cli-linux-x64": "0.1.8",
+    "@lepton-desk/cli-win32-x64": "0.1.8"
   },
   "scripts": {
     "stage": "node scripts/stage.mjs",

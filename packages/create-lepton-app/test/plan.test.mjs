@@ -66,6 +66,26 @@ test("what lepton info reports missing is listed, and nothing when ready", () =>
   assert.equal(missing("not json").length, 1);
 });
 
+test("on Windows a missing engine is WebView2, never WPE", () => {
+  const windows = (webview2) =>
+    JSON.stringify({
+      engine: {
+        webkit: null,
+        platform: false,
+        legacy: false,
+        cairo: false,
+        xcb: false,
+        webview2,
+        ready: webview2 !== null,
+      },
+    });
+  assert.deepEqual(missing(windows("155.0.4283.62"), "win32"), []);
+  const lines = missing(windows(null), "win32");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^WebView2 runtime: not found/);
+  assert.ok(!lines.some((line) => line.includes("WPE")), lines.join("\n"));
+});
+
 test("the real lepton info --json is read, and agrees with its own ready", () => {
   // 0.1.5 was published reading an engine shape the CLI no longer printed: the hand-written
   // report above had drifted from the real one. This one comes from the binary.
@@ -79,6 +99,7 @@ test("the real lepton info --json is read, and agrees with its own ready", () =>
     "platform",
     "ready",
     "webkit",
+    "webview2",
     "xcb",
   ]);
   const engineLines = missing(json).filter(
