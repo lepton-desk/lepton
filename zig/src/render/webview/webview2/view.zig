@@ -56,12 +56,20 @@ var version_len: usize = 0;
 /// `%LOCALAPPDATA%\<identifier>`, the counterpart of `~/.local/share/<identifier>`: every
 /// Lepton page has the same origin, so a shared folder would share storage. Call before
 /// `open`. False when `LOCALAPPDATA` is not set.
+/// `shobjidl.h`; declared here rather than pulling that header into the translation.
+extern "shell32" fn SetCurrentProcessExplicitAppUserModelID(id: [*:0]const u16) callconv(.winapi) c.HRESULT;
+
 pub fn useApplicationDirectories(identifier: []const u8) bool {
+    var name: [256]u16 = undefined;
+    const units = std.unicode.utf8ToUtf16Le(name[0 .. name.len - 1], identifier[0..@min(identifier.len, 80)]) catch return false;
+    name[units] = 0;
+    // The same identifier as the installer's Start menu shortcut (`PKEY_AppUserModel_ID`,
+    // `lepton package` MSI): the taskbar groups this process's windows under it. Before
+    // any window, as Windows requires.
+    _ = SetCurrentProcessExplicitAppUserModelID(name[0..units :0]);
     var base: [c.MAX_PATH]u16 = undefined;
     const got = c.GetEnvironmentVariableW(W("LOCALAPPDATA"), &base, base.len);
     if (got == 0 or got >= base.len) return false;
-    var name: [256]u16 = undefined;
-    const units = std.unicode.utf8ToUtf16Le(&name, identifier[0..@min(identifier.len, 80)]) catch return false;
     if (got + 1 + units >= data_directory.len) return false;
     @memcpy(data_directory[0..got], base[0..got]);
     data_directory[got] = '\\';

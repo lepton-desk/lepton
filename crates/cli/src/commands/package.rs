@@ -219,6 +219,14 @@ pub fn write_target(
             // The publisher Settings → Apps shows: `bundle.maintainer` when given, else the
             // product's own name — never an invented company.
             let manufacturer = formats.maintainer.as_deref().unwrap_or(&spec.product);
+            // `bundle.icon` is relative to the project: the prefix is `<root>/src-lepton/zig-out`.
+            let root = spec
+                .prefix
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or(&spec.prefix);
+            let icon = formats.icon.as_deref().map(|relative| root.join(relative));
+            let program = crate::platform::executable(&spec.binary);
             let digest = super::installer::write(&super::installer::Installer {
                 bundle,
                 skip: &[MARKER],
@@ -226,6 +234,8 @@ pub fn write_target(
                 product: &spec.product,
                 version: &spec.version,
                 manufacturer,
+                program: &program,
+                icon: icon.as_deref(),
                 mtime: super::archive::release_time(),
                 out: &out,
             })?;
@@ -606,6 +616,7 @@ mod tests {
             targets: vec![BundleTarget::Deb],
             maintainer: Some(String::from("Ada <ada@example.org>")),
             deb_depends: Some(vec![String::from("libc6")]),
+            icon: None,
         };
         let (_, line) = assert_ok!(
             write_target(&spec, &bundle, BundleTarget::Deb, &[], &formats),

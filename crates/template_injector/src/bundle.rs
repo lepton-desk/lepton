@@ -70,6 +70,10 @@ pub struct Bundle {
     /// (`libglib-2.0.so.0` is `libglib2.0-0t64` since the 64-bit time transition), so they
     /// are read from dpkg or written down — never guessed.
     pub deb_depends: Option<Vec<String>>,
+    /// `bundle.icon`: an `.ico` file, relative to the project, for the Windows installer's
+    /// Start menu shortcut and its Settings → Apps entry. Without it both show the
+    /// program's own icon.
+    pub icon: Option<String>,
 }
 
 impl Default for Bundle {
@@ -82,6 +86,7 @@ impl Default for Bundle {
             }],
             maintainer: None,
             deb_depends: None,
+            icon: None,
         }
     }
 }
@@ -116,10 +121,18 @@ pub fn parse_bundle(text: &str) -> Result<Bundle, ManifestError> {
         },
         Some(_) => return Err(invalid("\"bundle.deb\" must be an object")),
     };
+    let icon = match section.get("icon") {
+        None => None,
+        Some(Value::String(text)) if text.trim().to_ascii_lowercase().ends_with(".ico") => {
+            Some(text.trim().to_owned())
+        }
+        Some(_) => return Err(invalid("\"bundle.icon\" must be the path of an .ico file")),
+    };
     Ok(Bundle {
         targets,
         maintainer,
         deb_depends,
+        icon,
     })
 }
 

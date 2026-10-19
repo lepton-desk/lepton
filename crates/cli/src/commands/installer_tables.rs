@@ -1,12 +1,14 @@
 //! The installer's tables: the standard ones it uses, with the Windows Installer schema's
 //! column types (`installer_db.rs` writes them), and their rows.
 
-use super::installer::{COMPONENT_64BIT, Directory, File, Installer, LANGUAGE, name_uuid};
+use super::installer::{COMPONENT_64BIT, Directory, Extras, File, Installer, LANGUAGE, name_uuid};
 use super::installer_db::{Cell, Column, Database, Kind, text};
 
 /// The standard tables this package uses, as the Windows Installer SDK defines them.
-pub(super) fn tables(db: &mut Database) {
+pub(super) fn tables(db: &mut Database, icon: bool) {
     let s = |name, len| Column::new(name, Kind::Str(len));
+    let i2 = |name| Column::new(name, Kind::Int16);
+    let i4 = |name| Column::new(name, Kind::Int32);
     db.table(
         "Property",
         vec![s("Property", 72).key(), s("Value", 0).localizable()],
@@ -71,6 +73,82 @@ pub(super) fn tables(db: &mut Database) {
             s("Source", 72).nullable(),
         ],
     );
+    // The Start menu shortcut, its AppUserModelID, and the HKCU value that is its
+    // component's key path (a per-user shortcut needs one).
+    db.table(
+        "Shortcut",
+        vec![
+            s("Shortcut", 72).key(),
+            s("Directory_", 72),
+            s("Name", 128).localizable(),
+            s("Component_", 72),
+            s("Target", 72),
+            s("Arguments", 255).nullable(),
+            s("Description", 255).nullable().localizable(),
+            i2("Hotkey").nullable(),
+            s("Icon_", 72).nullable(),
+            i2("IconIndex").nullable(),
+            i2("ShowCmd").nullable(),
+            s("WkDir", 72).nullable(),
+        ],
+    );
+    db.table(
+        "MsiShortcutProperty",
+        vec![
+            s("MsiShortcutProperty", 72).key(),
+            s("Shortcut_", 72),
+            s("PropertyKey", 0),
+            s("PropVariantValue", 0),
+            i2("Sequence").nullable(),
+        ],
+    );
+    db.table(
+        "Registry",
+        vec![
+            s("Registry", 72).key(),
+            i2("Root"),
+            s("Key", 255).localizable(),
+            s("Name", 255).nullable().localizable(),
+            s("Value", 0).nullable().localizable(),
+            s("Component_", 72),
+        ],
+    );
+    // A newer version installed refuses this one; an older one is removed first.
+    db.table(
+        "Upgrade",
+        vec![
+            s("UpgradeCode", 38).key(),
+            s("VersionMin", 20).nullable().key(),
+            s("VersionMax", 20).nullable().key(),
+            s("Language", 255).nullable().key(),
+            i4("Attributes").key(),
+            s("Remove", 255).nullable(),
+            s("ActionProperty", 72),
+        ],
+    );
+    db.table(
+        "LaunchCondition",
+        vec![
+            s("Condition", 255).key(),
+            s("Description", 255).localizable(),
+        ],
+    );
+    db.table(
+        "CustomAction",
+        vec![
+            s("Action", 72).key(),
+            i2("Type"),
+            s("Source", 72).nullable(),
+            s("Target", 255).nullable(),
+            i4("ExtendedType").nullable(),
+        ],
+    );
+    if icon {
+        db.table(
+            "Icon",
+            vec![s("Name", 72).key(), Column::new("Data", Kind::Binary)],
+        );
+    }
     for sequence in ["InstallExecuteSequence", "InstallUISequence"] {
         db.table(
             sequence,
@@ -83,29 +161,45 @@ pub(super) fn tables(db: &mut Database) {
     }
 }
 
+/// The icon's name in the Icon table; the extension tells Windows what it is.
+const ICON: &str = "product.ico";
+
 /// The standard actions, in the numbers the Windows Installer SDK's sequence tables use.
-const EXECUTE: [(&str, i32); 16] = [
+const EXECUTE: [(&str, i32); 25] = [
+    ("FindRelatedProducts", 25),
+    ("LaunchConditions", 100),
     ("CostInitialize", 800),
     ("FileCost", 900),
     ("CostFinalize", 1000),
+    ("SetARPINSTALLLOCATION", 1001),
+    ("MigrateFeatureStates", 1200),
     ("InstallValidate", 1400),
+    // Right after validation: the older version goes before anything of this one lands.
+    ("RemoveExistingProducts", 1401),
     ("InstallInitialize", 1500),
     ("ProcessComponents", 1600),
     ("UnpublishFeatures", 1800),
+    ("RemoveRegistryValues", 2600),
+    ("RemoveShortcuts", 3200),
     ("RemoveFiles", 3500),
     ("RemoveFolders", 3600),
     ("CreateFolders", 3700),
     ("InstallFiles", 4000),
+    ("CreateShortcuts", 4500),
+    ("WriteRegistryValues", 5000),
     ("RegisterUser", 6000),
     ("RegisterProduct", 6100),
     ("PublishFeatures", 6300),
     ("PublishProduct", 6400),
     ("InstallFinalize", 6600),
 ];
-const UI: [(&str, i32); 4] = [
+const UI: [(&str, i32); 7] = [
+    ("FindRelatedProducts", 25),
+    ("LaunchConditions", 100),
     ("CostInitialize", 800),
     ("FileCost", 900),
     ("CostFinalize", 1000),
+    ("MigrateFeatureStates", 1200),
     ("ExecuteAction", 1300),
 ];
 
@@ -114,8 +208,8 @@ pub(super) fn rows(
     spec: &Installer<'_>,
     version: &str,
     codes: (&str, &str),
-    directories: &[Directory],
-    files: &[File],
+    (directories, files): (&[Directory], &[File]),
+    extras: Extras,
 ) -> std::io::Result<()> {
     let (upgrade, product) = codes;
     let properties = [
@@ -128,7 +222,16 @@ pub(super) fn rows(
         // Settings → Apps offers Uninstall only; there is nothing to modify or repair.
         ("ARPNOMODIFY", String::from("1")),
         ("ARPNOREPAIR", String::from("1")),
+        // The upgrade rows' properties, kept when the install runs elevated.
+        (
+            "SecureCustomProperties",
+            String::from("NEWERFOUND;UPGRADEFOUND"),
+        ),
     ];
+    let mut properties: Vec<(&str, String)> = properties.to_vec();
+    if extras.icon.is_some() {
+        properties.push(("ARPPRODUCTICON", String::from(ICON)));
+    }
     db.rows(
         "Property",
         properties
@@ -180,11 +283,123 @@ pub(super) fn rows(
             Cell::Int(0),
         ]],
     )?;
+    // The shortcut's own component, in the Start menu folder, kept by an HKCU value.
+    let registry_key = format!("Software\\{}", spec.identifier);
+    db.rows(
+        "Component",
+        vec![vec![
+            text("shortcut"),
+            text(&name_uuid(
+                "component",
+                &[spec.identifier, "start menu shortcut"],
+            )),
+            text("ProgramMenuFolder"),
+            // 64-bit, key path in the registry (`msidbComponentAttributesRegistryKeyPath`).
+            Cell::Int(COMPONENT_64BIT | 4),
+            Cell::Null,
+            text("shortcut_installed"),
+        ]],
+    )?;
+    db.rows(
+        "Registry",
+        vec![vec![
+            text("shortcut_installed"),
+            Cell::Int(1),
+            text(&registry_key),
+            text("installed"),
+            text("#1"),
+            text("shortcut"),
+        ]],
+    )?;
+    db.rows(
+        "Shortcut",
+        vec![vec![
+            text("start_menu"),
+            text("ProgramMenuFolder"),
+            text(&extras.shortcut),
+            text("shortcut"),
+            text(&format!("[#{}]", extras.program)),
+            Cell::Null,
+            text(spec.product),
+            Cell::Null,
+            if extras.icon.is_some() {
+                text(ICON)
+            } else {
+                Cell::Null
+            },
+            if extras.icon.is_some() {
+                Cell::Int(0)
+            } else {
+                Cell::Null
+            },
+            Cell::Null,
+            text("INSTALLDIR"),
+        ]],
+    )?;
+    // `PKEY_AppUserModel_ID`: the identifier the running program also claims
+    // (`webview2/view.zig`), so the taskbar groups its windows under the shortcut.
+    db.rows(
+        "MsiShortcutProperty",
+        vec![vec![
+            text("aumid"),
+            text("start_menu"),
+            text("{9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3} 5"),
+            text(spec.identifier),
+            Cell::Null,
+        ]],
+    )?;
+    db.rows(
+        "Upgrade",
+        vec![
+            // Older versions: found, and removed by RemoveExistingProducts.
+            vec![
+                text(upgrade),
+                Cell::Null,
+                text(version),
+                Cell::Null,
+                Cell::Int(0),
+                Cell::Null,
+                text("UPGRADEFOUND"),
+            ],
+            // Newer ones: only detected (2), to refuse the downgrade below.
+            vec![
+                text(upgrade),
+                text(version),
+                Cell::Null,
+                Cell::Null,
+                Cell::Int(2),
+                Cell::Null,
+                text("NEWERFOUND"),
+            ],
+        ],
+    )?;
+    db.rows(
+        "LaunchCondition",
+        vec![vec![
+            text("NOT NEWERFOUND"),
+            text("A newer version of [ProductName] is already installed."),
+        ]],
+    )?;
+    // Type 51 sets a property: the folder Settings → Apps shows as the location.
+    db.rows(
+        "CustomAction",
+        vec![vec![
+            text("SetARPINSTALLLOCATION"),
+            Cell::Int(51),
+            text("ARPINSTALLLOCATION"),
+            text("[INSTALLDIR]"),
+            Cell::Null,
+        ]],
+    )?;
+    if let Some(bytes) = extras.icon {
+        db.rows("Icon", vec![vec![text(ICON), Cell::Bytes(bytes)]])?;
+    }
     db.rows(
         "FeatureComponents",
         files
             .iter()
             .map(|file| vec![text("Main"), text(&file.component)])
+            .chain(std::iter::once(vec![text("Main"), text("shortcut")]))
             .collect(),
     )?;
     db.rows(

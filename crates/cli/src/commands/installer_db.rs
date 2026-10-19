@@ -28,6 +28,10 @@ pub enum Kind {
     Int32,
     /// A string column with its maximum length (0 = unlimited).
     Str(u8),
+    /// A stream column (`Icon.Data`): the table stores 1, the bytes are the stream
+    /// `<table>.<key>` (read from a real database: `!Icon` held `1e 06 01 00`, the bytes
+    /// were in `Icon.ARPIco`).
+    Binary,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +73,7 @@ impl Column {
             Kind::Int16 => 0x2 | 0x400,
             Kind::Int32 => 0x4,
             Kind::Str(len) => 0x800 | 0x400 | i32::from(len),
+            Kind::Binary => 0x800,
         };
         let mut bits = base | 0x100;
         if self.localizable {
@@ -90,6 +95,8 @@ pub enum Cell {
     Null,
     Int(i32),
     Str(String),
+    /// A stream column's bytes.
+    Bytes(Vec<u8>),
 }
 
 pub fn text(value: &str) -> Cell {
@@ -183,6 +190,7 @@ impl Database {
                         i16::try_from(*value).is_ok_and(|v| v != i16::MIN)
                     }
                     (Cell::Int(value), Kind::Int32) => *value != i32::MIN,
+                    (Cell::Bytes(_), Kind::Binary) => true,
                     (Cell::Str(text), Kind::Str(len)) => {
                         !text.is_empty() && (len == 0 || text.chars().count() <= usize::from(len))
                     }
@@ -289,6 +297,28 @@ impl Database {
             .write_all(&data_bytes)?;
         comp.create_stream("\u{5}SummaryInformation")?
             .write_all(&summary_stream(self.summary, self.codepage))?;
+        // Stream columns: `<table>.<key>[.<key>…]`, beside the table.
+        for table in &self.tables {
+            for row in &table.rows {
+                for cell in row {
+                    let Cell::Bytes(bytes) = cell else { continue };
+                    let key: Vec<String> = table
+                        .columns
+                        .iter()
+                        .zip(row)
+                        .filter(|(column, _)| column.key)
+                        .map(|(_, cell)| match cell {
+                            Cell::Str(text) => text.clone(),
+                            Cell::Int(number) => number.to_string(),
+                            _ => String::new(),
+                        })
+                        .collect();
+                    let name = format!("{}.{}", table.name, key.join("."));
+                    comp.create_stream(stream_name(&name, false))?
+                        .write_all(bytes)?;
+                }
+            }
+        }
         for (name, bytes) in &self.streams {
             comp.create_stream(stream_name(name, false))?
                 .write_all(bytes)?;
@@ -366,6 +396,7 @@ fn table_stream(table: &Table, pool: &Pool) -> std::io::Result<Vec<u8>> {
             (Cell::Int(value), Kind::Int16) => u32::from((*value as u16) ^ 0x8000),
             (Cell::Int(value), _) => (*value as u32) ^ 0x8000_0000,
             (Cell::Str(text), _) => pool.id(text),
+            (Cell::Bytes(_), _) => 1,
         }
     };
     let keys: Vec<usize> = table
@@ -398,7 +429,7 @@ fn table_stream(table: &Table, pool: &Pool) -> std::io::Result<Vec<u8>> {
             match column.kind {
                 Kind::Int16 => out.extend_from_slice(&(value as u16).to_le_bytes()),
                 Kind::Int32 => out.extend_from_slice(&value.to_le_bytes()),
-                Kind::Str(_) => out.extend_from_slice(&(value as u16).to_le_bytes()),
+                Kind::Str(_) | Kind::Binary => out.extend_from_slice(&(value as u16).to_le_bytes()),
             }
         }
     }

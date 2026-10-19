@@ -60,8 +60,22 @@ pub struct Installer<'a> {
     pub version: &'a str,
     /// The publisher shown in Settings → Apps.
     pub manufacturer: &'a str,
+    /// The program's file name under `bin/` (`notes.exe`), for the Start menu shortcut.
+    pub program: &'a str,
+    /// `bundle.icon`, for the shortcut and Settings → Apps; the program's own icon without.
+    pub icon: Option<&'a Path>,
     pub mtime: u64,
     pub out: &'a Path,
+}
+
+/// What the installer adds beside the files.
+pub(super) struct Extras {
+    /// The program's File key, the shortcut's target.
+    pub program: String,
+    /// The shortcut's `short|long` name in the Start menu.
+    pub shortcut: String,
+    /// The `.ico` bytes, when `bundle.icon` names one.
+    pub icon: Option<Vec<u8>>,
 }
 
 /// One directory of the install, as the Directory table holds it.
@@ -96,7 +110,39 @@ pub fn write(spec: &Installer<'_>) -> Result<String, CliError> {
     digest.update(version.as_bytes());
     let package_code = uuid_from(&digest.finalize());
 
-    let mut texts: Vec<&str> = vec![spec.product, spec.manufacturer];
+    // The program the Start menu shortcut starts: `bin/<name>.exe` in the bundle.
+    let target = format!("bin/{}", spec.program);
+    let program = files
+        .iter()
+        .find(|file| file.relative == target)
+        .map(|file| file.key.clone())
+        .ok_or_else(|| {
+            CliError::Invalid(format!(
+                "the bundle has no {target} for the Start menu shortcut"
+            ))
+        })?;
+    let shortcut = ShortNames::default().named("ProgramMenuFolder", spec.product);
+    let icon = match spec.icon {
+        Some(path) => {
+            let bytes = std::fs::read(path).map_err(|error| io(path, "read the icon", &error))?;
+            // An .ico starts with reserved 0 and type 1 (`ICONDIR`).
+            if bytes.get(..4) != Some(&[0, 0, 1, 0][..]) {
+                return Err(CliError::Invalid(format!(
+                    "{} is not an .ico file",
+                    path.display()
+                )));
+            }
+            Some(bytes)
+        }
+        None => None,
+    };
+    let extras = Extras {
+        program,
+        shortcut,
+        icon,
+    };
+
+    let mut texts: Vec<&str> = vec![spec.product, spec.manufacturer, &extras.shortcut];
     texts.extend(directories.iter().map(|dir| dir.name.as_str()));
     texts.extend(files.iter().map(|file| file.name.as_str()));
     let codepage = codepage_for(&texts).ok_or_else(|| {
@@ -138,14 +184,14 @@ pub fn write(spec: &Installer<'_>) -> Result<String, CliError> {
     );
     // 2: read-only recommended, as a finished package is.
     db.summary(summary::SECURITY, Property::I4(2));
-    tables(&mut db);
+    tables(&mut db, extras.icon.is_some());
     rows(
         &mut db,
         spec,
         &version,
         (&upgrade, &product),
-        &directories,
-        &files,
+        (&directories, &files),
+        extras,
     )
     .map_err(failed)?;
     db.stream(CABINET, cabinet);
@@ -235,6 +281,12 @@ fn layout(spec: &Installer<'_>) -> Result<(Vec<Directory>, Vec<File>), CliError>
             key: "LocalAppDataFolder".into(),
             parent: "TARGETDIR".into(),
             name: "LocalApp".into(),
+        },
+        // The user's Start menu programs folder, for the shortcut.
+        Directory {
+            key: "ProgramMenuFolder".into(),
+            parent: "TARGETDIR".into(),
+            name: ".".into(),
         },
         Directory {
             key: "ProgramsDir".into(),
@@ -461,6 +513,10 @@ mod tests {
             scratch.path().join("one.msi"),
             scratch.path().join("two.msi"),
         );
+        // An `ICONDIR` header is all the writer checks; the bytes go in as they are.
+        let icon = scratch.path().join("notes.ico");
+        std::fs::write(&icon, [0, 0, 1, 0, 1, 0, 16, 16])
+            .map_err(|error| lepton_orchestrator::testing::fail("the icon", error))?;
         let make = |out| Installer {
             bundle: &tree,
             skip: &[".lepton-package"],
@@ -468,12 +524,45 @@ mod tests {
             product: "Notes",
             version: "1.2.3",
             manufacturer: "Lepton",
+            program: "notes.exe",
+            icon: Some(&icon),
             mtime: 0,
             out,
         };
         let first = assert_ok!(write(&make(&one)), "first");
         let second = assert_ok!(write(&make(&two)), "second");
         assert_eq!(first, second);
+
+        let mut package = assert_ok!(::msi::open(&one), "reads back");
+        for table in [
+            "Shortcut",
+            "MsiShortcutProperty",
+            "Registry",
+            "Upgrade",
+            "LaunchCondition",
+            "CustomAction",
+            "Icon",
+        ] {
+            ensure!(package.has_table(table), "{table} is written");
+        }
+        ensure!(
+            package.has_stream("Icon.product.ico"),
+            "the icon's bytes are the Icon row's stream"
+        );
+        let target = assert_ok!(
+            package.select_rows(::msi::Select::table("Shortcut")),
+            "shortcut"
+        )
+        .map(|row| row[4].as_str().unwrap_or_default().to_owned())
+        .collect::<Vec<_>>();
+        assert_eq!(target, vec![String::from("[#f1]")]);
+        let aumid = assert_ok!(
+            package.select_rows(::msi::Select::table("MsiShortcutProperty")),
+            "aumid"
+        )
+        .map(|row| row[3].as_str().unwrap_or_default().to_owned())
+        .collect::<Vec<_>>();
+        assert_eq!(aumid, vec![String::from("style.lepton.notes")]);
 
         // Laid out again from its own tables and cabinet, as `--verify` does.
         let unpacked = scratch.path().join("unpacked");
