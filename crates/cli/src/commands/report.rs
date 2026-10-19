@@ -126,6 +126,16 @@ impl Report {
         }
     }
 
+    /// A report that never paints, whatever stdout is: for text compared in tests.
+    #[cfg(test)]
+    pub fn plain() -> Self {
+        Self {
+            painter: Painter {
+                depth: crate::style::Depth::None,
+            },
+        }
+    }
+
     /// `  ◉ lepton  run · v0.1.7` and a blank line.
     pub fn header(&self, what: &str) {
         println!("{}", self.painter.header(what));

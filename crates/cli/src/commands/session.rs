@@ -65,12 +65,16 @@ pub fn span(duration: Duration) -> String {
 
 /// The receipt, as the lines `lepton dev` prints.
 pub fn receipt(session: &Session) -> String {
+    receipt_in(super::report::Report::new(), session)
+}
+
+/// The receipt painted by `report`; colour follows stdout only through [`receipt`].
+fn receipt_in(report: super::report::Report, session: &Session) -> String {
     let builds = if session.core_builds == 1 {
         String::from("1 time")
     } else {
         format!("{} times", session.core_builds)
     };
-    let report = super::report::Report::new();
     [
         report.title("session"),
         report.fact_text("window open", &span(session.window_open)),
@@ -91,7 +95,7 @@ pub fn receipt(session: &Session) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Session, edited_since, receipt, span};
+    use super::{Session, edited_since, receipt_in, span};
     use lepton_orchestrator::testing::{Failure, Scratch, fail};
     use lepton_orchestrator::{assert_contains, assert_eq};
     use std::time::{Duration, SystemTime};
@@ -133,12 +137,17 @@ mod tests {
 
     #[test]
     fn the_receipt_states_what_was_measured() -> Result<(), Failure> {
-        let text = receipt(&Session {
-            window_open: Duration::from_secs(252),
-            core_builds: 1,
-            core_build_time: Duration::from_millis(3200),
-            frontend_edits: 7,
-        });
+        // Plain, so the test reads the same from a terminal (where stdout is a TTY and the
+        // detected report paints) as from a pipe.
+        let text = receipt_in(
+            super::super::report::Report::plain(),
+            &Session {
+                window_open: Duration::from_secs(252),
+                core_builds: 1,
+                core_build_time: Duration::from_millis(3200),
+                frontend_edits: 7,
+            },
+        );
         assert_contains!(&text, "◆ window open    4m 12s");
         assert_contains!(&text, "◆ core built     1 time, 3.2 s");
         assert_contains!(&text, "◆ frontend edits 7 file(s)");

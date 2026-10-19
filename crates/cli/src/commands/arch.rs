@@ -221,7 +221,7 @@ mod tests {
 
     fn package<'a>(scratch: &'a Scratch, depends: &'a [String]) -> Package<'a> {
         Package {
-            bundle: scratch.path().join("b").leak(),
+            bundle: Box::leak(scratch.path().join("b").into_boxed_path()),
             skip: &[".lepton-package"],
             name: "notes",
             version: "1.2.0-beta.1",
