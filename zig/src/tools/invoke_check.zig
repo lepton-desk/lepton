@@ -8,6 +8,7 @@
 //! code: no stand-in for the core.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const core = @import("lepton_core");
 const invoke = core.webviewInvoke;
 const registry = core.webviewRegistry;
@@ -40,7 +41,9 @@ fn count(state: *Calls, _: []const u8, out: []u8) registry.HandlerError!usize {
 
 pub fn main(init: std.process.Init.Minimal) !void {
     const granted = registered.bind(&calls);
-    var args = init.args.iterate();
+    // Windows has no argv to borrow: its command line is decoded into a buffer.
+    var args = try init.args.iterateAllocator(std.heap.page_allocator);
+    defer args.deinit();
     _ = args.next();
     const mode = args.next() orelse return usage();
     if (std.mem.eql(u8, mode, "layout")) {
@@ -125,13 +128,12 @@ fn usage() error{Usage}!void {
 fn readExactly(buffer: []u8) error{ ReadFailed, TruncatedRequest }!bool {
     var filled: usize = 0;
     while (filled < buffer.len) {
-        const got = std.c.read(0, buffer[filled..].ptr, buffer.len - filled);
-        if (got < 0) return error.ReadFailed;
+        const got = try readSome(buffer[filled..]);
         if (got == 0) {
             if (filled == 0) return false;
             return error.TruncatedRequest;
         }
-        filled += @intCast(got);
+        filled += got;
     }
     return true;
 }
@@ -139,8 +141,46 @@ fn readExactly(buffer: []u8) error{ ReadFailed, TruncatedRequest }!bool {
 fn writeAll(bytes: []const u8) error{WriteFailed}!void {
     var sent: usize = 0;
     while (sent < bytes.len) {
-        const wrote = std.c.write(1, bytes[sent..].ptr, bytes.len - sent);
-        if (wrote <= 0) return error.WriteFailed;
-        sent += @intCast(wrote);
+        sent += try writeSome(bytes[sent..]);
     }
+}
+
+// stdin and stdout as raw bytes. On Windows the C runtime's descriptors are in text mode
+// (a 0x0A byte in a frame would gain a 0x0D), so the handles are read and written directly.
+const windows = builtin.os.tag == .windows;
+extern "kernel32" fn GetStdHandle(which: u32) callconv(.winapi) ?*anyopaque;
+extern "kernel32" fn ReadFile(file: ?*anyopaque, buffer: [*]u8, len: u32, read: *u32, overlapped: ?*anyopaque) callconv(.winapi) c_int;
+extern "kernel32" fn WriteFile(file: ?*anyopaque, buffer: [*]const u8, len: u32, wrote: *u32, overlapped: ?*anyopaque) callconv(.winapi) c_int;
+extern "kernel32" fn GetLastError() callconv(.winapi) u32;
+const std_input: u32 = @bitCast(@as(i32, -10));
+const std_output: u32 = @bitCast(@as(i32, -11));
+const error_broken_pipe = 109;
+
+/// Bytes read into `buffer`; 0 at the end of input.
+fn readSome(buffer: []u8) error{ReadFailed}!usize {
+    if (windows) {
+        var got: u32 = 0;
+        const asked: u32 = @intCast(@min(buffer.len, std.math.maxInt(u32)));
+        if (ReadFile(GetStdHandle(std_input), buffer.ptr, asked, &got, null) == 0) {
+            // A pipe whose writer closed reports the end as an error.
+            if (GetLastError() == error_broken_pipe) return 0;
+            return error.ReadFailed;
+        }
+        return got;
+    }
+    const got = std.c.read(0, buffer.ptr, buffer.len);
+    if (got < 0) return error.ReadFailed;
+    return @intCast(got);
+}
+
+fn writeSome(bytes: []const u8) error{WriteFailed}!usize {
+    if (windows) {
+        var wrote: u32 = 0;
+        const asked: u32 = @intCast(@min(bytes.len, std.math.maxInt(u32)));
+        if (WriteFile(GetStdHandle(std_output), bytes.ptr, asked, &wrote, null) == 0 or wrote == 0) return error.WriteFailed;
+        return wrote;
+    }
+    const wrote = std.c.write(1, bytes.ptr, bytes.len);
+    if (wrote <= 0) return error.WriteFailed;
+    return @intCast(wrote);
 }

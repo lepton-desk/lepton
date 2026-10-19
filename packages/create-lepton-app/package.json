@@ -32,7 +32,7 @@
     "@lepton-desk/cli": "0.1.9-beta.0"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.*\""
   },
   "publishConfig": {
     "access": "public"

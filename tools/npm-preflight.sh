@@ -8,6 +8,10 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 plugins=(plugin-os plugin-clipboard plugin-fs plugin-dialog)
 packages=(cli-linux-x64 cli-win32-x64 cli api "${plugins[@]}" create-lepton-app)
+# Published from Windows first (docs/yayin.md): the Windows binary, and the packages whose
+# whole prepublish chain passes there. plugin-os and plugin-fs carry Linux-only Zig
+# (`uname`, `openat2`), so they, the Linux binary, `cli` and create-lepton-app go from here.
+from_windows=(cli-win32-x64 api plugin-clipboard plugin-dialog)
 step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'preflight: %s\n' "$*" >&2; exit 1; }
 
@@ -48,8 +52,7 @@ step "not already published"
 for package in "${packages[@]}"; do
   name="$(node -p "require('$root/packages/$package/package.json').name" 2>/dev/null || echo "@lepton-desk/$package")"
   if published="$(npm view "$name@$version" version 2>/dev/null)" && [ -n "$published" ]; then
-    # The Windows binary goes out first, from Windows; the rest follow from here.
-    if [ "$package" = cli-win32-x64 ]; then
+    if [[ " ${from_windows[*]} " == *" $package "* ]]; then
       echo "$name@$version: published from Windows"
       continue
     fi
@@ -84,10 +87,10 @@ for plugin in "${plugins[@]}"; do
 done
 
 step "create-lepton-app: test, lint"
-(cd "$root/packages/create-lepton-app" && LEPTON_BINARY="$root/target/release/lepton" node --test test/ && "$root/packages/api/node_modules/.bin/biome" check .)
+(cd "$root/packages/create-lepton-app" && LEPTON_BINARY="$root/target/release/lepton" node --test "test/*.test.*" && "$root/packages/api/node_modules/.bin/biome" check .)
 
 step "@lepton-desk/cli: test, lint"
-(cd "$root/packages/cli" && node --test test/ && "$root/packages/api/node_modules/.bin/biome" check .)
+(cd "$root/packages/cli" && node --test "test/*.test.*" && "$root/packages/api/node_modules/.bin/biome" check .)
 
 step "what each tarball will contain"
 for package in "${packages[@]}"; do

@@ -41,7 +41,7 @@
     "build": "tsc -p tsconfig.json",
     "generate": "../../zig/zig-out/bin/lepton-invoke-check types > src/commands.gen.ts",
     "check": "biome check . && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.*\"",
     "prepublishOnly": "pnpm run build && pnpm run check && pnpm test"
   },
   "devDependencies": {

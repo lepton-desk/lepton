@@ -42,49 +42,80 @@ npm whoami
 her komuta `--tag beta`, `1.0.0-rc.N` için `--tag next` (npm 11 ön sürümü etiketsiz yayımlamaz).
 Eklentilerin `peerDependencies` (`^<sürüm>`) ve `cli`'nin `optionalDependencies`'i de sürümle birlikte artar.
 
-Önce Windows'ta (dual-boot, `D:\lepton`; `git pull` ile aynı commit), PowerShell'de:
+Yayın iki makineye bölünür; aynı commit'ten (`git pull`). **Önce Windows**, sonra Linux: `cli` iki platform
+paketine, `create-lepton-app` `cli`'ye bağlı. Windows'ta yalnız orada `prepublishOnly` zinciri baştan sona geçen
+paketler yayımlanır; `plugin-os` (`uname`) ve `plugin-fs` (`openat2`) Linux'a özgü Zig taşıdığı için Linux'ta kalır.
+Ön kontrol Windows'tan yayımlananları (`from_windows`) "published from Windows" diye geçer.
 
-```
+### 4a. Windows (`D:/lepton`, PowerShell 5.1 — `&&` yok, komutlar ayrı ya da `;` + `if ($?)`)
+
+Hazırlık:
+
+```powershell
 cargo build --release --bin lepton
+```
+
+```powershell
 node packages/cli/scripts/stage.mjs
-cd packages/cli-win32-x64; npm pack --dry-run; npm publish --tag beta
 ```
 
-`stage.mjs` ikilinin `lepton --version`'ının paket sürümüyle aynı olduğunu denetler. Lisans
-metinleri Linux'taki ön kontrolde kopyalanır; Windows klonunda yoksa kökteki `LICENSE-*`'ı pakete
-kopyalayın. Sonra Linux'ta ön kontrol bu paketi "already on npm" diye geçer.
-
-```bash
-cd packages/cli-linux-x64 && npm publish
+```powershell
+cd D:/lepton/zig; if ($?) { zig build invoke-check }
 ```
 
-```bash
-cd packages/cli && npm publish
+```powershell
+cd D:/lepton; foreach ($p in 'cli-win32-x64','api','plugin-clipboard','plugin-dialog') { Copy-Item LICENSE-MIT, LICENSE-APACHE "packages/$p/" }
 ```
 
-```bash
-cd packages/api && npm publish
+Yayın, bu sırayla (`api` ve eklentiler yayından önce kendi `prepublishOnly`'lerini çalıştırır: derleme + denetim + test):
+
+```powershell
+cd D:/lepton/packages/cli-win32-x64; if ($?) { npm publish --tag beta }
 ```
 
-```bash
-cd packages/plugin-os && npm publish
+```powershell
+cd D:/lepton/packages/api; if ($?) { npm publish --tag beta }
 ```
 
-```bash
-cd packages/plugin-clipboard && npm publish
+```powershell
+cd D:/lepton/packages/plugin-clipboard; if ($?) { npm publish --tag beta }
 ```
 
-```bash
-cd packages/plugin-fs && npm publish
+```powershell
+cd D:/lepton/packages/plugin-dialog; if ($?) { npm publish --tag beta }
 ```
 
-```bash
-cd packages/plugin-dialog && npm publish
-```
+`stage.mjs` ikilinin `lepton --version`'ının paket sürümüyle aynı olduğunu denetler.
+
+### 4b. Linux (EndeavourOS)
 
 ```bash
-cd packages/create-lepton-app && npm publish
+tools/npm-preflight.sh
 ```
+
+Windows'tan çıkan dört paketi "published from Windows" diye geçmeli, sonu `preflight: ready to publish`.
+
+```bash
+cd packages/cli-linux-x64 && npm publish --tag beta
+```
+
+```bash
+cd packages/cli && npm publish --tag beta
+```
+
+```bash
+cd packages/plugin-os && npm publish --tag beta
+```
+
+```bash
+cd packages/plugin-fs && npm publish --tag beta
+```
+
+```bash
+cd packages/create-lepton-app && npm publish --tag beta
+```
+
+Kararlı sürümde (`latest`) aynı komutlar `--tag beta` olmadan.
 
 `publishConfig.access: public` her pakette var; `--access public` gerekmez.
 - `E404 Not Found - PUT` paket yokluğu değil, oturum yok demek (`npm whoami` 401 verir): `npm login`.

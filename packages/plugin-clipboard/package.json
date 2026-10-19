@@ -31,7 +31,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "biome check . && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.*\"",
     "prepublishOnly": "pnpm run build && pnpm run check && pnpm test"
   },
   "devDependencies": {
