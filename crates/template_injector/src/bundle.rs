@@ -24,11 +24,13 @@ pub enum BundleTarget {
     Deb,
     /// `<name>-<version>-windows-<arch>.zip`: the install prefix, for Windows.
     Zip,
+    /// A Windows Installer package (`.msi`), written without WiX: a per-user install.
+    Msi,
 }
 
 impl BundleTarget {
     /// Every format, in the spelling the configuration uses.
-    pub const ALL: [Self; 4] = [Self::TarGz, Self::Arch, Self::Deb, Self::Zip];
+    pub const ALL: [Self; 5] = [Self::TarGz, Self::Arch, Self::Deb, Self::Zip, Self::Msi];
 
     /// The spelling in `bundle.targets`.
     pub fn name(self) -> &'static str {
@@ -37,12 +39,18 @@ impl BundleTarget {
             Self::Arch => "arch",
             Self::Deb => "deb",
             Self::Zip => "zip",
+            Self::Msi => "msi",
         }
     }
 
     /// Whether the format is a Linux package (Arch, Debian): only a Linux build can be one.
     pub fn linux_only(self) -> bool {
         matches!(self, Self::Arch | Self::Deb)
+    }
+
+    /// Whether the format installs on Windows only (it carries a Windows build).
+    pub fn windows_only(self) -> bool {
+        matches!(self, Self::Msi)
     }
 
     pub fn parse(text: &str) -> Option<Self> {
@@ -197,7 +205,7 @@ mod tests {
             "unknown format"
         );
         assert_contains!(&error.reason, "\"appimage\"");
-        assert_contains!(&error.reason, "tar.gz, arch, deb, zip");
+        assert_contains!(&error.reason, "tar.gz, arch, deb, zip, msi");
         Ok(())
     }
 

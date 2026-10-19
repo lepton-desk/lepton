@@ -18,6 +18,13 @@ ruzstd = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }
+msi = { workspace = true }
+cab = { workspace = true }
+# The installer's compound file (`installer_db.rs` writes the database itself).
+cfb = "0.14"
+# The cabinet's fixed time stamp and the installer's name-based GUIDs (both crates `msi`/`cab` use).
+time = { version = "0.3", default-features = false }
+uuid = { version = "1", default-features = false }
 inquire = "0.9"
 lepton-core-vendoring = { path = "../core_vendoring" }
 lepton-orchestrator = { path = "../orchestrator" }

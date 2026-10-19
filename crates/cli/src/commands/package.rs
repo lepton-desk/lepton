@@ -214,6 +214,29 @@ pub fn write_target(
                 format!("{}  {} bytes  sha256 {digest}", out.display(), size),
             ))
         }
+        BundleTarget::Msi => {
+            let out = spec.out.join(format!("{}.msi", bundle_name(spec)));
+            // The publisher Settings → Apps shows: `bundle.maintainer` when given, else the
+            // product's own name — never an invented company.
+            let manufacturer = formats.maintainer.as_deref().unwrap_or(&spec.product);
+            let digest = super::installer::write(&super::installer::Installer {
+                bundle,
+                skip: &[MARKER],
+                identifier: &spec.app_id,
+                product: &spec.product,
+                version: &spec.version,
+                manufacturer,
+                mtime: super::archive::release_time(),
+                out: &out,
+            })?;
+            let size = std::fs::metadata(&out)
+                .map_err(|error| io(&out, "inspect", &error))?
+                .len();
+            Ok((
+                out.clone(),
+                format!("{}  {} bytes  sha256 {digest}", out.display(), size),
+            ))
+        }
         BundleTarget::Zip => {
             let name = bundle_name(spec);
             let out = spec.out.join(format!("{name}.zip"));

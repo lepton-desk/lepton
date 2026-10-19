@@ -47,6 +47,10 @@ nix = { version = "0.31", default-features = false, features = ["signal"] }
 # 2026-10-18). A job object with kill-on-close ends the whole tree when `lepton` ends, even
 # when it is killed outright (`Stop-Process -Force`, measured) — the kernel closes the handle.
 win32job = "2.0.3"
+# Windows Installer packages, written in Rust (`lepton package`, `msi` target): no WiX, whose
+# v6+ releases carry the Open Source Maintenance Fee and v3-v5 are out of support (2026-10-19).
+msi = "0.10"
+cab = "0.6"
 
 # `lepton package` writes release archives itself, with no `tar`/`gzip` subprocess: the
 # entries, their order, owners and times are chosen here, so two packages of one build

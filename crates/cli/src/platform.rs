@@ -75,8 +75,16 @@ pub fn isolated_directories(home: &Path) -> Vec<PathBuf> {
 }
 
 /// Whether this system's build can be packaged as `target`: the Arch and Debian formats
-/// carry a Linux build and are refused elsewhere.
+/// carry a Linux build and are refused elsewhere, as the MSI (a Windows build) is off
+/// Windows.
 pub fn packages_as(target: lepton_template_injector::BundleTarget) -> Result<(), String> {
+    if target.windows_only() && !cfg!(windows) {
+        return Err(format!(
+            "\"{}\" installs a Windows build and this is {}; package it on Windows",
+            target.name(),
+            std::env::consts::OS
+        ));
+    }
     if target.linux_only() && !cfg!(target_os = "linux") {
         return Err(format!(
             "\"{}\" is a Linux package and this is {}; list \"zip\" in \"bundle.targets\" here",
@@ -138,6 +146,11 @@ mod tests {
         ensure!(
             deb.is_ok() == cfg!(target_os = "linux"),
             "a .deb only on Linux: {deb:?}"
+        );
+        let msi = packages_as(BundleTarget::Msi);
+        ensure!(
+            msi.is_ok() == cfg!(windows),
+            "an .msi only on Windows: {msi:?}"
         );
         Ok(())
     }

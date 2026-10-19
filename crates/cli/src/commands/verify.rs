@@ -128,6 +128,11 @@ pub fn unpack(artifact: &Path, target: BundleTarget, into: &Path) -> Result<Path
             extract(decoder, artifact, into)?;
             Ok(into.join("usr"))
         }
+        BundleTarget::Msi => {
+            // The installed tree, laid out from the package's own tables and cabinet —
+            // without `msiexec`, so a verify registers nothing on this machine.
+            super::installer::extract(artifact, into)
+        }
         BundleTarget::Zip => {
             super::zip::unpack(artifact, into)?;
             let top = artifact
