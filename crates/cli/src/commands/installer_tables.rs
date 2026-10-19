@@ -4,158 +4,194 @@
 use super::installer::{COMPONENT_64BIT, Directory, Extras, File, Installer, LANGUAGE, name_uuid};
 use super::installer_db::{Cell, Column, Database, Kind, text};
 
-/// The standard tables this package uses, as the Windows Installer SDK defines them.
+/// The standard tables this package uses, as the Windows Installer SDK defines them — type,
+/// category, range, foreign key and set (the SDK schema's `_Validation`), so ICE checks the
+/// rows against what the tables mean.
 pub(super) fn tables(db: &mut Database, icon: bool) {
     let s = |name, len| Column::new(name, Kind::Str(len));
     let i2 = |name| Column::new(name, Kind::Int16);
     let i4 = |name| Column::new(name, Kind::Int32);
+    let id = |name| s(name, 72).cat("Identifier");
     db.table(
         "Property",
-        vec![s("Property", 72).key(), s("Value", 0).localizable()],
+        vec![
+            id("Property").key(),
+            s("Value", 0).localizable().cat("Text"),
+        ],
     );
     db.table(
         "Directory",
         vec![
-            s("Directory", 72).key(),
-            s("Directory_Parent", 72).nullable(),
-            s("DefaultDir", 255).localizable(),
+            id("Directory").key(),
+            id("Directory_Parent").nullable().refers("Directory", 1),
+            s("DefaultDir", 255).localizable().cat("DefaultDir"),
         ],
     );
     db.table(
         "Component",
         vec![
-            s("Component", 72).key(),
-            s("ComponentId", 38).nullable(),
-            s("Directory_", 72),
-            Column::new("Attributes", Kind::Int16),
-            s("Condition", 255).nullable(),
-            s("KeyPath", 72).nullable(),
+            id("Component").key(),
+            s("ComponentId", 38).nullable().cat("Guid"),
+            id("Directory_").refers("Directory", 1),
+            i2("Attributes"),
+            s("Condition", 255).nullable().cat("Condition"),
+            id("KeyPath")
+                .nullable()
+                .refers("File;Registry;ODBCDataSource", 1),
         ],
     );
     db.table(
         "Feature",
         vec![
-            s("Feature", 38).key(),
-            s("Feature_Parent", 38).nullable(),
-            s("Title", 64).nullable().localizable(),
-            s("Description", 255).nullable().localizable(),
-            Column::new("Display", Kind::Int16).nullable(),
-            Column::new("Level", Kind::Int16),
-            s("Directory_", 72).nullable(),
-            Column::new("Attributes", Kind::Int16),
+            s("Feature", 38).key().cat("Identifier"),
+            s("Feature_Parent", 38)
+                .nullable()
+                .cat("Identifier")
+                .refers("Feature", 1),
+            s("Title", 64).nullable().localizable().cat("Text"),
+            s("Description", 255).nullable().localizable().cat("Text"),
+            i2("Display").nullable().range(0, 32767),
+            i2("Level").range(0, 32767),
+            s("Directory_", 72)
+                .nullable()
+                .cat("UpperCase")
+                .refers("Directory", 1),
+            i2("Attributes").set(
+                "0;1;2;4;5;6;8;9;10;16;17;18;20;21;22;24;25;26;32;33;34;36;37;38;48;49;50;52;53;54",
+            ),
         ],
     );
     db.table(
         "FeatureComponents",
-        vec![s("Feature_", 38).key(), s("Component_", 72).key()],
+        vec![
+            s("Feature_", 38)
+                .key()
+                .cat("Identifier")
+                .refers("Feature", 1),
+            id("Component_").key().refers("Component", 1),
+        ],
     );
     db.table(
         "File",
         vec![
-            s("File", 72).key(),
-            s("Component_", 72),
-            s("FileName", 255).localizable(),
-            Column::new("FileSize", Kind::Int32),
-            s("Version", 72).nullable(),
-            s("Language", 20).nullable(),
-            Column::new("Attributes", Kind::Int16).nullable(),
-            Column::new("Sequence", Kind::Int32),
+            id("File").key(),
+            id("Component_").refers("Component", 1),
+            s("FileName", 255).localizable().cat("Filename"),
+            i4("FileSize").range(0, 2_147_483_647),
+            s("Version", 72).nullable().cat("Version").refers("File", 1),
+            s("Language", 20).nullable().cat("Language"),
+            i2("Attributes").nullable().range(0, 32767),
+            i4("Sequence").range(1, 2_147_483_647),
         ],
     );
     db.table(
         "Media",
         vec![
-            Column::new("DiskId", Kind::Int16).key(),
-            Column::new("LastSequence", Kind::Int32),
-            s("DiskPrompt", 64).nullable().localizable(),
-            s("Cabinet", 255).nullable(),
-            s("VolumeLabel", 32).nullable(),
-            s("Source", 72).nullable(),
+            i2("DiskId").key().range(1, 32767),
+            i4("LastSequence").range(0, 2_147_483_647),
+            s("DiskPrompt", 64).nullable().localizable().cat("Text"),
+            s("Cabinet", 255).nullable().cat("Cabinet"),
+            s("VolumeLabel", 32).nullable().cat("Text"),
+            s("Source", 72).nullable().cat("Property"),
         ],
     );
-    // The Start menu shortcut, its AppUserModelID, and the HKCU value that is its
-    // component's key path (a per-user shortcut needs one).
+    // The Start menu shortcut, its AppUserModelID, and the HKCU values that are the key
+    // paths of every component (a per-user component must have one — ICE38).
     db.table(
         "Shortcut",
         vec![
-            s("Shortcut", 72).key(),
-            s("Directory_", 72),
-            s("Name", 128).localizable(),
-            s("Component_", 72),
-            s("Target", 72),
-            s("Arguments", 255).nullable(),
-            s("Description", 255).nullable().localizable(),
-            i2("Hotkey").nullable(),
-            s("Icon_", 72).nullable(),
-            i2("IconIndex").nullable(),
-            i2("ShowCmd").nullable(),
-            s("WkDir", 72).nullable(),
+            id("Shortcut").key(),
+            id("Directory_").refers("Directory", 1),
+            s("Name", 128).localizable().cat("Filename"),
+            id("Component_").refers("Component", 1),
+            s("Target", 72).cat("Shortcut"),
+            s("Arguments", 255).nullable().cat("Formatted"),
+            s("Description", 255).nullable().localizable().cat("Text"),
+            i2("Hotkey").nullable().range(0, 32767),
+            id("Icon_").nullable().refers("Icon", 1),
+            i2("IconIndex").nullable().range(-32767, 32767),
+            i2("ShowCmd").nullable().set("1;3;7"),
+            id("WkDir").nullable(),
         ],
     );
     db.table(
         "MsiShortcutProperty",
         vec![
-            s("MsiShortcutProperty", 72).key(),
-            s("Shortcut_", 72),
-            s("PropertyKey", 0),
-            s("PropVariantValue", 0),
-            i2("Sequence").nullable(),
+            id("MsiShortcutProperty").key(),
+            id("Shortcut_").refers("Shortcut", 1),
+            s("PropertyKey", 0).cat("Formatted"),
+            s("PropVariantValue", 0).cat("Formatted"),
+            i2("Sequence").nullable().range(0, 32767),
         ],
     );
     db.table(
         "Registry",
         vec![
-            s("Registry", 72).key(),
-            i2("Root"),
-            s("Key", 255).localizable(),
-            s("Name", 255).nullable().localizable(),
-            s("Value", 0).nullable().localizable(),
-            s("Component_", 72),
+            id("Registry").key(),
+            i2("Root").range(-1, 3),
+            s("Key", 255).localizable().cat("RegPath"),
+            s("Name", 255).nullable().localizable().cat("Formatted"),
+            s("Value", 0).nullable().localizable().cat("Formatted"),
+            id("Component_").refers("Component", 1),
+        ],
+    );
+    // The folders this package makes in the profile, removed when it goes (ICE64).
+    db.table(
+        "RemoveFile",
+        vec![
+            id("FileKey").key(),
+            id("Component_").refers("Component", 1),
+            s("FileName", 255)
+                .nullable()
+                .localizable()
+                .cat("WildCardFilename"),
+            id("DirProperty"),
+            i2("InstallMode").set("1;2;3"),
         ],
     );
     // A newer version installed refuses this one; an older one is removed first.
     db.table(
         "Upgrade",
         vec![
-            s("UpgradeCode", 38).key(),
-            s("VersionMin", 20).nullable().key(),
-            s("VersionMax", 20).nullable().key(),
-            s("Language", 255).nullable().key(),
-            i4("Attributes").key(),
-            s("Remove", 255).nullable(),
-            s("ActionProperty", 72),
+            s("UpgradeCode", 38).key().cat("Guid"),
+            s("VersionMin", 20).nullable().key().cat("Text"),
+            s("VersionMax", 20).nullable().key().cat("Text"),
+            s("Language", 255).nullable().key().cat("Language"),
+            i4("Attributes").key().range(0, 2_147_483_647),
+            s("Remove", 255).nullable().cat("Formatted"),
+            s("ActionProperty", 72).cat("UpperCase"),
         ],
     );
     db.table(
         "LaunchCondition",
         vec![
-            s("Condition", 255).key(),
-            s("Description", 255).localizable(),
+            s("Condition", 255).key().cat("Condition"),
+            s("Description", 255).localizable().cat("Formatted"),
         ],
     );
     db.table(
         "CustomAction",
         vec![
-            s("Action", 72).key(),
-            i2("Type"),
-            s("Source", 72).nullable(),
-            s("Target", 255).nullable(),
-            i4("ExtendedType").nullable(),
+            id("Action").key(),
+            i2("Type").range(1, 32767),
+            s("Source", 72).nullable().cat("CustomSource"),
+            s("Target", 255).nullable().cat("Formatted"),
+            i4("ExtendedType").nullable().range(0, 2_147_483_647),
         ],
     );
     if icon {
         db.table(
             "Icon",
-            vec![s("Name", 72).key(), Column::new("Data", Kind::Binary)],
+            vec![id("Name").key(), Column::new("Data", Kind::Binary)],
         );
     }
     for sequence in ["InstallExecuteSequence", "InstallUISequence"] {
         db.table(
             sequence,
             vec![
-                s("Action", 72).key(),
-                s("Condition", 255).nullable(),
-                Column::new("Sequence", Kind::Int16).nullable(),
+                id("Action").key(),
+                s("Condition", 255).nullable().cat("Condition"),
+                i2("Sequence").nullable().range(-4, 32767),
             ],
         );
     }
@@ -254,6 +290,10 @@ pub(super) fn rows(
             .collect(),
     )?;
     let sequence_of = |index: usize| i32::try_from(index + 1).unwrap_or(i32::MAX);
+    // Every file is in the profile, so every component's key path is an HKCU value, one per
+    // component under `Software\<identifier>\Components` (ICE38); the file is still the
+    // component's only file, and the value goes with it.
+    let components_key = format!("Software\\{}\\Components", spec.identifier);
     db.rows(
         "Component",
         files
@@ -263,9 +303,44 @@ pub(super) fn rows(
                     text(&file.component),
                     text(&name_uuid("component", &[spec.identifier, &file.relative])),
                     text(&file.directory),
-                    Cell::Int(COMPONENT_64BIT),
+                    Cell::Int(COMPONENT_64BIT | 4),
                     Cell::Null,
-                    text(&file.key),
+                    text(&format!("r_{}", file.component)),
+                ]
+            })
+            .collect(),
+    )?;
+    db.rows(
+        "Registry",
+        files
+            .iter()
+            .map(|file| {
+                vec![
+                    text(&format!("r_{}", file.component)),
+                    Cell::Int(1),
+                    text(&components_key),
+                    text(&file.component),
+                    text("#1"),
+                    text(&file.component),
+                ]
+            })
+            .collect(),
+    )?;
+    // The folders made in the profile go on uninstall (ICE64): the program's own and every
+    // one below it, and `%LOCALAPPDATA%\Programs` when nothing else is left in it.
+    let profile = ["TARGETDIR", "LocalAppDataFolder", "ProgramMenuFolder"];
+    db.rows(
+        "RemoveFile",
+        directories
+            .iter()
+            .filter(|dir| !profile.contains(&dir.key.as_str()))
+            .map(|dir| {
+                vec![
+                    text(&format!("rm_{}", dir.key)),
+                    text("shortcut"),
+                    Cell::Null,
+                    text(&dir.key),
+                    Cell::Int(2),
                 ]
             })
             .collect(),
@@ -311,13 +386,19 @@ pub(super) fn rows(
             text("shortcut"),
         ]],
     )?;
+    // The shortcut belongs to its target's component (ICE69): it comes and goes with the
+    // program, whose key path is an HKCU value (ICE43).
+    let program_component = files
+        .iter()
+        .find(|file| file.key == extras.program)
+        .map_or("shortcut", |file| file.component.as_str());
     db.rows(
         "Shortcut",
         vec![vec![
             text("start_menu"),
             text("ProgramMenuFolder"),
             text(&extras.shortcut),
-            text("shortcut"),
+            text(program_component),
             text(&format!("[#{}]", extras.program)),
             Cell::Null,
             text(spec.product),

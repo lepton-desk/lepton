@@ -15,8 +15,8 @@
 //! rows column by column — strings as 2-byte pool references, integers stored with the top
 //! bit flipped, 0 for null; `_StringPool`/`_StringData` holding the strings once each in
 //! the database's code page; `_Tables` and `_Columns` describing the tables;
-//! `\u{5}SummaryInformation` an OLE property set. No `_Validation`: the installer does not
-//! read it, and the package carries only what installing needs.
+//! `\u{5}SummaryInformation` an OLE property set; `_Validation` describing every column for
+//! the ICE checks (the installer itself does not read it).
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -41,6 +41,13 @@ pub struct Column {
     pub key: bool,
     pub nullable: bool,
     pub localizable: bool,
+    /// What `_Validation` says of the column — the Windows Installer SDK's schema — for the
+    /// ICE checks (ICE03 refuses a column with no row there). The installer itself does not
+    /// read `_Validation`.
+    pub category: Option<&'static str>,
+    pub range: Option<(i32, i32)>,
+    pub refers: Option<(&'static str, i16)>,
+    pub set: Option<&'static str>,
 }
 
 impl Column {
@@ -51,7 +58,30 @@ impl Column {
             key: false,
             nullable: false,
             localizable: false,
+            category: None,
+            range: None,
+            refers: None,
+            set: None,
         }
+    }
+    /// The value's category (`Identifier`, `Text`, `Guid`, …).
+    pub const fn cat(mut self, category: &'static str) -> Self {
+        self.category = Some(category);
+        self
+    }
+    pub const fn range(mut self, min: i32, max: i32) -> Self {
+        self.range = Some((min, max));
+        self
+    }
+    /// A foreign key: the table(s) (`;`-separated) and the 1-based key column.
+    pub const fn refers(mut self, table: &'static str, column: i16) -> Self {
+        self.refers = Some((table, column));
+        self
+    }
+    /// The allowed values, `;`-separated.
+    pub const fn set(mut self, values: &'static str) -> Self {
+        self.set = Some(values);
+        self
     }
     pub const fn key(mut self) -> Self {
         self.key = true;
@@ -213,13 +243,59 @@ impl Database {
         self.summary.push((id, value));
     }
 
+    /// `_Validation`: one row per column of every table, itself included, from each
+    /// column's category, range, foreign key and set.
+    fn validation(&mut self) -> std::io::Result<()> {
+        let s = |name, len| Column::new(name, Kind::Str(len));
+        let columns = vec![
+            s("Table", 32).key().cat("Identifier"),
+            s("Column", 32).key().cat("Identifier"),
+            s("Nullable", 4).set("Y;N"),
+            Column::new("MinValue", Kind::Int32).nullable().range(-2_147_483_647, 2_147_483_647),
+            Column::new("MaxValue", Kind::Int32).nullable().range(-2_147_483_647, 2_147_483_647),
+            s("KeyTable", 255).nullable().cat("Identifier"),
+            Column::new("KeyColumn", Kind::Int16).nullable().range(1, 32),
+            s("Category", 32).nullable().set(
+                "Text;Formatted;Template;Condition;Guid;Path;Version;Language;Identifier;Binary;UpperCase;LowerCase;Filename;Paths;AnyPath;WildCardFilename;RegPath;CustomSource;Property;Cabinet;Shortcut;FormattedSDDLText;Integer;DoubleInteger;TimeDate;DefaultDir",
+            ),
+            s("Set", 255).nullable().cat("Text"),
+            s("Description", 255).nullable().cat("Text"),
+        ];
+        self.table("_Validation", columns);
+        let mut rows = Vec::new();
+        for table in &self.tables {
+            for column in &table.columns {
+                let optional = |value: Option<&str>| value.map_or(Cell::Null, text);
+                rows.push(vec![
+                    text(&table.name),
+                    text(column.name),
+                    text(if column.nullable { "Y" } else { "N" }),
+                    column.range.map_or(Cell::Null, |(min, _)| Cell::Int(min)),
+                    column.range.map_or(Cell::Null, |(_, max)| Cell::Int(max)),
+                    optional(column.refers.map(|(table, _)| table)),
+                    column
+                        .refers
+                        .map_or(Cell::Null, |(_, at)| Cell::Int(i32::from(at))),
+                    optional(column.category.or(match column.kind {
+                        Kind::Binary => Some("Binary"),
+                        _ => None,
+                    })),
+                    optional(column.set),
+                    Cell::Null,
+                ]);
+            }
+        }
+        self.rows("_Validation", rows)
+    }
+
     /// An embedded stream (a cabinet), under its plain name.
     pub fn stream(&mut self, name: &str, bytes: Vec<u8>) {
         self.streams.push((name.to_owned(), bytes));
     }
 
     /// The whole database as compound-file bytes.
-    pub fn finish(self) -> std::io::Result<Vec<u8>> {
+    pub fn finish(mut self) -> std::io::Result<Vec<u8>> {
+        self.validation()?;
         let mut pool = Pool::default();
         // Ids are handed out in the order strings are met; every sort below is by id.
         for table in &self.tables {
