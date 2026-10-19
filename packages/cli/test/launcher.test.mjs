@@ -7,7 +7,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const launcher = fileURLToPath(new URL("../bin/lepton.js", import.meta.url));
-const built = fileURLToPath(new URL("../../../target/release/lepton", import.meta.url));
+const binary = process.platform === "win32" ? "lepton.exe" : "lepton";
+const built = fileURLToPath(new URL(`../../../target/release/${binary}`, import.meta.url));
 
 function run(args, env = {}) {
   return spawnSync(process.execPath, [launcher, ...args], {
@@ -36,7 +37,11 @@ test("a missing platform package is explained, not a stack trace", () => {
   assert.match(result.stderr, /@lepton-desk\/cli-/);
 });
 
-test("SIGTERM to the launcher ends the child too", async () => {
+// Linux only: it reads the process tree from /proc, and Windows has no SIGTERM to forward
+// (`kill` there ends the launcher outright).
+test("SIGTERM to the launcher ends the child too", {
+  skip: process.platform !== "linux",
+}, async () => {
   const launched = spawn(process.execPath, [launcher, "30"], {
     env: { ...process.env, LEPTON_BINARY: "/usr/bin/sleep" },
   });

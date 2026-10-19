@@ -30,6 +30,7 @@ test("install is the default and not repeated", () => {
 
 test("what lepton info reports missing is listed, and nothing when ready", () => {
   // The engine fields are Engine::json's; the real output is read in the next test.
+  // These are Linux reports; Windows has its own test below.
   const engine = {
     webkit: "2.54.1",
     platform: true,
@@ -42,12 +43,12 @@ test("what lepton info reports missing is listed, and nothing when ready", () =>
     tools: [{ name: "zig", version: "0.16.0", problem: null }],
     engine,
   });
-  assert.deepEqual(missing(ready), []);
+  assert.deepEqual(missing(ready, "linux"), []);
   const lacking = JSON.stringify({
     tools: [{ name: "zig", version: null, problem: "Missing" }],
     engine: { webkit: null, platform: false, legacy: false, cairo: true, xcb: false, ready: false },
   });
-  assert.deepEqual(missing(lacking), [
+  assert.deepEqual(missing(lacking, "linux"), [
     "zig: not usable (Missing)",
     "WPE WebKit: not installed (`lepton info` says how to get it)",
     "xcb: missing",
@@ -62,7 +63,9 @@ test("what lepton info reports missing is listed, and nothing when ready", () =>
       ready: false,
     },
   });
-  assert.deepEqual(missing(noPlatform), ["WPE WebKit 2.52.3: wpe-platform-2.0 is missing"]);
+  assert.deepEqual(missing(noPlatform, "linux"), [
+    "WPE WebKit 2.52.3: wpe-platform-2.0 is missing",
+  ]);
   assert.equal(missing("not json").length, 1);
 });
 

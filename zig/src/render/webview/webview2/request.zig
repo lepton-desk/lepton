@@ -173,8 +173,27 @@ pub fn refuse(request: Request, message: [*:0]const u8) void {
 
 /// No such file: a 404, so a page's `<link rel=icon>` or a missing asset reads as
 /// absent rather than as the core failing (measured: `favicon.ico` showed as a 500).
+/// `/favicon.ico` is the exception: WebView2 asks for it on every page load whether the
+/// page names one or not (WPE does not), and its 404 was the one console error every new
+/// project showed (measured on all five Astro, Next and Angular templates). An empty 204
+/// is just as absent and logs nothing.
 pub fn missing(request: Request, message: [*:0]const u8) void {
+    if (isFavicon(path(request))) {
+        answerText(request, "", 204, wv.W("No Content"));
+        return;
+    }
     answerText(request, message, 404, wv.W("Not Found"));
+}
+
+fn isFavicon(asked: ?[]const u8) bool {
+    return std.mem.eql(u8, asked orelse return false, "/favicon.ico");
+}
+
+test "only the root favicon is answered empty" {
+    try std.testing.expect(isFavicon(pathOf("http://lepton.localhost/favicon.ico?v=2")));
+    try std.testing.expect(!isFavicon(pathOf("http://lepton.localhost/img/favicon.ico")));
+    try std.testing.expect(!isFavicon(pathOf("http://lepton.localhost/app.js")));
+    try std.testing.expect(!isFavicon(null));
 }
 
 fn answerText(request: Request, message: [*:0]const u8, status: c_int, reason: [*:0]const u16) void {
