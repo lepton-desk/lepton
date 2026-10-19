@@ -15,6 +15,7 @@ pub mod deb;
 pub mod depends;
 pub mod desktop_entry;
 pub mod dev;
+pub mod dev_ready;
 pub mod engine;
 pub mod info;
 pub mod installer;

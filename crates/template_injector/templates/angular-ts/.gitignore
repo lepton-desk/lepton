@@ -1,0 +1,5 @@
+node_modules
+dist
+.angular
+src-lepton/zig-out
+src-lepton/.zig-cache

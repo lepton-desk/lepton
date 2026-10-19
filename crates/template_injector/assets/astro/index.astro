@@ -1,0 +1,25 @@
+---
+/**
+ * The page the window opens: Astro renders it to `dist/index.html` at build time.
+ *
+ * The screen itself is `src/main.ts`, the same plain-DOM screen the vanilla template has,
+ * loaded by the `<script>` below; Astro bundles it. Put your own pages beside this one.
+ */
+
+// The window's title: the window shows the page's `<title>`.
+const title = "{title}";
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      import "../main.ts";
+    </script>
+  </body>
+</html>

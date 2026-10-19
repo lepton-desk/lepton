@@ -1,5 +1,5 @@
 {
-  "$schema": "https://lepton.style/schema/config.json",
+  "$schema": "https://lepton-desk.vercel.app/schema/config.json",
   "productName": "Notes",
   "identifier": "dev.lepton.notes",
   "version": "0.1.0",

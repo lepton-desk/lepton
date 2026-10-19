@@ -527,6 +527,8 @@ fn target_of(template: &str) -> Result<Target, CliError> {
         "preact" => Ok(Target::Preact),
         "lit" => Ok(Target::Lit),
         "angular" => Ok(Target::Angular),
+        "astro" => Ok(Target::Astro),
+        "next" => Ok(Target::Next),
         other => Err(CliError::Invalid(format!(
             "`{template}` names a framework this build does not know: {other}"
         ))),

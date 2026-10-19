@@ -20,6 +20,8 @@
 pub mod assets;
 pub mod base;
 pub mod bundle;
+pub mod frame_pages;
+pub mod frontend;
 pub mod manifest;
 pub mod merge;
 pub mod permissions;
@@ -34,6 +36,7 @@ pub use assets::{
 };
 pub use base::{BaseFrontend, Bindings, TemplateError};
 pub use bundle::{Bundle, BundleTarget, parse_bundle};
+pub use frontend::{Frontend, parse_frontend};
 pub use manifest::{
     Language, Manifest, ManifestError, RenderPath, Target, render_manifest, validate,
 };

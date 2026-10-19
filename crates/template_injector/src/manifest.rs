@@ -106,6 +106,8 @@ pub enum Target {
     Preact,
     Lit,
     Angular,
+    Astro,
+    Next,
 }
 
 impl Target {
@@ -119,6 +121,8 @@ impl Target {
             Self::Preact => "preact",
             Self::Lit => "lit",
             Self::Angular => "angular",
+            Self::Astro => "astro",
+            Self::Next => "next",
         }
     }
 
@@ -132,6 +136,27 @@ impl Target {
             "preact" => Some(Self::Preact),
             "lit" => Some(Self::Lit),
             "angular" => Some(Self::Angular),
+            "astro" => Some(Self::Astro),
+            "next" => Some(Self::Next),
+            _ => None,
+        }
+    }
+
+    /// The `frontend` section a project of this framework is created with: its output
+    /// directory and its dev server's flags (`frontend.rs`). `None` for the Vite templates,
+    /// whose defaults those are. Measured 2026-10-19: Next.js 16 exports to `out/` and names
+    /// the address `--hostname`; Astro 7 needs `--ignore-lock` or, under an AI agent, moves
+    /// its server into the background where `lepton dev` cannot stop it; `ng serve` takes
+    /// `--port` and `--host`, and the template's `angular.json` writes to `dist/`. Next and
+    /// Angular refuse a taken port by themselves; Astro does through `astro.config.mjs`.
+    pub fn frontend(self) -> Option<(&'static str, &'static [&'static str])> {
+        match self {
+            Self::Astro => Some((
+                "dist",
+                &["--port", "{port}", "--host", "{host}", "--ignore-lock"],
+            )),
+            Self::Next => Some(("out", &["--port", "{port}", "--hostname", "{host}"])),
+            Self::Angular => Some(("dist", &["--port", "{port}", "--host", "{host}"])),
             _ => None,
         }
     }
@@ -235,11 +260,7 @@ pub fn render_manifest(manifest: &Manifest) -> String {
     // Every string goes through `json_string`, so a title containing a quote or a
     // newline produces a file that still parses.
     let _ = writeln!(out, "{{");
-    let _ = writeln!(
-        out,
-        "  \"$schema\": {},",
-        json_string("https://lepton.style/schema/config.json")
-    );
+    let _ = writeln!(out, "  \"$schema\": {},", json_string(SCHEMA_URL));
     let _ = writeln!(
         out,
         "  \"productName\": {},",
@@ -291,7 +312,8 @@ pub fn render_manifest(manifest: &Manifest) -> String {
         }
     }
     let fs = manifest.plugins.contains(&"fs");
-    let comma = if fs { "," } else { "" };
+    let frontend = manifest.target.frontend();
+    let comma = if fs || frontend.is_some() { "," } else { "" };
     // On one line while it fits the project's `biome.json` line width, one name per line
     // after that: Biome formats an array this way, and a project made with plugins failed
     // `biome check` before its first build on a 140-character line (measured 2026-10-17).
@@ -308,12 +330,26 @@ pub fn render_manifest(manifest: &Manifest) -> String {
         // developer's decision, written here by name.
         let _ = writeln!(out, "  \"plugins\": {{");
         let _ = writeln!(out, "    \"fs\": {{ \"scope\": [\"$APPDATA\"] }}");
+        let _ = writeln!(out, "  }}{}", if frontend.is_some() { "," } else { "" });
+    }
+    if let Some((dist, dev_args)) = frontend {
+        let args: Vec<String> = dev_args.iter().map(|arg| json_string(arg)).collect();
+        let _ = writeln!(out, "  \"frontend\": {{");
+        let _ = writeln!(out, "    \"dist\": {},", json_string(dist));
+        let _ = writeln!(out, "    \"devArgs\": [{}]", args.join(", "));
         let _ = writeln!(out, "  }}");
     }
     let _ = writeln!(out, "}}");
 
     out
 }
+
+/// The configuration's JSON Schema, published with the site (`lepton-site/public/schema/`).
+pub const SCHEMA_URL: &str = "https://lepton-desk.vercel.app/schema/config.json";
+
+/// Where projects up to 0.1.8 pointed `$schema`: a domain that does not resolve (measured
+/// 2026-10-19). `lepton update` moves them to [`SCHEMA_URL`].
+pub const OLD_SCHEMA_URL: &str = "https://lepton.style/schema/config.json";
 
 /// `lineWidth` in the `biome.json` every project gets (`assets/biome.json`).
 const BIOME_LINE_WIDTH: usize = 100;
@@ -396,7 +432,9 @@ mod tests {
         Manifest, RenderPath, Target, identifier_for, json_string, render_manifest, validate,
     };
     use lepton_orchestrator::testing::{Failure, balanced};
-    use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ne, ensure};
+    use lepton_orchestrator::{
+        assert_contains, assert_eq, assert_err, assert_ne, assert_ok, ensure,
+    };
 
     #[test]
     fn the_configuration_fits_the_projects_biome_line_width() -> Result<(), Failure> {
@@ -582,10 +620,40 @@ mod tests {
             Target::Preact,
             Target::Lit,
             Target::Angular,
+            Target::Astro,
+            Target::Next,
         ] {
             assert_eq!(Target::parse(target.as_str()), Some(target));
         }
         assert_eq!(Target::parse("qwik"), None::<Target>);
+        Ok(())
+    }
+
+    #[test]
+    fn a_framework_with_its_own_server_writes_a_frontend_section_the_cli_reads()
+    -> Result<(), Failure> {
+        for (target, dist, flag) in [
+            (Target::Next, "out", "--hostname"),
+            (Target::Astro, "dist", "--ignore-lock"),
+            (Target::Angular, "dist", "--host"),
+        ] {
+            let mut manifest = Manifest::new("Notes");
+            manifest.target = target;
+            manifest.plugins = vec!["fs"];
+            let text = render_manifest(&manifest);
+            let frontend = assert_ok!(crate::frontend::parse_frontend(&text), "parses");
+            assert_eq!(frontend.dist, dist);
+            ensure!(
+                frontend.dev_args.iter().any(|arg| arg == flag),
+                "{:?} should carry {flag}",
+                frontend.dev_args
+            );
+        }
+        let vite = render_manifest(&Manifest::new("Notes"));
+        ensure!(
+            !vite.contains("frontend"),
+            "a Vite project keeps the defaults: {vite}"
+        );
         Ok(())
     }
 

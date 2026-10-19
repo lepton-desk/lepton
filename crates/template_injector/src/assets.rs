@@ -129,6 +129,20 @@ pub const LIT_SCREEN: &str = include_str!("../assets/lit/measures-screen.ts");
 pub const JS_LIT_ENTRY: &str = include_str!("../assets/js/lit/main.js");
 pub const JS_LIT_SCREEN: &str = include_str!("../assets/js/lit/measures-screen.js");
 
+/// Frameworks with their own pages and server (`frame_pages.rs`). Astro's page loads the
+/// plain-DOM screen; Next.js renders React's `App` from a page loaded in the window only;
+/// Angular's is a component. `{title}` is filled per project.
+pub const ASTRO_PAGE: &str = include_str!("../assets/astro/index.astro");
+pub const NEXT_LAYOUT: &str = include_str!("../assets/next/layout.tsx");
+pub const NEXT_PAGE: &str = include_str!("../assets/next/page.tsx");
+pub const NEXT_SCREEN: &str = include_str!("../assets/next/Screen.tsx");
+pub const JS_NEXT_LAYOUT: &str = include_str!("../assets/js/next/layout.jsx");
+pub const JS_NEXT_PAGE: &str = include_str!("../assets/js/next/page.jsx");
+pub const JS_NEXT_SCREEN: &str = include_str!("../assets/js/next/Screen.jsx");
+pub const ANGULAR_ENTRY: &str = include_str!("../assets/angular/main.ts");
+pub const ANGULAR_SCREEN: &str = include_str!("../assets/angular/app.ts");
+pub const ANGULAR_INDEX: &str = include_str!("../assets/angular/index.html");
+
 /// The generator `build.zig` runs to write the TypeScript names of the application's
 /// commands (`zig-out/lepton-commands.d.ts`).
 pub const COMMAND_TYPES: &str = include_str!("../assets/lepton-commands.zig");

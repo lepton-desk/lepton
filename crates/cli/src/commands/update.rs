@@ -18,7 +18,9 @@
 
 use std::path::{Path, PathBuf};
 
-use lepton_template_injector::update::{Decision, Part, Values, decide, react_tsconfig};
+use lepton_template_injector::update::{
+    Decision, Part, Values, decide, react_tsconfig, schema_url,
+};
 
 use lepton_orchestrator::Step;
 use lepton_orchestrator::Toolchain;
@@ -322,6 +324,10 @@ impl Flags {
         let tsconfig = std::fs::read_to_string(&tsconfig_path)
             .ok()
             .and_then(|text| react_tsconfig(&text, uses_react(root)));
+        let config_path = root.join("lepton.config.json");
+        let config = std::fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|text| schema_url(&text));
 
         for (part, _, decision) in &decisions {
             let label = match part {
@@ -364,6 +370,12 @@ impl Flags {
                 "\"jsx\": \"react-jsx\" added (tsc failed without it)",
             );
         }
+        if config.is_some() {
+            report.fact(
+                "lepton.config.json",
+                "$schema moved to lepton-desk.vercel.app (the old address never resolved)",
+            );
+        }
 
         let conflicts: Vec<_> = decisions
             .iter()
@@ -404,7 +416,8 @@ impl Flags {
             .iter()
             .any(|(_, _, decision)| *decision != Decision::Current)
             || matches!(vendor, Vendor::Replace { .. })
-            || tsconfig.is_some();
+            || tsconfig.is_some()
+            || config.is_some();
         if !changes {
             return Ok(());
         }
@@ -422,6 +435,9 @@ impl Flags {
         }
         if let Some(text) = &tsconfig {
             write(&tsconfig_path, text)?;
+        }
+        if let Some(text) = &config {
+            write(&config_path, text)?;
         }
         if let Vendor::Replace { .. } = vendor {
             if vendor_dir.exists() {

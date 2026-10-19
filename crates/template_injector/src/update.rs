@@ -84,6 +84,18 @@ pub fn react_tsconfig(existing: &str, react: bool) -> Option<String> {
     ))
 }
 
+/// `lepton.config.json` with `$schema` moved off the address projects up to 0.1.8 were
+/// given, which never resolved; `None` when the file does not use it.
+pub fn schema_url(existing: &str) -> Option<String> {
+    let old = crate::manifest::json_string(crate::manifest::OLD_SCHEMA_URL);
+    existing.contains(&old).then(|| {
+        existing.replace(
+            &old,
+            &crate::manifest::json_string(crate::manifest::SCHEMA_URL),
+        )
+    })
+}
+
 /// What `lepton.config.json` gives the entry template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Values {
@@ -258,6 +270,20 @@ mod tests {
             RELEASES.iter().any(|release| release.version == built),
             "assets/history has no {built}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn an_old_schema_address_is_moved_and_a_current_one_left_alone() -> Result<(), Failure> {
+        let old = "{\n  \"$schema\": \"https://lepton.style/schema/config.json\",\n  \"productName\": \"n\"\n}\n";
+        assert_eq!(
+            super::schema_url(old).as_deref(),
+            Some(
+                "{\n  \"$schema\": \"https://lepton-desk.vercel.app/schema/config.json\",\n  \"productName\": \"n\"\n}\n"
+            )
+        );
+        let current = crate::render_manifest(&crate::Manifest::new("n"));
+        assert_eq!(super::schema_url(&current), None::<String>);
         Ok(())
     }
 

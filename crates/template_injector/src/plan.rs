@@ -124,15 +124,6 @@ pub fn plan(manifest: &Manifest) -> Result<Plan, InjectionError> {
             mode: Mode::Write,
         },
         Injection {
-            path: "index.html".to_owned(),
-            contents: crate::assets::index_html(
-                manifest.target,
-                manifest.language,
-                &manifest.window_title,
-            ),
-            mode: Mode::Write,
-        },
-        Injection {
             path: format!("src/lepton.{}", manifest.language.extension()),
             contents: binding_for(manifest).to_owned(),
             mode: Mode::Write,
@@ -140,14 +131,6 @@ pub fn plan(manifest: &Manifest) -> Result<Plan, InjectionError> {
         Injection {
             path: "src/lepton-sdk.css".to_owned(),
             contents: crate::assets::STYLESHEET.to_owned(),
-            mode: Mode::Write,
-        },
-        // The screen, expressed in whatever the project's framework is. Writing the
-        // plain-DOM entry into a React project would leave the framework unmounted and
-        // its own components dead — a project that builds, runs, and does nothing.
-        Injection {
-            path: format!("src/main.{}", entry_extension(manifest)),
-            contents: entry_contents(manifest).to_owned(),
             mode: Mode::Write,
         },
         Injection {
@@ -223,7 +206,34 @@ pub fn plan(manifest: &Manifest) -> Result<Plan, InjectionError> {
             mode: Mode::RemoveDir,
         },
     ];
+    // A Vite project's document and entry. Astro, Next.js and Angular bring their own
+    // pages instead (`frame_pages.rs`); Astro's page still loads the plain entry.
+    if !crate::frame_pages::own_pages(manifest.target) {
+        files.insert(
+            3,
+            Injection {
+                path: "index.html".to_owned(),
+                contents: crate::assets::index_html(
+                    manifest.target,
+                    manifest.language,
+                    &manifest.window_title,
+                ),
+                mode: Mode::Write,
+            },
+        );
+    }
+    if crate::frame_pages::uses_plain_entry(manifest.target) {
+        // The screen, expressed in whatever the project's framework is. Writing the
+        // plain-DOM entry into a React project would leave the framework unmounted and
+        // its own components dead — a project that builds, runs, and does nothing.
+        files.push(Injection {
+            path: format!("src/main.{}", entry_extension(manifest)),
+            contents: entry_contents(manifest).to_owned(),
+            mode: Mode::Write,
+        });
+    }
     files.extend(extra_injections(manifest));
+    files.extend(crate::frame_pages::injections(manifest));
     Ok(Plan { files })
 }
 

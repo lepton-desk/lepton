@@ -1,0 +1,8 @@
+# pnpm 11+ stops an install whose dependencies have build scripts nobody decided on. These
+# four ship prebuilt binaries for this machine, and the project builds without their scripts
+# (measured 2026-10-19, Angular 22.2): they are declined here rather than run.
+allowBuilds:
+  "@parcel/watcher": false
+  esbuild: false
+  lmdb: false
+  msgpackr-extract: false

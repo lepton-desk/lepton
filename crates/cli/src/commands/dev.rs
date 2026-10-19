@@ -13,6 +13,7 @@
 use std::path::Path;
 
 use lepton_orchestrator::{Step, ToolRequirement, Toolchain, display};
+use lepton_template_injector::Frontend;
 
 use super::build::CORE_DIR;
 use super::{CliError, Outcome};
@@ -91,7 +92,8 @@ impl Flags {
         if !native && root.join("package.json").is_file() {
             super::package_manager::ensure_installed(root, &chain)?;
         }
-        let mut steps = self.plan(root, &chain, native);
+        let frontend = super::launch::read_frontend(root)?;
+        let mut steps = self.plan(root, &chain, native, &frontend);
         let binary = super::launch::binary_name(&manifest.product_name);
         super::launch::name_core(&mut steps, &binary);
         super::launch::grant_permissions(&mut steps, root)?;
@@ -188,6 +190,22 @@ impl Flags {
         }
         super::command_types::sync_and_report(root);
 
+        // The window loads its page from the server once, as it opens: it opens only when
+        // the server listens (`dev_ready.rs`).
+        if !background_children.0.is_empty() {
+            let address = std::net::SocketAddr::from(([127, 0, 0, 1], self.port));
+            let waited = super::dev_ready::wait_for(address, super::dev_ready::LIMIT, || {
+                background_children.ended()
+            })?;
+            report.fact(
+                "dev server",
+                &format!(
+                    "listening on {address} (waited {})",
+                    super::report::took(waited)
+                ),
+            );
+        }
+
         // The application's own binary, started last and in the foreground: a development
         // loop that returned while its window closed behind it is not a loop.
         super::desktop_entry::announce(
@@ -250,11 +268,17 @@ impl Flags {
     }
 
     /// The processes this loop runs, in start order.
-    pub fn plan(&self, root: &Path, chain: &Toolchain, native: bool) -> Vec<Step> {
+    pub fn plan(
+        &self,
+        root: &Path,
+        chain: &Toolchain,
+        native: bool,
+        frontend: &Frontend,
+    ) -> Vec<Step> {
         let mut steps = Vec::new();
 
         if !native && !self.no_server && root.join("package.json").is_file() {
-            steps.push(self.server_step(chain, root));
+            steps.push(self.server_step(chain, root, frontend));
         }
 
         steps.push(self.core_step(root, native));
@@ -264,25 +288,17 @@ impl Flags {
     /// The dev server, on the port the developer chose.
     ///
     /// `run dev` rather than a bare `dev` because the script name is a project's
-    /// choice, not Lepton's; the flag is what Lepton owns.
-    fn server_step(&self, chain: &Toolchain, root: &Path) -> Step {
+    /// choice, not Lepton's; the port and address are what Lepton owns, passed in the
+    /// framework's own spelling (`frontend.devArgs`, Vite's flags by default).
+    fn server_step(&self, chain: &Toolchain, root: &Path, frontend: &Frontend) -> Step {
         let manager = super::package_manager::for_project(root, chain);
         // Only npm wants a `--` before the script's own flags; pnpm passes one through
         // literally — measured: `vite -- --port 5199` opened on 5173, Vite ignoring every
         // flag after it (`package_manager.rs`).
-        let flags = [
-            "--port".to_owned(),
-            self.port.to_string(),
-            "--strict-port".to_owned(),
-            // The exact address the core is given below. `localhost` resolves to `::1`
-            // on some machines, and a server there is refused at `127.0.0.1`.
-            "--host".to_owned(),
-            DEV_HOST.to_owned(),
-            // Vite clears the terminal when it starts, which wiped `lepton dev`'s own lines
-            // above it (seen in a pseudo-terminal: `ESC[1;1H ESC[0J` after the header).
-            "--clearScreen".to_owned(),
-            "false".to_owned(),
-        ];
+        //
+        // The address is the exact one the core is given below. `localhost` resolves to
+        // `::1` on some machines, and a server there is refused at `127.0.0.1`.
+        let flags = frontend.dev_args_for(self.port, DEV_HOST);
         Step::new(NAME, manager.program())
             .args(manager.run_script("dev", &flags))
             .in_dir(root.to_path_buf())
@@ -319,6 +335,16 @@ impl Flags {
 #[derive(Default)]
 struct Background(Vec<std::process::Child>);
 
+impl Background {
+    /// The status of the first server that has already ended, as text.
+    fn ended(&mut self) -> Option<String> {
+        self.0
+            .iter_mut()
+            .find_map(|child| child.try_wait().ok().flatten())
+            .map(|status| status.to_string())
+    }
+}
+
 impl Drop for Background {
     fn drop(&mut self) {
         for child in &mut self.0 {
@@ -331,7 +357,7 @@ impl Drop for Background {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_PORT, Flags, display};
+    use super::{DEFAULT_PORT, Flags, Frontend, display};
     use crate::commands::build::CORE_DIR;
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{
@@ -400,7 +426,7 @@ mod tests {
         // started first would ask a server that is not listening yet, once.
         let root = webview_root("dev-order")?;
 
-        let steps = default_flags().plan(root.path(), &complete(), false);
+        let steps = default_flags().plan(root.path(), &complete(), false, &Frontend::default());
 
         assert_eq!(steps.len(), 2);
         ensure!(
@@ -426,7 +452,7 @@ mod tests {
             ..default_flags()
         };
 
-        let steps = flags.plan(root.path(), &complete(), false);
+        let steps = flags.plan(root.path(), &complete(), false, &Frontend::default());
 
         for step in &steps {
             ensure!(
@@ -442,7 +468,7 @@ mod tests {
     fn pnpm_gets_the_flags_without_a_separator_and_npm_with_one() -> Result<(), Failure> {
         let root = webview_root("dev-separator")?;
 
-        let pnpm = default_flags().plan(root.path(), &complete(), false);
+        let pnpm = default_flags().plan(root.path(), &complete(), false, &Frontend::default());
         ensure!(
             !pnpm[0].args.iter().any(|arg| arg == "--"),
             "pnpm forwards a literal `--` and Vite then ignores every flag: {:?}",
@@ -452,7 +478,7 @@ mod tests {
         let mut without_pnpm = complete();
         without_pnpm.package_manager.version = None;
         without_pnpm.package_manager.problem = Some(lepton_orchestrator::ToolProblem::NotFound);
-        let npm = default_flags().plan(root.path(), &without_pnpm, false);
+        let npm = default_flags().plan(root.path(), &without_pnpm, false, &Frontend::default());
         assert_eq!(npm[0].program, "npm");
         assert_eq!(npm[0].args.get(2).map(String::as_str), Some("--"));
         Ok(())
@@ -465,11 +491,38 @@ mod tests {
         // named on both sides so neither depends on how the machine resolves a name.
         let root = webview_root("dev-host")?;
 
-        let steps = default_flags().plan(root.path(), &complete(), false);
+        let steps = default_flags().plan(root.path(), &complete(), false, &Frontend::default());
 
         let server = steps[0].args.join(" ");
         assert_contains!(&server, "--host 127.0.0.1");
         assert_contains!(&steps[1].args.join(" "), "-Ddev-server=http://127.0.0.1:");
+        Ok(())
+    }
+
+    #[test]
+    fn a_framework_s_own_flags_carry_the_port_and_address() -> Result<(), Failure> {
+        // Next.js names the address `--hostname` and has no `--strict-port` (measured: a
+        // taken port is already an error there); the configuration says so, not the CLI.
+        let root = webview_root("dev-next")?;
+        let next = assert_ok!(
+            lepton_template_injector::parse_frontend(
+                r#"{"frontend":{"dist":"out","devArgs":["--port","{port}","--hostname","{host}"]}}"#
+            ),
+            "parses"
+        );
+
+        let steps = default_flags().plan(root.path(), &complete(), false, &next);
+
+        let server = steps[0].args.join(" ");
+        assert_contains!(&server, "dev --port 5173 --hostname 127.0.0.1");
+        ensure!(
+            !server.contains("--strict-port"),
+            "Vite's flags must not reach another server: {server}"
+        );
+        assert_contains!(
+            &steps[1].args.join(" "),
+            "-Ddev-server=http://127.0.0.1:5173"
+        );
         Ok(())
     }
 
@@ -487,7 +540,7 @@ mod tests {
         // nothing that the developer still has to remember to stop.
         let root = webview_root("dev-native")?;
 
-        let steps = default_flags().plan(root.path(), &complete(), true);
+        let steps = default_flags().plan(root.path(), &complete(), true, &Frontend::default());
 
         assert_eq!(steps.len(), 1);
         ensure!(
@@ -507,7 +560,7 @@ mod tests {
             ..default_flags()
         };
 
-        let steps = flags.plan(root.path(), &complete(), false);
+        let steps = flags.plan(root.path(), &complete(), false, &Frontend::default());
 
         assert_eq!(steps.len(), 1);
         // With no server of our own, the core is still told where the bundle is —
@@ -524,7 +577,8 @@ mod tests {
         let root = webview_root("dev-once")?;
 
         for native in [true, false] {
-            let steps = default_flags().plan(root.path(), &complete(), native);
+            let steps =
+                default_flags().plan(root.path(), &complete(), native, &Frontend::default());
             for step in steps.iter().filter(|step| step.program == "zig") {
                 ensure!(
                     !step.args.iter().any(|arg| arg == "run"),
@@ -542,7 +596,7 @@ mod tests {
         // dev build turns a backtrace into a list of addresses.
         let root = webview_root("dev-debug")?;
 
-        let steps = default_flags().plan(root.path(), &complete(), true);
+        let steps = default_flags().plan(root.path(), &complete(), true, &Frontend::default());
 
         assert_contains!(&steps[0].args.join(" "), "-Doptimize=Debug");
         Ok(())
@@ -552,7 +606,7 @@ mod tests {
     fn the_core_runs_from_the_core_directory() -> Result<(), Failure> {
         let root = webview_root("dev-cwd")?;
 
-        let steps = default_flags().plan(root.path(), &complete(), true);
+        let steps = default_flags().plan(root.path(), &complete(), true, &Frontend::default());
 
         assert_eq!(
             steps[0].cwd.as_deref(),
@@ -583,7 +637,7 @@ mod tests {
         // wrong and they want to run one half of it by hand.
         let root = webview_root("dev-display")?;
 
-        let steps = default_flags().plan(root.path(), &complete(), false);
+        let steps = default_flags().plan(root.path(), &complete(), false, &Frontend::default());
         let rendered: Vec<String> = steps.iter().map(display).collect();
 
         for line in rendered {

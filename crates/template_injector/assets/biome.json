@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!!**/dist", "!!**/zig-out"]
+    "includes": [
+      "**",
+      "!!**/dist",
+      "!!**/zig-out",
+      "!!**/out",
+      "!!**/.next",
+      "!!**/.astro",
+      "!!**/.angular"
+    ]
   },
   "formatter": {
     "enabled": true,

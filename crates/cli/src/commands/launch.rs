@@ -136,18 +136,28 @@ pub(super) fn is_core_build(step: &Step) -> bool {
             .is_some_and(|dir| dir.ends_with(super::build::CORE_DIR))
 }
 
+/// The `frontend` section of the project's configuration: Vite's `dist` and flags without it.
+pub fn read_frontend(root: &Path) -> Result<lepton_template_injector::Frontend, CliError> {
+    let path = root.join(lepton_orchestrator::CONFIG_FILE);
+    let text = std::fs::read_to_string(&path).map_err(|error| {
+        CliError::Invalid(format!("could not read {}: {error}", path.display()))
+    })?;
+    lepton_template_injector::parse_frontend(&text).map_err(|error| CliError::Invalid(error.reason))
+}
+
 /// Tells every core build where the bundler wrote the frontend, when a plan bundles one.
 ///
-/// The core's build installs it to `share/<name>/dist` beside the binary, which is where
-/// the binary looks first; a plan with no `run build` step has no bundle to hand over.
-pub fn hand_over_frontend(steps: &mut [Step], root: &Path) {
+/// `dist` is `frontend.dist` (`out` for Next.js). The core's build installs it to
+/// `share/<name>/dist` beside the binary whatever it was called, which is where the binary
+/// looks first; a plan with no `run build` step has no bundle to hand over.
+pub fn hand_over_frontend(steps: &mut [Step], root: &Path, dist: &str) {
     let bundles = steps
         .iter()
         .any(|step| step.args.len() >= 2 && step.args[0] == "run" && step.args[1] == "build");
     if !bundles {
         return;
     }
-    let dist = root.join("dist");
+    let dist = root.join(dist);
     for step in steps.iter_mut() {
         if step.args.first().is_some_and(|arg| arg == "build")
             && step
@@ -360,7 +370,7 @@ mod naming_tests {
                 .in_dir(root.join(CORE_DIR)),
         ];
 
-        super::hand_over_frontend(&mut steps, &root);
+        super::hand_over_frontend(&mut steps, &root, "dist");
 
         ensure!(
             steps[1]
@@ -369,6 +379,25 @@ mod naming_tests {
                 .any(|arg| *arg == format!("-Dfrontend-dist={}", root.join("dist").display())),
             "the core must install the bundle: {:?}",
             steps[1].args
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_configured_output_directory_is_the_one_handed_over() -> Result<(), Failure> {
+        // Next.js exports to `out/`: handing over `dist` would install an empty frontend.
+        let root = std::path::PathBuf::from("/project");
+        let mut steps = bundle_then_core(&root);
+
+        super::hand_over_frontend(&mut steps, &root, "out");
+
+        assert_eq!(
+            steps[1]
+                .args
+                .iter()
+                .find(|arg| arg.starts_with("-Dfrontend-dist="))
+                .cloned(),
+            Some(format!("-Dfrontend-dist={}", root.join("out").display()))
         );
         Ok(())
     }
@@ -383,7 +412,7 @@ mod naming_tests {
                 .in_dir(root.join(CORE_DIR)),
         ];
 
-        super::hand_over_frontend(&mut steps, &root);
+        super::hand_over_frontend(&mut steps, &root, "dist");
 
         ensure!(
             !steps[0]

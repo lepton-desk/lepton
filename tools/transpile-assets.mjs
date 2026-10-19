@@ -66,6 +66,9 @@ const SOURCES = [
   { from: join("preact", "main.tsx"), to: join("preact", "main.jsx") },
   { from: join("lit", "measures-screen.ts"), to: join("lit", "measures-screen.js") },
   { from: join("lit", "main.ts"), to: join("lit", "main.js") },
+  { from: join("next", "layout.tsx"), to: join("next", "layout.jsx") },
+  { from: join("next", "page.tsx"), to: join("next", "page.jsx") },
+  { from: join("next", "Screen.tsx"), to: join("next", "Screen.jsx") },
 ];
 
 const banner = (source) =>
