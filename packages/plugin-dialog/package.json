@@ -1,6 +1,6 @@
 {
   "name": "@lepton-desk/plugin-dialog",
-  "version": "0.1.9-beta.0",
+  "version": "0.1.9-beta.1",
   "description": "Lepton plugin: the desktop's own file dialogs, through xdg-desktop-portal.",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -26,7 +26,7 @@
     "plugin": "zig/plugin.zig"
   },
   "peerDependencies": {
-    "@lepton-desk/api": "^0.1.9-beta.0"
+    "@lepton-desk/api": "^0.1.9-beta.1"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
