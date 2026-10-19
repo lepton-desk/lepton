@@ -1,6 +1,6 @@
 # npm yayını: `@lepton-desk/*`
 
-Şu anki sürüm: **0.1.8** (0.1.0–0.1.7 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı tek komut: `node tools/release-version.mjs <sürüm>`. `Cargo.toml` (CLI sürümünü
+Şu anki sürüm: **0.1.9-beta.0** (0.1.0–0.1.8 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı tek komut: `node tools/release-version.mjs <sürüm>`. `Cargo.toml` (CLI sürümünü
 derlemede buradan okur: `--version`, komut başlıkları, yeni projelerin `@lepton-desk/*` sürümleri),
 `Cargo.lock`, dokuz npm paketinin `version`'ı, `cli`'nin `optionalDependencies`'i (iki platform paketi), eklentilerin
 `^<sürüm>` `peerDependencies`'i, `create-lepton-app`'in `@lepton-desk/cli`'si, `lepton update`'in
