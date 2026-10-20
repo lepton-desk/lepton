@@ -11,7 +11,8 @@
 //!
 //! ## What is carried
 //!
-//! Four roots: the build file, `src`, `protocols` and `webview2` (Microsoft's header). Anything else in the core's
+//! Five roots: the build file, `src`, `protocols`, `webview2` (Microsoft's header) and
+//! `servo` (the Servo bridge's header). Anything else in the core's
 //! directory is a build artefact or an editor's scratch file, and shipping one would
 //! mean every project's vendor directory grows with the size of the repository's
 //! cache.
@@ -46,6 +47,9 @@ const ROOTS: &[(&str, Root)] = &[
     // Microsoft's WebView2 header and its licence: the Windows webview path compiles
     // against it (`src/render/webview/webview2/c.zig`).
     ("webview2", Root::Tree),
+    // The Servo bridge's C ABI, imported by the experimental Servo engine
+    // (`src/render/webview/servo/c.zig`) when a project builds with `-Dservo-lib`.
+    ("servo", Root::Tree),
 ];
 
 /// Which of the two shapes a root has.

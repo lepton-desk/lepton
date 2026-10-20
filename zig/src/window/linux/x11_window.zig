@@ -342,6 +342,12 @@ pub fn pumpOne(self: *X11Window) bool {
     return true;
 }
 
+/// The connection's descriptor, for a caller that waits on it beside its own (the Servo
+/// engine also waits on the eventfd Servo wakes it with).
+pub fn connectionFd(self: *X11Window) i32 {
+    return @intCast(xcb.xcb_get_file_descriptor(self.conn));
+}
+
 /// Translates one X event into input state.
 ///
 /// Every field is read from the event rather than from the window: a button press

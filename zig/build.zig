@@ -59,6 +59,8 @@ pub const CoreOptions = struct {
     /// project had its own `-Drender`. The value is validated where it is read, so an
     /// unrecognised string is still reported once, by the party that received it.
     render: []const u8 = "webview",
+    /// Where `liblepton_servo.so` is: pages render in Servo, not WPE (`src/build_servo.zig`).
+    servo_lib: ?[]const u8 = null,
 };
 
 /// Configures the core module and returns it.
@@ -139,7 +141,9 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // run time behind a `switch`.
     const want_webview = !native_render;
     // WPE is the Linux engine; Windows pages go through WebView2 below.
-    const want_wpe = want_webview and linux;
+    const have_servo = want_webview and linux and options.servo_lib != null;
+    if (have_servo) @import("src/build_servo.zig").linkEngine(b, core, options.root, options.servo_lib.?);
+    const want_wpe = want_webview and linux and !have_servo;
 
     // Two engine ABIs are in the wild and they are not source compatible.
     //
@@ -312,6 +316,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     opts.addOption(bool, "gpu_scene", gpu_text);
     opts.addOption(bool, "have_wpe", have_wpe);
     opts.addOption(bool, "have_webview2", have_webview2);
+    opts.addOption(bool, "have_servo", have_servo);
     opts.addOption(bool, "wpe_platform_abi", use_platform_abi);
     opts.addOption([]const u8, "wpe_backend_library", wpe_backend_library orelse "");
 
@@ -394,16 +399,16 @@ pub fn build(b: *std.Build) void {
     // product's build flags belong to the product.
     const render = b.option([]const u8, "render", "Render path: webview or native (default: webview)") orelse "webview";
 
+    const servo_lib = b.option([]const u8, "servo-lib", "Directory holding liblepton_servo.so: Servo renders the pages");
     const configured = configureCore(b, .{
         .root = ".",
         .target = target,
         .optimize = optimize,
+        .servo_lib = servo_lib,
         .render = render,
     });
     const core = configured.module;
-    if (b.option([]const u8, "servo-lib", "Directory holding liblepton_servo.so, for servo-window-check")) |dir| {
-        @import("src/build_servo.zig").windowCheck(b, target, core, configured.protocol_step, dir);
-    }
+    if (servo_lib) |dir| @import("src/build_servo.zig").windowCheck(b, target, core, configured.protocol_step, dir);
 
     const lib = b.addLibrary(.{
         .name = "lepton_core",

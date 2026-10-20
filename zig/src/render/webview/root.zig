@@ -13,15 +13,18 @@ pub const wpe_view = @import("wpe_view.zig");
 pub const webview2 = @import("webview2/view.zig");
 
 const windows = builtin.os.tag == .windows;
-const engine = if (windows) webview2 else wpe_view;
+/// Servo, experimental, chosen at build time with `-Dservo-lib` (`servo/view.zig`).
+const servo = @import("build_options").have_servo;
+pub const servo_view = if (servo) @import("servo/view.zig") else struct {};
+const engine = if (windows) webview2 else if (servo) servo_view else wpe_view;
 
 /// Whether this build contains a web engine.
 pub fn is_available() bool {
-    return if (windows) webview2.is_available() else wpe_view.is_available();
+    return if (windows) webview2.is_available() else if (servo) true else wpe_view.is_available();
 }
 
 /// WPE is linked: the measurements and the display module below are WPE's own.
-const wpe_linked = !windows and wpe_view.is_available();
+const wpe_linked = !windows and !servo and wpe_view.is_available();
 
 /// The webview, or null when this build has no engine.
 pub const View = if (is_available()) engine.View else void;

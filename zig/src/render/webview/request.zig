@@ -9,7 +9,12 @@
 
 const builtin = @import("builtin");
 
-const engine = if (builtin.os.tag == .windows) @import("webview2/request.zig") else @import("wpe_request.zig");
+const engine = if (builtin.os.tag == .windows)
+    @import("webview2/request.zig")
+else if (@import("build_options").have_servo)
+    @import("servo/request.zig")
+else
+    @import("wpe_request.zig");
 
 pub const Request = engine.Request;
 pub const BodyError = engine.BodyError;

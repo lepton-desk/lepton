@@ -8,6 +8,19 @@
 const std = @import("std");
 const support = @import("build_support.zig");
 
+/// Links the core to Servo: the bridge's header (`servo/`), `liblepton_servo.so` from
+/// `lib_dir`, and Xlib, which the view hands Servo (surfman takes no XCB connection). The
+/// binary finds the library beside itself once packaged (`$ORIGIN/../lib`), or in
+/// `lib_dir` during development.
+pub fn linkEngine(b: *std.Build, core: *std.Build.Module, root: []const u8, lib_dir: []const u8) void {
+    core.addIncludePath(b.path(b.pathJoin(&.{ root, "servo" })));
+    core.addLibraryPath(.{ .cwd_relative = lib_dir });
+    core.addRPath(.{ .cwd_relative = lib_dir });
+    core.addRPathSpecial("$ORIGIN/../lib");
+    core.linkSystemLibrary("lepton_servo", .{ .use_pkg_config = .no });
+    core.linkSystemLibrary("X11", .{});
+}
+
 /// `zig build servo-window-check -Drender=native -Dservo-lib=<dir>`: installs
 /// `lepton-servo-window-check`, which opens the core's own X11 window and has Servo
 /// draw a `lepton://` page into it (`src/tools/servo_window_check.zig`).
