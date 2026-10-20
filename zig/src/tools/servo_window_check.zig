@@ -97,6 +97,10 @@ fn onLoaded(context: ?*anyopaque) callconv(.c) void {
     state.loaded = true;
 }
 
+/// The bytes a `lepton_servo_request_*` call pointed at. Called with the length the call
+/// returned, after it: an argument list is evaluated left to right, so passing the pointer
+/// and the call together read the pointer before the call set it (every URL read empty,
+/// the page was answered 404, measured).
 fn bytesOf(pointer: [*c]const u8, len: usize) []const u8 {
     if (len == 0 or pointer == null) return "";
     return pointer[0..len];
@@ -108,12 +112,15 @@ fn onRequest(context: ?*anyopaque, request: ?*c.LeptonServoRequest) callconv(.c)
     const state: *State = @ptrCast(@alignCast(context orelse return));
 
     var url_ptr: [*c]const u8 = null;
-    const url = bytesOf(url_ptr, c.lepton_servo_request_url(req, &url_ptr));
+    const url_len = c.lepton_servo_request_url(req, &url_ptr);
+    const url = bytesOf(url_ptr, url_len);
     var body_ptr: [*c]const u8 = null;
-    const body = bytesOf(body_ptr, c.lepton_servo_request_body(req, &body_ptr));
+    const body_len = c.lepton_servo_request_body(req, &body_ptr);
+    const body = bytesOf(body_ptr, body_len);
 
     var method_ptr: [*c]const u8 = null;
-    const method = bytesOf(method_ptr, c.lepton_servo_request_method(req, &method_ptr));
+    const method_len = c.lepton_servo_request_method(req, &method_ptr);
+    const method = bytesOf(method_ptr, method_len);
     std.debug.print("request         {s} {s} ({d} bytes)\n", .{ method, url, body.len });
 
     const origin = "lepton://localhost";
