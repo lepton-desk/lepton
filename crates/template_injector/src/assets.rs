@@ -769,7 +769,10 @@ mod tests {
             entry.contains(".product = \"Bob's \\\"App\\\"\""),
             "the quote is escaped in the product literal"
         );
-        ensure!(entry.contains("\"A \\\\ B\""), "the backslash is escaped in the title");
+        ensure!(
+            entry.contains("\"A \\\\ B\""),
+            "the backslash is escaped in the title"
+        );
         assert_eq!(super::zig_text("a\nb"), "a\\nb");
         Ok(())
     }

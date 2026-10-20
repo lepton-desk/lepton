@@ -32,6 +32,16 @@ impl Version {
             Some((core, pre)) => (core, Some(pre.to_owned())),
             None => (text, None),
         };
+        // The registry's answer is written into `package.json`: a pre-release is semver's
+        // dot-separated `[0-9A-Za-z-]` words and nothing that could leave the JSON string.
+        if let Some(pre) = &pre {
+            let word = |part: &str| {
+                !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            };
+            if !pre.split('.').all(word) {
+                return None;
+            }
+        }
         let mut parts = core.split('.').map(str::parse::<u64>);
         let major = parts.next()?.ok()?;
         let minor = parts.next()?.ok()?;
@@ -332,6 +342,8 @@ mod tests {
             Some(version("0.2.0-beta.1")?)
         );
         assert_eq!(version_in("npm error 404\n"), None::<Version>);
+        assert_eq!(Version::parse("1.0.0-beta\",\"x"), None::<Version>);
+        assert_eq!(Version::parse("1.0.0-beta..1"), None::<Version>);
         Ok(())
     }
 }

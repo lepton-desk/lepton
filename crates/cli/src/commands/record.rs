@@ -227,7 +227,12 @@ impl ReplayFlags {
                 file.display()
             )));
         }
-        let home = std::env::temp_dir().join(format!("lepton-replay-{}", std::process::id()));
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let home =
+            std::env::temp_dir().join(format!("lepton-replay-{}-{stamp}", std::process::id()));
         let mut env = replay_environment(&file, &home, self.page);
         if self.close {
             require_closing(&root)?;
@@ -238,9 +243,11 @@ impl ReplayFlags {
             print_launch(&built, &env);
             return Ok(());
         }
-        // Made, not only named: WebView2 does not create `%LOCALAPPDATA%` itself.
-        for dir in std::iter::once(home.clone()).chain(crate::platform::isolated_directories(&home))
-        {
+        // Made, not only named: WebView2 does not create `%LOCALAPPDATA%` itself. The home
+        // is made new and owner-only, so a directory or link another user left under that
+        // name in the shared temporary directory is an error, never the replay's home.
+        private_dir(&home)?;
+        for dir in crate::platform::isolated_directories(&home) {
             std::fs::create_dir_all(&dir).map_err(|error| {
                 CliError::Invalid(format!("could not create {}: {error}", dir.display()))
             })?;
@@ -249,6 +256,16 @@ impl ReplayFlags {
         let _ = std::fs::remove_dir_all(&home);
         replayed.map_err(verdict)
     }
+}
+
+/// Creates `dir`, which must not exist yet, readable by its owner only.
+fn private_dir(dir: &std::path::Path) -> Result<(), CliError> {
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder
+        .create(dir)
+        .map_err(|error| CliError::Invalid(format!("could not create {}: {error}", dir.display())))
 }
 
 /// The application's exit code, as the replay's verdict; its report is already printed.

@@ -39,6 +39,11 @@ pub fn sync(root: &Path, core_dir: &Path) -> Result<Synced, CliError> {
         return Ok(Synced::NothingGenerated);
     };
     let target = root.join(TARGET);
+    // A link is never written through: a dangling one would create its target wherever it
+    // points, outside the project.
+    if std::fs::symlink_metadata(&target).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Ok(Synced::Foreign);
+    }
     match std::fs::read_to_string(&target) {
         Ok(existing) if existing == text => return Ok(Synced::Unchanged),
         Ok(existing) if !existing.starts_with(HEADER) => return Ok(Synced::Foreign),
@@ -102,8 +107,8 @@ pub fn sync_and_report(root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{GENERATED, HEADER, Synced, TARGET, sync, types_first};
-    use lepton_orchestrator::testing::{Failure, Scratch};
-    use lepton_orchestrator::{assert_eq, assert_ok};
+    use lepton_orchestrator::testing::{Failure, Scratch, fail};
+    use lepton_orchestrator::{assert_eq, assert_ok, ensure};
 
     fn generated(text: &str) -> String {
         format!("{HEADER} by its core build.\n{text}")
@@ -192,6 +197,28 @@ mod tests {
             Synced::Foreign
         );
         assert_eq!(scratch.read(TARGET)?, "// mine\n");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_is_never_written_through() -> Result<(), Failure> {
+        let scratch = Scratch::new("command-types-link")?;
+        let core = scratch.path().join("src-lepton");
+        scratch.write(&format!("src-lepton/{GENERATED}"), &generated("x\n"))?;
+        let target = scratch.path().join(TARGET);
+        let outside = scratch.path().join("outside.d.ts");
+        std::fs::create_dir_all(target.parent().ok_or_else(|| fail("a parent", ""))?)
+            .map_err(|e| fail("a directory", e))?;
+        std::os::unix::fs::symlink(&outside, &target).map_err(|e| fail("a link", e))?;
+        assert_eq!(
+            assert_ok!(sync(scratch.path(), &core), "link"),
+            Synced::Foreign
+        );
+        ensure!(
+            !outside.exists(),
+            "nothing was written where the link points"
+        );
         Ok(())
     }
 
