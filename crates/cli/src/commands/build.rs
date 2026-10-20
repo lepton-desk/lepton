@@ -58,10 +58,11 @@ pub struct Flags {
     #[arg(long)]
     pub webview: bool,
 
-    /// Links the embedded Servo engine on Linux.
+    /// Servo, the experimental second engine (Linux). Not in this release yet,
+    /// so it is refused with the reason ([`SERVO_NOT_YET`]).
     ///
-    /// Only meaningful for Linux, and refused elsewhere rather than silently
-    /// ignored: a flag that does nothing is worse than one that says why.
+    /// Kept as a flag rather than removed: a script that asks for Servo gets the
+    /// reason, not clap's "unexpected argument".
     #[arg(long, requires = "linux")]
     pub servo: bool,
 
@@ -69,6 +70,9 @@ pub struct Flags {
     #[arg(long, short = 'n')]
     pub dry_run: bool,
 }
+
+/// Why `--servo` is refused: the build would be WPE WebKit under Servo's name.
+pub const SERVO_NOT_YET: &str = "--servo: Servo is not in this release yet. It is coming as an experimental second engine; until it links, a --servo build would be WPE WebKit under Servo's name, so it is refused. Leave out --servo to build with WPE WebKit.";
 
 impl Flags {
     /// Builds the project in the current directory.
@@ -84,6 +88,12 @@ impl Flags {
 
     /// Builds the project rooted at `root`.
     pub fn build_in(&self, root: &Path) -> Outcome {
+        // Measured 2026-10-18: `--servo` exited 0 with a WPE WebKit binary, since the
+        // template's `build.zig` only checked `-Dservo` and linked nothing. Refused before
+        // anything runs, a dry run included, until a Servo build exists.
+        if self.servo {
+            return Err(CliError::Invalid(SERVO_NOT_YET.to_owned()));
+        }
         lepton_orchestrator::require_project(root)?;
         // A SIGTERM to `lepton` ends the build or the application it started.
         lepton_orchestrator::supervise::install();
@@ -546,6 +556,34 @@ mod tests {
             "a Servo build must not target another platform: {:?}",
             steps[0].args
         );
+        Ok(())
+    }
+
+    #[test]
+    fn servo_is_refused_with_its_reason_a_dry_run_included() -> Result<(), Failure> {
+        // `--servo` once exited 0 with a WPE WebKit binary. Until Servo links, every
+        // build that asks for it stops before running anything and says why.
+        let (scratch, _) = project("build-servo-refused", RenderPath::Webview)?;
+        for dry_run in [false, true] {
+            let flags = Flags {
+                linux: true,
+                servo: true,
+                dry_run,
+                ..Flags::default()
+            };
+            match flags.build_in(scratch.path()) {
+                Err(super::CliError::Invalid(reason)) => {
+                    assert_contains!(&reason, "Servo is not in this release yet");
+                    assert_contains!(&reason, "Leave out --servo");
+                }
+                other => {
+                    return Err(Failure {
+                        claim: format!("--servo (dry run {dry_run}) is refused"),
+                        actual: format!("{other:?}"),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 

@@ -244,6 +244,13 @@ fn check_render_options(render: []const u8, servo: bool) !void {
         return error.UnknownRenderPath;
     }
 
+    // `-Dservo` once linked nothing and the binary was WPE WebKit under Servo's name.
+    // Until Servo links, it stops the build with the reason.
+    if (servo) {
+        std.log.err("lepton: -Dservo: Servo is not in this release yet; a build with it would be WPE WebKit under Servo's name. Leave it out to build with WPE WebKit", .{});
+        return error.ServoNotInThisRelease;
+    }
+
     if (servo and !webview) {
         std.log.err("lepton: -Dservo needs the webview render path: Servo is the engine the webview renders with, so there is nothing for it to serve in the native path", .{});
         return error.ServoNeedsWebview;
