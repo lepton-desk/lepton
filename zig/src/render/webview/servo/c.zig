@@ -6,10 +6,7 @@
 
 const std = @import("std");
 
-pub const c = @cImport({
-    @cInclude("lepton_servo.h");
-    @cInclude("X11/Xlib.h");
-});
+pub const c = @import("c_servo");
 
 comptime {
     std.debug.assert(@sizeOf(c.LeptonServoSurface) == 40);

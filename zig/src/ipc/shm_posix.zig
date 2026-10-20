@@ -16,15 +16,7 @@ const std = @import("std");
 const posix = std.posix;
 const Allocator = std.mem.Allocator;
 
-const c = @cImport({
-    @cDefine("_GNU_SOURCE", "1");
-    @cInclude("errno.h");
-    @cInclude("fcntl.h");
-    @cInclude("sys/mman.h");
-    @cInclude("sys/stat.h");
-    @cInclude("sys/types.h");
-    @cInclude("unistd.h");
-});
+const c = @import("c_shm_posix");
 
 /// Alignment of every mapping this module hands out.
 pub const page_align = std.heap.page_size_min;

@@ -18,10 +18,7 @@ pub const glyph_text = @import("glyph_text.zig");
 /// This build can draw the command list on the GPU (`core.gles3.available`).
 pub const available = true;
 
-const c = @cImport({
-    @cInclude("EGL/egl.h");
-    @cInclude("GLES3/gl3.h");
-});
+const c = @import("c_gles3");
 
 /// `EGL_OPENGL_ES3_BIT` (EGL 1.5 / `EGL_KHR_create_context`), not in every `egl.h`.
 const egl_opengl_es3_bit: c.EGLint = 0x0040;
@@ -420,7 +417,11 @@ test "a glyph is the atlas's coverage, tinted" {
     var glyphs = try atlas.Atlas.init(std.testing.allocator);
     defer glyphs.deinit(std.testing.allocator);
     // A 4×4 coverage block: left half full, right half none.
-    const bitmap = [_]u8{ 255, 255, 0, 0 } ** 4;
+    const bitmap = comptime blk: {
+        var bytes: [16]u8 = undefined;
+        for (0..4) |at| @memcpy(bytes[at * 4 ..][0..4], &[_]u8{ 255, 255, 0, 0 });
+        break :blk bytes;
+    };
     const slot = (try glyphs.put(std.testing.allocator, .{ .font = 0, .glyph = 1, .size = 4 }, 4, 4, 4, &bitmap, 0, 4)).?;
     var list: scene.List = .{};
     defer list.deinit(std.testing.allocator);

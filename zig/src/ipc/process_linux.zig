@@ -7,11 +7,7 @@ const std = @import("std");
 const testing = std.testing;
 const posix = std.posix;
 
-const c = @cImport({
-    @cInclude("signal.h");
-    @cInclude("stdio.h");
-    @cInclude("unistd.h");
-});
+const c = @import("c_process");
 
 /// Identifies one process, unambiguously.
 pub const Identity = struct {
@@ -103,7 +99,7 @@ pub const Stat = struct {
 
 fn readStat(pid: u32) ?Stat {
     var path_buffer: [64]u8 = undefined;
-    const path = std.fmt.bufPrintZ(&path_buffer, "/proc/{d}/stat", .{pid}) catch return null;
+    const path = std.fmt.bufPrintSentinel(&path_buffer, "/proc/{d}/stat", .{pid}, 0) catch return null;
 
     const file = c.fopen(path.ptr, "r") orelse return null;
     defer _ = c.fclose(file);

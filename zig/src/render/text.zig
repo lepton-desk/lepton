@@ -39,9 +39,7 @@
 const std = @import("std");
 const surface = @import("surface.zig");
 
-const cairo = @cImport({
-    @cInclude("cairo.h");
-});
+const cairo = @import("c_cairo");
 
 pub const Error = error{
     /// Cairo refused the buffer, so nothing can be drawn into it.

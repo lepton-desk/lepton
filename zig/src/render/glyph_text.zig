@@ -14,12 +14,7 @@ const std = @import("std");
 const scene = @import("scene.zig");
 const atlas = @import("atlas.zig");
 
-const c = @cImport({
-    @cInclude("freetype/freetype.h");
-    @cInclude("hb.h");
-    @cInclude("hb-ft.h");
-    @cInclude("fontconfig/fontconfig.h");
-});
+const c = @import("c_glyph");
 
 pub const Error = error{ NoFreeType, NoFace, NoSize, NoFont, NoShaping, AtlasFull, OutOfMemory };
 

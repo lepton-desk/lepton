@@ -15,7 +15,8 @@ pub const length = 32;
 
 /// Where the key goes in text written before it exists (the comptime layout); replaced in
 /// place, so it has the key's length.
-pub const marker: *const [length]u8 = "#" ** length;
+pub const marker: *const [length]u8 = &marker_bytes;
+const marker_bytes: [length]u8 = @splat('#');
 
 var key: [length]u8 = undefined;
 var made = false;
@@ -63,11 +64,11 @@ test "the key is hex, stable within a run, and opens only its own paths" {
     const own = try std.fmt.bufPrint(&path_buffer, "/__lepton/{s}/invoke", .{first});
     try std.testing.expectEqualStrings("/invoke", corePath(own).?);
     try std.testing.expect(corePath("/__lepton/invoke") == null);
-    try std.testing.expect(corePath("/__lepton/" ++ "0" ** length ++ "/invoke") == null or
-        std.mem.eql(u8, &first, "0" ** length));
+    try std.testing.expect(corePath("/__lepton/" ++ @as([length]u8, @splat('0')) ++ "/invoke") == null or
+        std.mem.eql(u8, &first, &@as([length]u8, @splat('0'))));
     try std.testing.expect(corePath("/assets/app.js") == null);
 
-    var text = ("url:\"lepton://localhost/__lepton/" ++ "#" ** length ++ "/invoke\"").*;
+    var text = ("url:\"lepton://localhost/__lepton/" ++ marker_bytes ++ "/invoke\"").*;
     fill(&text);
     try std.testing.expect(std.mem.indexOf(u8, &text, &first) != null);
     try std.testing.expect(std.mem.indexOf(u8, &text, "#") == null);

@@ -16,14 +16,7 @@
 
 const std = @import("std");
 
-const c = @cImport({
-    @cDefine("WIN32_LEAN_AND_MEAN", "1");
-    @cInclude("windows.h");
-    @cInclude("objbase.h");
-    @cInclude("shlwapi.h");
-    @cInclude("psapi.h");
-    @cInclude("WebView2.h");
-});
+const c = @import("c_webview2_check");
 
 const W = std.unicode.utf8ToUtf16LeStringLiteral;
 

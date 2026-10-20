@@ -344,7 +344,7 @@ const Slot = struct {
     timeout: c_uint = 0,
 };
 
-var slots = [_]Slot{.{}} ** slot_count;
+var slots: [slot_count]Slot = @splat(.{});
 
 /// Reads a buffer back and records what was in it.
 ///
@@ -537,7 +537,6 @@ fn renderBuffer(view: ?*anyopaque, buffer: ?*anyopaque, damage: ?*const anyopaqu
     counters.render_buffer_calls += 1;
     return 1;
 }
-
 
 /// Hands the engine an EGL display.
 ///

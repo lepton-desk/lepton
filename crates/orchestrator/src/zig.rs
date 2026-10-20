@@ -1,24 +1,27 @@
 //! Which Zig builds a project's core.
 //!
-//! The core and every project's `build.zig` are written against one Zig release series:
-//! Zig's standard library and build API change between releases. Measured 2026-10-20:
-//! Zig 0.17.0 stops at Lepton's own `build.zig` with 8 errors (`Build.getInstallPath` is
-//! gone, `build_support.zig`'s calls take one argument fewer). The same day Arch moved its
-//! `zig` package to 0.17.0, so `zig` on `PATH` stopped being one Lepton can use.
+//! The core and every project's `build.zig` build with Zig 0.16 and 0.17: Zig's standard
+//! library and build API change between releases, and the differences are kept in one
+//! place each (`compat.zig`, `build_support.zig`'s `zig_017`, C headers translated by the
+//! build since 0.17 has no `@cImport`). Any other series is refused rather than tried.
 //!
 //! So the Zig is chosen, not assumed: `LEPTON_ZIG` when set (and only it), otherwise the
-//! first of `zig` and `zig-0.16` (the name Arch's `zig0.16-bin` installs) that reports a
-//! 0.16 version. Every step whose program is `zig` runs the chosen one ([`program`]).
+//! first of `zig`, `zig-0.17` and `zig-0.16` (the names Arch's `zig0.17-bin` and
+//! `zig0.16-bin` install) that reports a series Lepton builds with. Every step whose
+//! program is `zig` runs the chosen one ([`program`]).
 
 use std::sync::OnceLock;
 
 use crate::toolchain::{ToolProblem, ToolStatus, probe_at};
 
 /// The release series Lepton builds with.
-pub const SERIES: &str = "0.16";
+pub const SERIES: [&str; 2] = ["0.16", "0.17"];
+
+/// The series named in a message: "0.16 or 0.17".
+pub const SERIES_TEXT: &str = "0.16 or 0.17";
 
 /// Names tried on `PATH`, in order, when `LEPTON_ZIG` is not set.
-pub const NAMES: [&str; 2] = ["zig", "zig-0.16"];
+pub const NAMES: [&str; 3] = ["zig", "zig-0.17", "zig-0.16"];
 
 /// The environment variable that names the Zig to use, as a path or a name on `PATH`.
 pub const OVERRIDE: &str = "LEPTON_ZIG";
@@ -49,11 +52,13 @@ pub fn program() -> String {
         .clone()
 }
 
-/// Whether a printed version is of the series Lepton builds with (`0.16.0`, `0.16.1`).
+/// Whether a printed version is of a series Lepton builds with (`0.16.1`, `0.17.0`).
 pub fn fits(version: &str) -> bool {
-    version
-        .strip_prefix(SERIES)
-        .is_some_and(|rest| rest.starts_with('.'))
+    SERIES.iter().any(|series| {
+        version
+            .strip_prefix(series)
+            .is_some_and(|rest| rest.starts_with('.'))
+    })
 }
 
 /// The choice itself, with the running of each candidate passed in so it is tested.
@@ -89,7 +94,7 @@ pub fn choose(explicit: Option<&str>, run: impl Fn(&str) -> ToolStatus) -> ToolS
             version: None,
             problem: Some(ToolProblem::WrongVersion {
                 found,
-                needed: SERIES,
+                needed: SERIES_TEXT,
             }),
         },
         None => first.unwrap_or(ToolStatus {
@@ -125,10 +130,13 @@ mod tests {
     }
 
     #[test]
-    fn only_the_0_16_series_fits() -> Result<(), Failure> {
-        ensure!(fits("0.16.0") && fits("0.16.1"), "0.16.x fits");
+    fn the_0_16_and_0_17_series_fit() -> Result<(), Failure> {
         ensure!(
-            !fits("0.17.0") && !fits("0.160.0") && !fits("0.15.2"),
+            fits("0.16.0") && fits("0.16.1") && fits("0.17.0"),
+            "0.16.x and 0.17.x fit"
+        );
+        ensure!(
+            !fits("0.18.0") && !fits("0.160.0") && !fits("0.15.2") && !fits("0.170.1"),
             "others do not"
         );
         Ok(())
@@ -143,27 +151,39 @@ mod tests {
     }
 
     #[test]
-    fn after_a_0_17_zig_the_side_by_side_0_16_is_found() -> Result<(), Failure> {
+    fn the_zig_on_path_is_used_whether_0_16_or_0_17() -> Result<(), Failure> {
         // Arch on 2026-10-20: `zig` is 0.17.0, `zig0.16-bin` installs `zig-0.16`.
         let chosen = choose(None, |program| match program {
             "zig" => found("0.17.0"),
             "zig-0.16" => found("0.16.0"),
             _ => absent(),
         });
-        assert_eq!(chosen.path.as_deref(), Some("zig-0.16"));
-        assert_eq!(chosen.version.as_deref(), Some("0.16.0"));
+        assert_eq!(chosen.path.as_deref(), Some("zig"));
+        assert_eq!(chosen.version.as_deref(), Some("0.17.0"));
         Ok(())
     }
 
     #[test]
-    fn only_a_0_17_zig_is_refused_by_name_and_version() -> Result<(), Failure> {
+    fn after_another_series_a_side_by_side_one_is_found() -> Result<(), Failure> {
         let chosen = choose(None, |program| match program {
-            "zig" => found("0.17.0"),
+            "zig" => found("0.18.0"),
+            "zig-0.16" => found("0.16.0"),
             _ => absent(),
         });
-        ensure!(!chosen.is_usable(), "a 0.17 Zig is not usable");
+        assert_eq!(chosen.path.as_deref(), Some("zig-0.16"));
+        Ok(())
+    }
+
+    #[test]
+    fn only_another_series_is_refused_by_name_and_version() -> Result<(), Failure> {
+        let chosen = choose(None, |program| match program {
+            "zig" => found("0.18.0"),
+            _ => absent(),
+        });
+        ensure!(!chosen.is_usable(), "a 0.18 Zig is not usable");
         let text = chosen.describe();
-        assert_contains!(&text, "0.17.0 (zig)");
+        assert_contains!(&text, "0.18.0 (zig)");
+        assert_contains!(&text, "0.16 or 0.17");
         assert_contains!(&text, "LEPTON_ZIG");
         Ok(())
     }
@@ -182,8 +202,8 @@ mod tests {
             _ => found("0.16.0"),
         });
         assert_eq!(chosen.path.as_deref(), Some("/opt/zig0.16/zig"));
-        let wrong = choose(Some("/usr/bin/zig"), |_| found("0.17.0"));
-        assert_contains!(&wrong.describe(), "0.17.0 (/usr/bin/zig)");
+        let wrong = choose(Some("/usr/bin/zig"), |_| found("0.18.0"));
+        assert_contains!(&wrong.describe(), "0.18.0 (/usr/bin/zig)");
         Ok(())
     }
 }

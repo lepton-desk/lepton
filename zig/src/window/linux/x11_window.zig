@@ -14,13 +14,7 @@
 const std = @import("std");
 const posix = std.posix;
 
-const xcb = @cImport({
-    @cInclude("xcb/xcb.h");
-    @cInclude("xcb/xproto.h");
-    // `xcb_image_t` and `xcb_put_image` live in their own header; `xcb.h` does not
-    // pull them in.
-    @cInclude("xcb/xcb_image.h");
-});
+const xcb = @import("c_x11");
 
 const window = @import("../window.zig");
 const platform_display = @import("../../platform/linux/display.zig");

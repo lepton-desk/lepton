@@ -227,7 +227,7 @@ test "a start time is not interchangeable with any other" {
 
 test "a record naming this process is held, and a clean release leaves nothing" {
     var buffered: [96]u8 = undefined;
-    const name = std.fmt.bufPrintZ(&buffered, "/lepton-own-live-{d}", .{process.currentPid()}) catch unreachable;
+    const name = std.fmt.bufPrintSentinel(&buffered, "/lepton-own-live-{d}", .{process.currentPid()}, 0) catch unreachable;
     defer _ = shm.unlink(testing.allocator, name) catch {};
 
     var first = try acquire(testing.allocator, name);
@@ -246,7 +246,7 @@ test "a record naming this process is held, and a clean release leaves nothing" 
 
 test "a record naming a process that is not this one is taken over" {
     var buffered: [96]u8 = undefined;
-    const name = std.fmt.bufPrintZ(&buffered, "/lepton-own-reused-{d}", .{process.currentPid()}) catch unreachable;
+    const name = std.fmt.bufPrintSentinel(&buffered, "/lepton-own-reused-{d}", .{process.currentPid()}, 0) catch unreachable;
 
     const owner = try ownerName(testing.allocator, name);
     defer testing.allocator.free(owner);
@@ -283,7 +283,7 @@ test "a record naming a process that is not this one is taken over" {
 
 test "a zeroed record is stale, not a live process named zero" {
     var buffered: [96]u8 = undefined;
-    const name = std.fmt.bufPrintZ(&buffered, "/lepton-own-zero-{d}", .{process.currentPid()}) catch unreachable;
+    const name = std.fmt.bufPrintSentinel(&buffered, "/lepton-own-zero-{d}", .{process.currentPid()}, 0) catch unreachable;
 
     const owner = try ownerName(testing.allocator, name);
     defer testing.allocator.free(owner);

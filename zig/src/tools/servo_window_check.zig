@@ -15,11 +15,7 @@
 const std = @import("std");
 const core = @import("lepton_core");
 
-const c = @cImport({
-    @cInclude("lepton_servo.h");
-    @cInclude("X11/Xlib.h");
-    @cInclude("xcb/xcb.h");
-});
+const c = @import("c_servo_window_check");
 
 /// The body the page sends with every call; the reply is it reversed.
 const sent = [_]u8{ 0, 1, 2, 3, 127, 128, 250, 255, 76, 101, 112, 116, 111, 110 };

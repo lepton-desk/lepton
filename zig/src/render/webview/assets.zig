@@ -286,7 +286,7 @@ test "the types a Vite bundle needs are named" {
 test "a real file is read whole, and a missing one is not" {
     if (windows) return loadsOnWindows();
     var name_buffer: [64]u8 = undefined;
-    const name = try std.fmt.bufPrintZ(&name_buffer, "/tmp/lepton-assets-{d}.bin", .{std.c.getpid()});
+    const name = try std.fmt.bufPrintSentinel(&name_buffer, "/tmp/lepton-assets-{d}.bin", .{std.c.getpid()}, 0);
     const fd = std.c.open(name.ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true, .CLOEXEC = true }, @as(std.c.mode_t, 0o600));
     try std.testing.expect(fd >= 0);
     // Larger than the first buffer, so the growth path runs.

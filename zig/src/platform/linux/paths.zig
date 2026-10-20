@@ -12,6 +12,7 @@
 //! would be a different directory on this very machine.
 
 const std = @import("std");
+const compat = @import("../../compat.zig");
 const linux = std.os.linux;
 
 /// The directories a page may name instead of a path.
@@ -50,8 +51,8 @@ pub const Base = enum(u8) {
     }
 
     pub fn fromVariable(name: []const u8) ?Base {
-        inline for (std.meta.fields(Base)) |field| {
-            const base: Base = @enumFromInt(field.value);
+        inline for (comptime compat.enumValues(Base)) |value| {
+            const base: Base = @enumFromInt(value);
             if (base != .none and std.mem.eql(u8, name, base.variable())) return base;
         }
         return null;
@@ -328,9 +329,9 @@ test "this machine's own directories resolve" {
 test "missing directories are made 0700, existing ones keep their mode" {
     if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
     var name: [96]u8 = undefined;
-    const base = try std.fmt.bufPrintZ(&name, "/tmp/lepton-paths-test-{d}", .{linux.getpid()});
+    const base = try std.fmt.bufPrintSentinel(&name, "/tmp/lepton-paths-test-{d}", .{linux.getpid()}, 0);
     var deep: [160]u8 = undefined;
-    const target = try std.fmt.bufPrintZ(&deep, "{s}/a/b", .{base});
+    const target = try std.fmt.bufPrintSentinel(&deep, "{s}/a/b", .{base}, 0);
     try std.testing.expect(makePrivate(target));
     var info: linux.Statx = undefined;
     for ([_][:0]const u8{ base, target }) |path| {
@@ -344,7 +345,7 @@ test "missing directories are made 0700, existing ones keep their mode" {
     try std.testing.expect(!makePrivate("relative/path"));
     var middle: [128]u8 = undefined;
     _ = linux.unlinkat(linux.AT.FDCWD, target, linux.AT.REMOVEDIR);
-    _ = linux.unlinkat(linux.AT.FDCWD, try std.fmt.bufPrintZ(&middle, "{s}/a", .{base}), linux.AT.REMOVEDIR);
+    _ = linux.unlinkat(linux.AT.FDCWD, try std.fmt.bufPrintSentinel(&middle, "{s}/a", .{base}, 0), linux.AT.REMOVEDIR);
     _ = linux.unlinkat(linux.AT.FDCWD, base, linux.AT.REMOVEDIR);
 }
 

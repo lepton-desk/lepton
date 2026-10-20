@@ -1,0 +1,19 @@
+/* Generated from the @cImport that was in src/render/gpu/presenter.zig: translated by the build
+   (`addCModules` in build_support.zig), since Zig 0.17 has no @cImport. Each
+   include is guarded, so a missing library leaves its names out instead of
+   failing the build; the code that uses them is compiled only when it is there. */
+/* Not on Windows: a Windows build's translation must not find the host's own headers. */
+#ifndef _WIN32
+#if __has_include(<EGL/egl.h>)
+#include <EGL/egl.h>
+#endif
+#if __has_include(<GLES2/gl2.h>)
+#include <GLES2/gl2.h>
+#endif
+#if __has_include(<wayland-client.h>)
+#include <wayland-client.h>
+#endif
+#if __has_include(<wayland-egl.h>)
+#include <wayland-egl.h>
+#endif
+#endif

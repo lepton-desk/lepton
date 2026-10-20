@@ -34,13 +34,14 @@ pub fn windowCheck(
     const module = b.createModule(.{
         .root_source_file = b.path("src/tools/servo_window_check.zig"),
         .target = target,
-        .optimize = .ReleaseSafe,
+        .optimize = std.builtin.OptimizeMode.ReleaseSafe,
         .link_libc = true,
         .imports = &.{
             .{ .name = "lepton_core", .module = core },
         },
     });
     module.addIncludePath(b.path("servo"));
+    support.addCModules(b, module, .{ .root = ".", .target = target, .optimize = std.builtin.OptimizeMode.ReleaseSafe }, &.{"c_servo_window_check"});
     module.addLibraryPath(.{ .cwd_relative = lib_dir });
     module.addRPath(.{ .cwd_relative = lib_dir });
     module.linkSystemLibrary("lepton_servo", .{ .use_pkg_config = .no });

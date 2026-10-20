@@ -23,8 +23,28 @@ pub const Protocol = struct {
 /// and a non-zero probe are all the same fact to this build: the library is not
 /// available here, so the module compiles without it and the runtime probe
 /// reports the absence.
+/// Zig 0.17's build API, told apart by a declaration only it has. The other version's
+/// branch is never analysed, so each compiles against its own `std.Build`.
+pub const zig_017 = @hasDecl(std.Build, "FindProgramOptions");
+
+/// A program on `PATH`, or null.
+pub fn findProgram(b: *std.Build, name: []const u8) ?[]const u8 {
+    if (comptime zig_017) return b.findProgram(.{ .names = &.{name} });
+    return b.findProgram(&.{name}, &.{}) catch null;
+}
+
+/// Records the install prefix's `lib` directory as a string option: known while the
+/// build is configured in 0.16, filled in when it runs in 0.17.
+pub fn addInstallLibOption(b: *std.Build, opts: *std.Build.Step.Options, name: []const u8) void {
+    if (comptime zig_017) {
+        opts.addOptionPathUntracked(name, .{ .relative = .{ .base = .install_lib } });
+    } else {
+        opts.addOption([]const u8, name, b.getInstallPath(.lib, ""));
+    }
+}
+
 pub fn hasPkgConfig(b: *std.Build, pkg: []const u8) bool {
-    const found = b.findProgram(&.{"pkg-config"}, &.{}) catch return false;
+    const found = findProgram(b, "pkg-config") orelse return false;
     var code: u8 = 0;
     // `--exists` takes the leading dashes; the bare word exits non-zero even for a
     // package pkg-config can resolve, which would report every host as lacking
@@ -48,7 +68,7 @@ pub fn hasPkgConfig(b: *std.Build, pkg: []const u8) bool {
 /// boundary at. A distribution that backported either way is a case worth reading the
 /// linker message for, not worth guessing about here.
 pub fn pkgConfigVersion(b: *std.Build, pkg: []const u8) ?[]const u8 {
-    const found = b.findProgram(&.{"pkg-config"}, &.{}) catch return null;
+    const found = findProgram(b, "pkg-config") orelse return null;
     var code: u8 = 0;
     const stdout = b.runAllowFail(&.{ found, "--modversion", pkg }, &code, .ignore) catch return null;
     if (code != 0) return null;
@@ -61,7 +81,7 @@ pub fn pkgConfigVersion(b: *std.Build, pkg: []const u8) ?[]const u8 {
 /// requires `wpe-1.0` (openSUSE's and Debian's 2.54.1), one without it does not (Arch's
 /// 2.54.1, `ENABLE_WPE_LEGACY_API=OFF`). The version number cannot tell them apart.
 pub fn pkgConfigRequires(b: *std.Build, pkg: []const u8, required: []const u8) bool {
-    const found = b.findProgram(&.{"pkg-config"}, &.{}) catch return false;
+    const found = findProgram(b, "pkg-config") orelse return false;
     var code: u8 = 0;
     const stdout = b.runAllowFail(&.{ found, "--print-requires", pkg }, &code, .ignore) catch return false;
     if (code != 0) return false;
@@ -95,7 +115,7 @@ pub fn wpeBackendLibrary(b: *std.Build, pkg: []const u8) ?[]const u8 {
     // path never loads and which Arch no longer packages (measured with its `.pc`
     // hidden: `zig build webview-check` failed before compiling anything).
     if (!hasPkgConfig(b, pkg)) return null;
-    const found = b.findProgram(&.{"pkg-config"}, &.{}) catch return null;
+    const found = findProgram(b, "pkg-config") orelse return null;
     const reported = b.run(&.{ found, "--libs-only-l", pkg });
 
     var flags = std.mem.tokenizeAny(u8, reported, " \t\r\n");
@@ -116,7 +136,7 @@ pub fn wpeBackendLibrary(b: *std.Build, pkg: []const u8) ?[]const u8 {
 /// here", the other says "and here is where its headers are", and a build that had
 /// only the first would compile `@cImport` against a header set that does not exist.
 pub fn addPkgConfigIncludes(b: *std.Build, module: *std.Build.Module, pkg: []const u8) void {
-    const found = b.findProgram(&.{"pkg-config"}, &.{}) catch return;
+    const found = findProgram(b, "pkg-config") orelse return;
     var code: u8 = 0;
     const outcome = b.runAllowFail(&.{ found, "--cflags-only-I", pkg }, &code, .ignore) catch return;
     if (code != 0) return;
@@ -182,7 +202,7 @@ pub const ProtocolBindings = struct {
 };
 
 pub fn generateProtocols(b: *std.Build, root: []const u8, protocols: []const Protocol) ProtocolBindings {
-    const scanner = b.findProgram(&.{"wayland-scanner"}, &.{}) catch
+    const scanner = findProgram(b, "wayland-scanner") orelse
         @panic("wayland-scanner is required to build the Wayland path; " ++
             "install it, or build for a target that does not use Wayland");
 
@@ -238,4 +258,81 @@ pub fn throughLld(compile: *std.Build.Step.Compile) *std.Build.Step.Compile {
         compile.use_lld = true;
     }
     return compile;
+}
+
+/// What the headers under `src/c/` need to be translated.
+pub const CHeaders = struct {
+    /// The core's directory (`zig` here, `vendor/lepton-core` in a project).
+    root: []const u8,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    /// The generated Wayland protocol headers (`xdg-shell-client-protocol.h`), when built.
+    protocols: ?ProtocolBindings = null,
+};
+
+const Translated = struct { key: []const u8, module: *std.Build.Module };
+var translated: std.ArrayList(Translated) = .empty;
+
+/// The libraries whose `pkg-config --cflags` each header needs, and whether it reads the
+/// generated protocol headers or a vendored header directory (`servo`, `webview2`).
+const header_needs = .{
+    .{ "c_cairo", .{"cairo"}, "" },
+    .{ "c_glyph", .{ "freetype2", "harfbuzz", "fontconfig" }, "" },
+    .{ "c_wayland", .{"wayland-client"}, "protocols" },
+    .{ "c_wayland_probe", .{"wayland-client"}, "" },
+    .{ "c_presenter", .{ "wayland-client", "wayland-egl", "egl" }, "" },
+    .{ "c_gpu_check", .{ "wayland-client", "egl" }, "" },
+    .{ "c_gl_renderer", .{"egl"}, "" },
+    .{ "c_gles3", .{"egl"}, "" },
+    .{ "c_scene_check", .{}, "" },
+    .{ "c_xcb_probe", .{ "xcb", "xcb-randr" }, "" },
+    .{ "c_x11", .{ "xcb", "xcb-image" }, "" },
+    .{ "c_servo", .{"x11"}, "servo" },
+    .{ "c_servo_window_check", .{ "x11", "xcb" }, "servo" },
+    .{ "c_vulkan", .{"vulkan"}, "" },
+    .{ "c_shm_posix", .{}, "" },
+    .{ "c_process", .{}, "" },
+    .{ "c_win_dialog", .{}, "" },
+    .{ "c_webview2", .{}, "webview2" },
+    .{ "c_webview2_check", .{}, "webview2" },
+};
+
+/// Adds the translated headers `names` (`src/c/<name>.h`) to `module` as imports of the
+/// same names. Zig 0.17 has no `@cImport`; translating in the build works in 0.16 too.
+/// Each header is translated once per target, so every module that imports one sees the
+/// same types. Libraries are asked for only on Linux and only when pkg-config has them:
+/// every include in the headers is guarded by `__has_include`.
+pub fn addCModules(b: *std.Build, module: *std.Build.Module, headers: CHeaders, comptime names: []const []const u8) void {
+    const linux = headers.target.result.os.tag == .linux;
+    inline for (names) |name| {
+        const key = b.fmt("{s}/{s}/{s}", .{ name, @tagName(headers.target.result.os.tag), @tagName(headers.optimize) });
+        const found = for (translated.items) |entry| {
+            if (std.mem.eql(u8, entry.key, key)) break entry.module;
+        } else blk: {
+            const step = b.addTranslateC(.{
+                .root_source_file = b.path(b.pathJoin(&.{ headers.root, "src", "c", name ++ ".h" })),
+                .target = headers.target,
+                .optimize = headers.optimize,
+            });
+            inline for (header_needs) |need| {
+                if (comptime std.mem.eql(u8, need[0], name)) {
+                    if (linux) inline for (need[1]) |library| {
+                        if (hasPkgConfig(b, library)) step.linkSystemLibrary(library, .{});
+                    };
+                    if (comptime std.mem.eql(u8, need[2], "protocols")) {
+                        if (headers.protocols) |generated| {
+                            step.addIncludePath(generated.include_dir);
+                            step.step.dependOn(generated.step);
+                        }
+                    } else if (comptime need[2].len > 0) {
+                        step.addIncludePath(b.path(b.pathJoin(&.{ headers.root, need[2] })));
+                    }
+                }
+            }
+            const made = step.createModule();
+            translated.append(b.allocator, .{ .key = key, .module = made }) catch @panic("out of memory");
+            break :blk made;
+        };
+        module.addImport(name, found);
+    }
 }

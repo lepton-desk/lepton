@@ -98,10 +98,10 @@ pub fn ensureSelected(allocator: std.mem.Allocator, io: std.Io) !void {
     defer allocator.free(directory);
 
     var path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = std.fmt.bufPrintZ(&path_buffer, "{s}/{s}", .{
+    const path = std.fmt.bufPrintSentinel(&path_buffer, "{s}/{s}", .{
         directory,
         moduleFileName(),
-    }) catch return Error.ModuleMissing;
+    }, 0) catch return Error.ModuleMissing;
 
     // Opened before the engine is ever asked, for both reasons at once: the handle keeps
     // the library resident, and its `g_io_module_load` runs while the extension point
@@ -109,7 +109,7 @@ pub fn ensureSelected(allocator: std.mem.Allocator, io: std.Io) !void {
     resident = dlopen(path.ptr, rtld_now | rtld_local) orelse return Error.ModuleRefused;
 
     var dir_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_z = std.fmt.bufPrintZ(&dir_buffer, "{s}", .{directory}) catch
+    const dir_z = std.fmt.bufPrintSentinel(&dir_buffer, "{s}", .{directory}, 0) catch
         return Error.ModuleMissing;
 
     // Both variables go in together, because either alone is a broken state: a path with

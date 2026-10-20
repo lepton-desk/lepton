@@ -53,7 +53,7 @@ pub fn escape(identifier: []const u8, out: []u8) error{NoSpaceLeft}![]const u8 {
 pub fn unitName(identifier: []const u8, pid: i32, out: []u8) error{NoSpaceLeft}![:0]const u8 {
     var escaped_buffer: [256]u8 = undefined;
     const escaped = try escape(identifier, &escaped_buffer);
-    return std.fmt.bufPrintZ(out, "app-{s}-{d}.scope", .{ escaped, pid });
+    return std.fmt.bufPrintSentinel(out, "app-{s}-{d}.scope", .{ escaped, pid }, 0);
 }
 
 /// The unit the process is in, from `/proc/self/cgroup`'s unified line (`0::/…`): the

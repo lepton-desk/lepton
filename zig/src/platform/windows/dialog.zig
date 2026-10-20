@@ -25,11 +25,7 @@ pub const Filter = shared.Filter;
 pub const Options = shared.Options;
 pub const Outcome = shared.Outcome;
 
-const c = if (available) @cImport({
-    @cDefine("WIN32_LEAN_AND_MEAN", "1");
-    @cInclude("windows.h");
-    @cInclude("shobjidl.h");
-}) else struct {};
+const c = if (available) @import("c_win_dialog") else struct {};
 
 /// One dialog asked for and not yet answered. Its text is copied here: the page's
 /// argument is gone once the command returns, and the dialog is shown after that.
@@ -273,6 +269,6 @@ test "a request's text is kept in its slot, and too much is refused" {
     const patterns = try slot.keep(&.{ "*.txt", "*.md" }, ";");
     try std.testing.expectEqualStrings("Metin", slot.get(name));
     try std.testing.expectEqualStrings("*.txt;*.md", slot.get(patterns));
-    const huge = [_]u8{'a'} ** 9000;
+    const huge: [9000]u8 = @splat('a');
     try std.testing.expectError(error.TooLarge, slot.keep(&.{&huge}, ""));
 }

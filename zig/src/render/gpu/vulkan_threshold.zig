@@ -9,6 +9,7 @@
 //! the renderer fill `Caps` from the device.
 
 const std = @import("std");
+const compat = @import("../../compat.zig");
 
 /// Push constants the draw commands are laid out for: the baseline's `maxPushConstantsSize`.
 pub const push_constant_bytes = 256;
@@ -39,7 +40,7 @@ pub const Requirement = enum {
 };
 
 /// The requirements `caps` misses, in `Requirement` order; empty when it qualifies.
-pub fn missing(caps: Caps, out: *[@typeInfo(Requirement).@"enum".fields.len]Requirement) []const Requirement {
+pub fn missing(caps: Caps, out: *[compat.enumNames(Requirement).len]Requirement) []const Requirement {
     var count: usize = 0;
     const checks = [_]struct { Requirement, bool }{
         .{ .vulkan_1_3, caps.api_major > 1 or (caps.api_major == 1 and caps.api_minor >= 3) },

@@ -8,10 +8,7 @@
 
 const std = @import("std");
 
-const xcb = @cImport({
-    @cInclude("xcb/xcb.h");
-    @cInclude("xcb/randr.h");
-});
+const xcb = @import("c_xcb_probe");
 
 /// The RandR extension key, declared here rather than taken from the header.
 ///

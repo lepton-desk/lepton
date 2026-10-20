@@ -128,7 +128,7 @@ fn start(options: Options, later: invoke.Later) error{Unavailable}!void {
 
     tokens +%= 1;
     var token_buffer: [32]u8 = undefined;
-    const token = std.fmt.bufPrintZ(&token_buffer, "lepton{d}", .{tokens}) catch return error.Unavailable;
+    const token = std.fmt.bufPrintSentinel(&token_buffer, "lepton{d}", .{tokens}, 0) catch return error.Unavailable;
     var path_buffer: [256]u8 = undefined;
     const sender = std.mem.span(g.unique_name(bus) orelse return error.Unavailable);
     const request_path = requestPath(&path_buffer, sender, token) catch return error.Unavailable;

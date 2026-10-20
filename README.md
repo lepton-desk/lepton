@@ -17,7 +17,7 @@ frontend is a Vite project; Lepton puts it in a native window.
 
 ## Requirements (Linux)
 
-- Rust (stable) and Zig 0.16
+- Rust (stable) and Zig 0.16 or 0.17 (0.1.9-beta.2 and later; earlier releases need 0.16)
 - WPE WebKit 2.54+ with `wpe-platform` (`pkg-config wpe-webkit-2.0`), libsoup 3
 - Node 20+ and any of npm, pnpm, Yarn or Bun, for the frontend
 
@@ -25,8 +25,8 @@ frontend is a Vite project; Lepton puts it in a native window.
 
 The CLI is packaged for Arch as `lepton-desk` (built from source) and `lepton-desk-bin`
 (the npm binary). Until they are on the AUR (new AUR accounts are closed for now), build
-them from this repository. Lepton builds with Zig 0.16 and Arch's `zig` is 0.17, so the
-packages depend on the AUR's `zig0.16-bin`, installed beside the system Zig (`makepkg`
+them from this repository. The packaged release (0.1.8) builds with Zig 0.16 only and Arch's
+`zig` is 0.17, so the packages depend on the AUR's `zig0.16-bin`, installed beside the system Zig (`makepkg`
 does not fetch AUR dependencies itself); pacman pulls in WPE WebKit:
 
 ```bash

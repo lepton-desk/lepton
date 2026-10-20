@@ -79,7 +79,7 @@ pub fn isInspectorShortcut(keyval: c_uint, modifiers: u32) bool {
 
 /// Whether this build carries the Web Inspector: a developer's build (`lepton dev`,
 /// `lepton run`), never a release (`lepton build`, `lepton package`).
-pub const developer_tools = builtin.mode == .Debug;
+pub const developer_tools = builtin.mode == std.builtin.OptimizeMode.Debug;
 
 /// Applies the build's settings to a new view, and answers its links and new windows.
 pub fn apply(web_view: *anyopaque) void {
@@ -219,7 +219,7 @@ test "the engine callbacks are compiled" {
 }
 
 test "the inspector is a debug build's only" {
-    try std.testing.expectEqual(builtin.mode == .Debug, developer_tools);
+    try std.testing.expectEqual(builtin.mode == std.builtin.OptimizeMode.Debug, developer_tools);
 }
 
 /// Whether `uri` belongs outside the application: a web address that is not this

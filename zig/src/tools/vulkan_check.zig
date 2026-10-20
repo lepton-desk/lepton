@@ -13,9 +13,7 @@ const std = @import("std");
 const core = @import("lepton_core");
 const threshold = core.vulkanThreshold;
 
-const c = @cImport({
-    @cInclude("vulkan/vulkan.h");
-});
+const c = @import("c_vulkan");
 
 const side = 64;
 const pixel_bytes = 4;

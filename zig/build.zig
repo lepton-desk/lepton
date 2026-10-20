@@ -80,6 +80,16 @@ pub const CoreOptions = struct {
 /// listing tells you what `WPE_PLATFORM` should say.
 const platform_module_name = "wpe-display-lepton";
 
+/// The headers under `src/c/` that the core's own files import.
+const core_c_headers = [_][]const u8{
+    "c_shm_posix",   "c_process",   "c_wayland_probe", "c_xcb_probe", "c_win_dialog", "c_gles3",   "c_glyph",
+    "c_gl_renderer", "c_presenter", "c_cairo",         "c_servo",     "c_webview2",   "c_wayland", "c_x11",
+};
+
+fn cHeaders(root: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, protocols: ?ProtocolBindings) support.CHeaders {
+    return .{ .root = root, .target = target, .optimize = optimize, .protocols = protocols };
+}
+
 pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // The IPC layer maps POSIX shared memory and opens it with the platform's own
     // `shm_open`, so libc is a hard requirement rather than an option.
@@ -307,6 +317,9 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
         protocols = generated;
     }
 
+    // The C headers the core reads, translated by the build (`src/c/`, `addCModules`).
+    support.addCModules(b, core, cHeaders(options.root, options.target, options.optimize, protocols), &core_c_headers);
+
     opts.addOption(bool, "have_xcb", have_xcb);
     opts.addOption(bool, "have_xcb_randr", have_xcb_randr);
     opts.addOption(bool, "have_wayland", have_wayland);
@@ -342,7 +355,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // A cache path is the kind of path that works on the machine that built the project
     // and nowhere else, and a module found only there is a module that ships broken.
     opts.addOption([]const u8, "lepton_platform_module_name", "lib" ++ platform_module_name ++ ".so");
-    opts.addOption([]const u8, "lepton_platform_module_dir", b.getInstallPath(.lib, ""));
+    support.addInstallLibOption(b, opts, "lepton_platform_module_dir");
     core.addOptions("build_options", opts);
 
     return .{
@@ -429,6 +442,7 @@ pub fn build(b: *std.Build) void {
         });
         windows_tests.addOptions("build_options", configured.options);
         windows_tests.addIncludePath(b.path("webview2"));
+        support.addCModules(b, windows_tests, cHeaders(".", target, optimize, null), &core_c_headers);
         for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi", "shell32", "dwmapi" }) |library| {
             windows_tests.linkSystemLibrary(library, .{});
         }
@@ -457,7 +471,7 @@ pub fn build(b: *std.Build) void {
             // tests run, and the presenter's choice of path is tested where it is made.
             .root_source_file = b.path("src/gpu_tests.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = std.builtin.OptimizeMode.Debug,
             .link_libc = true,
         });
         gpu_module.linkSystemLibrary("egl", .{});
@@ -468,6 +482,7 @@ pub fn build(b: *std.Build) void {
         gpu_module.linkSystemLibrary("freetype2", .{});
         gpu_module.linkSystemLibrary("harfbuzz", .{});
         gpu_module.linkSystemLibrary("fontconfig", .{});
+        support.addCModules(b, gpu_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &core_c_headers);
 
         const gpu_tests = support.throughLld(b.addTest(.{ .root_module = gpu_module }));
         const run_gpu_tests = b.addRunArtifact(gpu_tests);
@@ -481,7 +496,7 @@ pub fn build(b: *std.Build) void {
         const gles3_module = b.createModule(.{
             .root_source_file = b.path("src/render/gles3.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = std.builtin.OptimizeMode.Debug,
             .link_libc = true,
         });
         gles3_module.linkSystemLibrary("egl", .{});
@@ -490,6 +505,7 @@ pub fn build(b: *std.Build) void {
         gles3_module.linkSystemLibrary("freetype2", .{});
         gles3_module.linkSystemLibrary("harfbuzz", .{});
         gles3_module.linkSystemLibrary("fontconfig", .{});
+        support.addCModules(b, gles3_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &core_c_headers);
         const gles3_tests = support.throughLld(b.addTest(.{ .root_module = gles3_module }));
         gpu_test_step.dependOn(&b.addRunArtifact(gles3_tests).step);
 
@@ -499,11 +515,12 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path("src/tools/scene_check.zig"),
                 .target = target,
                 // Timed: the driver's work, not a Debug build's bounds checks.
-                .optimize = .ReleaseSafe,
+                .optimize = std.builtin.OptimizeMode.ReleaseSafe,
                 .link_libc = true,
                 .imports = &.{.{ .name = "gles3", .module = gles3_module }},
             }),
         }));
+        support.addCModules(b, scene_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.ReleaseSafe, null), &.{"c_scene_check"});
         const scene_check_step = b.step(
             "scene-check",
             "Time a window-sized scene of cards on GLES 3 and say what crosses to the GPU",
@@ -520,7 +537,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             // ReleaseFast so the figure describes the shipped code path rather
             // than a debug build's bounds checks.
-            .optimize = .ReleaseFast,
+            .optimize = std.builtin.OptimizeMode.ReleaseFast,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "lepton_core", .module = core },
@@ -553,7 +570,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tools/window_check.zig"),
             .target = target,
-            .optimize = .ReleaseSafe,
+            .optimize = std.builtin.OptimizeMode.ReleaseSafe,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "lepton_core", .module = core },
@@ -579,7 +596,7 @@ pub fn build(b: *std.Build) void {
                 std.builtin.OptimizeMode,
                 "native-check-optimize",
                 "Optimisation for the native check tool (default: Debug)",
-            ) orelse .Debug,
+            ) orelse std.builtin.OptimizeMode.Debug,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "lepton_core", .module = core },
@@ -608,7 +625,7 @@ pub fn build(b: *std.Build) void {
                 std.builtin.OptimizeMode,
                 "webview-check-optimize",
                 "Optimisation for the webview check tool (default: Debug)",
-            ) orelse .Debug,
+            ) orelse std.builtin.OptimizeMode.Debug,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "lepton_core", .module = core },
@@ -632,11 +649,12 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/webview2_check.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = std.builtin.OptimizeMode.Debug,
                 .link_libc = true,
             }),
         }));
         webview2_check.root_module.addIncludePath(b.path("webview2"));
+        support.addCModules(b, webview2_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_webview2_check"});
         for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi" }) |name| {
             webview2_check.root_module.linkSystemLibrary(name, .{});
         }
@@ -656,7 +674,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/engine_caps.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = std.builtin.OptimizeMode.Debug,
                 .link_libc = true,
                 .imports = &.{
                     .{ .name = "lepton_core", .module = core },
@@ -678,7 +696,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/platform_check.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = std.builtin.OptimizeMode.Debug,
                 .link_libc = true,
                 .imports = &.{
                     .{ .name = "lepton_core", .module = core },
@@ -696,7 +714,9 @@ pub fn build(b: *std.Build) void {
         // executable first, so it is told where the build put it. This is the one place
         // a build directory is allowed to appear, and it is the override the runtime
         // documents for exactly this case.
-        run_platform_check.setEnvironmentVariable(
+        // Zig 0.17 knows the prefix only when the build runs; the tool then finds the
+        // module through `lepton_platform_module_dir`, which the build fills in.
+        if (comptime !support.zig_017) run_platform_check.setEnvironmentVariable(
             "LEPTON_PLATFORM_MODULE_DIR",
             b.getInstallPath(.lib, ""),
         );
@@ -719,7 +739,7 @@ pub fn build(b: *std.Build) void {
         const gpu_module = b.createModule(.{
             .root_source_file = b.path("src/tools/gpu_check.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = std.builtin.OptimizeMode.Debug,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "lepton_core", .module = core },
@@ -730,6 +750,7 @@ pub fn build(b: *std.Build) void {
         // separate libraries. Linking only EGL leaves `glClear` undefined at link time.
         gpu_module.linkSystemLibrary("GLESv2", .{});
         gpu_module.linkSystemLibrary("wayland-egl", .{});
+        support.addCModules(b, gpu_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_gpu_check"});
         // The bare-surface probe builds a `wl_surface` itself rather than taking the
         // window's, which means it needs the Wayland client library directly instead of
         // inheriting it from the core module.
@@ -751,7 +772,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/scene_window_check.zig"),
                 .target = target,
-                .optimize = .ReleaseSafe,
+                .optimize = std.builtin.OptimizeMode.ReleaseSafe,
                 .link_libc = true,
                 .imports = &.{.{ .name = "lepton_core", .module = core }},
             }),
@@ -771,13 +792,14 @@ pub fn build(b: *std.Build) void {
         const vulkan_module = b.createModule(.{
             .root_source_file = b.path("src/tools/vulkan_check.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = std.builtin.OptimizeMode.Debug,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "lepton_core", .module = core },
             },
         });
         vulkan_module.linkSystemLibrary("vulkan", .{});
+        support.addCModules(b, vulkan_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_vulkan"});
         const vulkan_check = support.throughLld(b.addExecutable(.{
             .name = "lepton-vulkan-check",
             .root_module = vulkan_module,

@@ -12,9 +12,7 @@ const std = @import("std");
 const gles3 = @import("gles3");
 const scene = gles3.scene;
 const glyph_text = gles3.glyph_text;
-const c = @cImport({
-    @cInclude("GLES3/gl3.h");
-});
+const c = @import("c_scene_check");
 
 const width = 1200;
 const height = 800;

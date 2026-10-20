@@ -72,7 +72,7 @@ pub fn watch(root_fd: i32, relative: [:0]const u8) Error!u32 {
     const fd = try beneath(root_fd, relative, .{ .PATH = true, .CLOEXEC = true }, 0);
     defer _ = linux.close(fd);
     var through: [32]u8 = undefined;
-    const path = std.fmt.bufPrintZ(&through, "/proc/self/fd/{d}", .{fd}) catch return error.Failed;
+    const path = std.fmt.bufPrintSentinel(&through, "/proc/self/fd/{d}", .{fd}, 0) catch return error.Failed;
     const mask: u32 = linux.IN.CREATE | linux.IN.CLOSE_WRITE | linux.IN.DELETE | linux.IN.MOVED_FROM |
         linux.IN.MOVED_TO | linux.IN.DELETE_SELF | linux.IN.MOVE_SELF;
     const wd = linux.inotify_add_watch(inotify_fd, path.ptr, mask);
@@ -403,15 +403,17 @@ const Tree = struct {
 
     fn shell(tree: *const Tree, comptime format: []const u8) !void {
         var command: [1024]u8 = undefined;
-        const text = try std.fmt.bufPrintZ(&command, format, .{tree.path()});
+        const text = try std.fmt.bufPrintSentinel(&command, format, .{tree.path()}, 0);
         const argv = [_:null]?[*:0]const u8{ "/bin/sh", "-c", text.ptr };
         const pid = linux.fork();
         if (pid == 0) {
             _ = linux.execve("/bin/sh", &argv, @ptrCast(std.c.environ));
             linux.exit(127);
         }
-        var status: u32 = 0;
-        _ = linux.wait4(@intCast(pid), &status, 0, null);
+        // libc's `waitpid`: its status is a `c_int` in every Zig, where `linux.wait4`'s
+        // pointer type changed between 0.16 and 0.17.
+        var status: c_int = 0;
+        _ = std.c.waitpid(@intCast(pid), &status, 0);
         if (status != 0) return error.ShellFailed;
     }
 

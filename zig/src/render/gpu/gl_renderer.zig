@@ -21,12 +21,7 @@
 
 const std = @import("std");
 
-const c = @cImport({
-    @cInclude("EGL/egl.h");
-    // The drawing calls are GL ES, not EGL: EGL hands over the context and then has no
-    // further say in what goes into it.
-    @cInclude("GLES2/gl2.h");
-});
+const c = @import("c_gl_renderer");
 
 /// The off-screen surface size. Fixed and small on purpose — this renders a test frame,
 /// not a window, so the size that matters is the one that keeps the check quick.
@@ -140,8 +135,8 @@ pub fn open() Error!Renderer {
     }
 
     const surface_attributes = [_]c.EGLint{
-        c.EGL_WIDTH,   surface_size,
-        c.EGL_HEIGHT,  surface_size,
+        c.EGL_WIDTH,  surface_size,
+        c.EGL_HEIGHT, surface_size,
         c.EGL_NONE,
     };
     const surface = c.eglCreatePbufferSurface(display, config, &surface_attributes);

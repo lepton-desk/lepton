@@ -12,6 +12,7 @@
 //! by the platform rather than negotiated.
 
 const std = @import("std");
+const compat = @import("../compat.zig");
 
 /// Bumped when the meaning of an existing `kind` changes. Additive kinds do not
 /// bump it, because a reader that meets an unknown kind can skip the payload.
@@ -203,7 +204,7 @@ pub fn header(kind: Kind, payload_len: u32, sequence: u64, opts: Flags) Header {
 /// buffer may hold fewer bytes than a header when a cell is being written.
 pub fn readHeader(bytes: []const u8) DecodeError!Header {
     if (bytes.len < header_bytes) return error.ShortFrame;
-    const h: Header = @bitCast(bytes[0..header_bytes].*);
+    const h = compat.fromBytes(Header, bytes[0..@sizeOf(Header)]);
     if (h.protocol != version) return error.UnsupportedProtocol;
     return h;
 }
@@ -219,7 +220,7 @@ pub fn payloadOf(bytes: []const u8, h: Header) DecodeError![]const u8 {
 /// Reads a fixed-layout payload from a slice, refusing a short one.
 pub fn readPayload(comptime T: type, payload: []const u8) DecodeError!T {
     if (payload.len < @sizeOf(T)) return error.ShortPayload;
-    const value: T = @bitCast(payload[0..@sizeOf(T)].*);
+    const value = compat.fromBytes(T, payload[0..@sizeOf(T)]);
     return value;
 }
 
@@ -257,7 +258,7 @@ pub const FrameAbsent = enum {};
 /// written, so it would carry whatever memory held before.
 fn coversEveryByte(comptime T: type) bool {
     var covered: usize = 0;
-    for (@typeInfo(T).@"struct".fields) |field| covered += @sizeOf(field.type);
+    for (compat.structTypes(T)) |field_type| covered += @sizeOf(field_type);
     return covered == @sizeOf(T);
 }
 

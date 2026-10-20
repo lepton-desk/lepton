@@ -274,7 +274,7 @@ pub const View = struct {
         const library = backendLibraryName();
         if (library.len == 0) return Error.NoBackendLibrary;
         var name_buffer: [library_name_capacity]u8 = undefined;
-        const name = std.fmt.bufPrintZ(&name_buffer, "{s}", .{library}) catch
+        const name = std.fmt.bufPrintSentinel(&name_buffer, "{s}", .{library}, 0) catch
             return Error.NoBackendLibrary;
 
         if (!abi.wpe_loader_init(name)) return Error.NoBackendLibrary;

@@ -26,17 +26,7 @@ const gles3 = @import("../gles3.zig");
 pub const Scene = gles3.scene.List;
 pub const Atlas = gles3.atlas.Atlas;
 
-const c = @cImport({
-    @cInclude("EGL/egl.h");
-    @cInclude("GLES2/gl2.h");
-    // The Wayland types are the caller's connection and surface; nothing here creates
-    // them, so the dependency is on the headers alone.
-    @cInclude("wayland-client.h");
-    // The native window EGL's Wayland platform takes. A bare `wl_surface` is *not* one:
-    // Mesa reads the handle as a `struct wl_egl_window`, so passing the surface was
-    // undefined behaviour that surfaced as a refused window surface.
-    @cInclude("wayland-egl.h");
-});
+const c = @import("c_presenter");
 
 /// `eglCreateWindowSurface` is declared here rather than imported, for one reason:
 /// `eglplatform.h` resolves `EGLNativeWindowType` to `unsigned long` on this machine

@@ -14,6 +14,7 @@
 //! `Entry.len` bytes of frame.
 
 const std = @import("std");
+const compat = @import("../../compat.zig");
 const report = @import("../../report.zig");
 const wire = @import("../../ipc/wire.zig");
 
@@ -228,7 +229,7 @@ pub const Reader = struct {
 
     pub fn init(bytes: []const u8) ReadError!Reader {
         if (bytes.len < @sizeOf(FileHeader)) return error.NotARecording;
-        const header: FileHeader = @bitCast(bytes[0..@sizeOf(FileHeader)].*);
+        const header = compat.fromBytes(FileHeader, bytes[0..@sizeOf(FileHeader)]);
         if (!std.mem.eql(u8, &header.magic, &magic)) return error.NotARecording;
         if (header.format != format or header.wire_version != wire.version) return error.OtherVersion;
         return .{ .bytes = bytes };
@@ -237,7 +238,7 @@ pub const Reader = struct {
     pub fn next(self: *Reader) ReadError!?Record {
         if (self.at == self.bytes.len) return null;
         if (self.bytes.len - self.at < @sizeOf(Entry)) return error.Truncated;
-        const entry: Entry = @bitCast(self.bytes[self.at..][0..@sizeOf(Entry)].*);
+        const entry = compat.fromBytes(Entry, self.bytes[self.at..][0..@sizeOf(Entry)]);
         const start = self.at + @sizeOf(Entry);
         if (self.bytes.len - start < entry.len) return error.Truncated;
         self.at = start + entry.len;
@@ -306,7 +307,7 @@ test "a recording reads back frame for frame, private bytes left out" {
 
 test "a file that is not a recording, or of another version, is refused" {
     try std.testing.expectError(error.NotARecording, Reader.init("short"));
-    try std.testing.expectError(error.NotARecording, Reader.init("NOTLEPTN" ++ [_]u8{0} ** 8));
+    try std.testing.expectError(error.NotARecording, Reader.init("NOTLEPTN" ++ @as([8]u8, @splat(0))));
     var other: FileHeader = .{};
     other.format = format + 1;
     try std.testing.expectError(error.OtherVersion, Reader.init(std.mem.asBytes(&other)));

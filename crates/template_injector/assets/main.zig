@@ -348,7 +348,7 @@ fn frontendAddress(allocator: std.mem.Allocator, io: std.Io) ![:0]const u8 {{
     // does not change the binary, so nothing has to be rebuilt or restarted.
     const options = @import("build_options");
     if (options.dev_server.len != 0) {{
-        return allocator.dupeZ(u8, options.dev_server);
+        return allocator.dupeSentinel(u8, options.dev_server, 0);
     }}
 
     // Installed layout first: `<prefix>/bin/<name>` beside `<prefix>/share/<name>/dist`.
@@ -555,7 +555,7 @@ fn paint(frame: *core.surface.Surface, subject: ?*core.render.Text, frames: u32,
     // the same channel the frontend binds at run time.
     if (state.resident_bytes) |bytes| {{
         var line: [64]u8 = undefined;
-        const text = std.fmt.bufPrintZ(&line, "resident set {{d}} KiB", .{{bytes / 1024}}) catch return;
+        const text = std.fmt.bufPrintSentinel(&line, "resident set {{d}} KiB", .{{bytes / 1024}}, 0) catch return;
         if (subject) |type_face| {{
             _ = type_face.draw(baseline, baseline * 10, text, ink.body);
         }}
@@ -743,7 +743,7 @@ fn claimOwnDataDirectory() void {{
     const link = readSelfExe(buffer[0..]) catch return;
     const directory = std.fs.path.dirname(link) orelse return;
     var path: [std.fs.max_path_bytes]u8 = undefined;
-    const written = std.fmt.bufPrintZ(&path, "{{s}}/data", .{{directory}}) catch return;
+    const written = std.fmt.bufPrintSentinel(&path, "{{s}}/data", .{{directory}}, 0) catch return;
     core.render.set_webview_data_directory(written.ptr);
 }}
 

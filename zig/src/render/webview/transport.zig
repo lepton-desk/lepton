@@ -17,6 +17,7 @@
 //! layout taken from the structs cannot drift from them.
 
 const std = @import("std");
+const compat = @import("../../compat.zig");
 const ring = @import("../../ipc/ring.zig");
 const wire = @import("../../ipc/wire.zig");
 const invoke = @import("invoke.zig");
@@ -93,9 +94,9 @@ const command_table = blk: {
 /// `{"1":"malformed",...}`, from `invoke.Status`, so an error names its cause.
 const status_table = blk: {
     var text: []const u8 = "{";
-    for (@typeInfo(invoke.Status).@"enum".fields, 0..) |field, index| {
+    for (compat.enumNames(invoke.Status), compat.enumValues(invoke.Status), 0..) |name, value, index| {
         if (index != 0) text = text ++ ",";
-        text = text ++ std.fmt.comptimePrint("\"{d}\":\"{s}\"", .{ field.value, field.name });
+        text = text ++ std.fmt.comptimePrint("\"{d}\":\"{s}\"", .{ value, name });
     }
     break :blk text ++ "}";
 };
@@ -129,7 +130,7 @@ pub const command_types = blk: {
     text = text ++ "}\n\n/** The events the core itself emits. */\nexport interface BuiltinEvents {\n";
     for (events.builtin) |name| text = text ++ "  \"" ++ name ++ "\": true;\n";
     text = text ++ "}\n\n/** Every status, by name; `ok` is success. */\nexport const statusNames = [";
-    for (@typeInfo(invoke.Status).@"enum".fields) |field| text = text ++ "\n  \"" ++ field.name ++ "\",";
+    for (compat.enumNames(invoke.Status)) |name| text = text ++ "\n  \"" ++ name ++ "\",";
     break :blk text ++ "\n] as const;\n\n/** Why a call failed, by name. */\nexport type StatusName = (typeof statusNames)[number];\n";
 };
 
@@ -185,7 +186,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, 
     // core is, so their table is written here at run time beside the comptime layout.
     var app_table: [2048]u8 = undefined;
     const app = try registry.writeAppTable(commands, &app_table);
-    const written = try std.fmt.bufPrintZ(out,
+    const written = try std.fmt.bufPrintSentinel(out,
         \\(() => {{
         \\  "use strict";
         \\  if (globalThis.__lepton !== undefined) return;
@@ -262,7 +263,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, 
         \\  refresh();
         \\}})();
         \\
-    , .{ core_origin, quotableOrigin(page_origin), quotableOrigin(page_origin), layout_object, region_len, coreUrl(region_name), retry_ms, app, coreUrl(close_name) });
+    , .{ core_origin, quotableOrigin(page_origin), quotableOrigin(page_origin), layout_object, region_len, coreUrl(region_name), retry_ms, app, coreUrl(close_name) }, 0);
     secret.fill(out[0..written.len]);
     return written;
 }

@@ -1,0 +1,47 @@
+# The core with each Zig Lepton builds with: 0.16 and 0.17 (`crates/orchestrator/src/zig.rs`).
+# The differences between them live in `zig/src/compat.zig`, `zig_017` in
+# `zig/src/build_support.zig`, and the C headers under `zig/src/c/` that the build
+# translates; this keeps both honest.
+name: zig
+
+on:
+  push:
+    branches: [trunk]
+    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", ".github/workflows/zig.yml"]
+  pull_request:
+    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", ".github/workflows/zig.yml"]
+  workflow_dispatch:
+
+jobs:
+  core:
+    strategy:
+      fail-fast: false
+      matrix:
+        zig: ["0.16.0", "0.17.0"]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libwayland-dev wayland-protocols libxcb1-dev \
+            libxcb-randr0-dev libxcb-image0-dev libcairo2-dev
+
+      - name: Zig ${{ matrix.zig }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" "https://ziglang.org/download/${{ matrix.zig }}/zig-x86_64-linux-${{ matrix.zig }}.tar.xz"
+          mkdir -p "$RUNNER_TEMP/zig" && tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+
+      - name: Core tests
+        working-directory: zig
+        run: |
+          zig version
+          zig build test --summary all
+
+      - name: Plugin tests
+        run: |
+          zig test packages/plugin-fs/zig/fs.zig -lc
+          zig test packages/plugin-os/zig/os.zig -lc
+          zig test packages/plugin-dialog/zig/request.zig

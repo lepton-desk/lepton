@@ -6,16 +6,7 @@
 //! lesson the Wayland listeners taught (`CLAUDE.md`: a hand-written table shifted every
 //! argument by one).
 
-pub const c = @cImport({
-    @cDefine("WIN32_LEAN_AND_MEAN", "1");
-    @cInclude("windows.h");
-    @cInclude("objbase.h");
-    @cInclude("shlwapi.h");
-    @cInclude("shellapi.h");
-    @cInclude("psapi.h");
-    @cInclude("dwmapi.h");
-    @cInclude("WebView2.h");
-});
+pub const c = @import("c_webview2");
 
 const std = @import("std");
 

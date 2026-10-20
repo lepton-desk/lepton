@@ -703,15 +703,15 @@ test "a bridge answers the body it was given" {
 
 test "a body larger than the buffer is truncated rather than overrunning it" {
     var bridge = Bridge{};
-    const too_long = "x" ** 9000;
-    bridge.setBody(too_long, "text/plain");
+    const too_long: [9000]u8 = @splat('x');
+    bridge.setBody(&too_long, "text/plain");
 
     // Truncated to the buffer, and the part that fit is exactly the front of the input —
     // a copy that shortened without preserving its beginning would answer the page with a
     // document that starts in the middle of nothing.
     try std.testing.expectEqual(bridge.body.len, bridge.body_len);
-    try std.testing.expectEqualStrings("x" ** 64, bridge.body[0..64]);
-    try std.testing.expectEqualStrings("x" ** 64, bridge.body[bridge.body.len - 64 ..]);
+    try std.testing.expectEqualStrings(&@as([64]u8, @splat('x')), bridge.body[0..64]);
+    try std.testing.expectEqualStrings(&@as([64]u8, @splat('x')), bridge.body[bridge.body.len - 64 ..]);
 }
 
 test "a bridge starts with nothing to say" {

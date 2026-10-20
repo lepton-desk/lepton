@@ -10,18 +10,7 @@
 const std = @import("std");
 const core = @import("lepton_core");
 
-const c = @cImport({
-    @cInclude("EGL/egl.h");
-    // For the drawing calls themselves: EGL creates the context, but the functions that
-    // put anything into it are declared by the GL ES header, not the EGL one.
-    @cInclude("GLES2/gl2.h");
-    // Wayland comes in through `@cImport` for the same reason the core's window layer
-    // does: a hand-written `@extern` for these names did not resolve at link time on
-    // this machine, while the identical call declared by this header does. The symbols
-    // are demonstrably present — `nm` claims otherwise — so the declaration path, not
-    // the library, was the thing that was wrong.
-    @cInclude("wayland-client.h");
-});
+const c = @import("c_gpu_check");
 
 const egl_platform_wayland: c.EGLint = 0x31D8;
 
@@ -29,7 +18,6 @@ const eglCreateWindowSurface = @extern(
     *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*const c.EGLint) callconv(.c) ?*anyopaque,
     .{ .name = "eglCreateWindowSurface" },
 );
-
 
 // The bare-surface probe.
 //

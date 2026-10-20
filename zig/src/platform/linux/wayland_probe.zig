@@ -8,9 +8,7 @@
 
 const std = @import("std");
 
-const wl = @cImport({
-    @cInclude("wayland-client.h");
-});
+const wl = @import("c_wayland_probe");
 
 pub const Error = error{
     ConnectionFailed,

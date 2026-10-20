@@ -42,7 +42,7 @@ pub fn build(b: *std.Build) !void {
         std.builtin.OptimizeMode,
         "optimize",
         "Prioritize performance, size, or debugging (default: ReleaseSmall)",
-    ) orelse .ReleaseSmall;
+    ) orelse std.builtin.OptimizeMode.ReleaseSmall;
 
     const render = b.option([]const u8, "render", "Render path: webview or native (default: webview)") orelse "webview";
     // Servo, experimental: the directory holding `liblepton_servo.so`, which the CLI finds
@@ -170,7 +170,7 @@ pub fn build(b: *std.Build) !void {
     // Windows: a release build is a GUI program, so starting it from Explorer or a
     // shortcut opens no console window beside it. Debug keeps the console for the core's
     // report lines; `lepton run` reads them from the pipes either way.
-    if (target.result.os.tag == .windows and optimize != .Debug) {
+    if (target.result.os.tag == .windows and optimize != std.builtin.OptimizeMode.Debug) {
         exe.subsystem = .windows;
     }
 
@@ -191,7 +191,7 @@ pub fn build(b: *std.Build) !void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("lepton-commands.zig"),
                 .target = target,
-                .optimize = .Debug,
+                .optimize = std.builtin.OptimizeMode.Debug,
                 .link_libc = true,
                 .imports = &.{
                     .{ .name = "app", .module = root },
@@ -227,8 +227,12 @@ pub fn build(b: *std.Build) !void {
     // developer expects the second time they type it.
     const run = b.addRunArtifact(exe);
     run.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run.addArgs(args);
+    // `zig build run -- …`: Zig 0.16 hands the arguments over as `b.args`, 0.17 forwards
+    // them itself (`addPassthruArgs`).
+    if (comptime @hasField(std.Build, "args")) {
+        if (b.args) |args| run.addArgs(args);
+    } else {
+        run.addPassthruArgs();
     }
     b.step("run", "Build and open the window").dependOn(&run.step);
 }

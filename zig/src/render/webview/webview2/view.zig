@@ -272,7 +272,7 @@ pub const View = struct {
         var settings: [*c]c.ICoreWebView2Settings = null;
         if (!wv.ok(core.lpVtbl.*.get_Settings.?(core, &settings)) or settings == null) return;
         defer _ = settings.*.lpVtbl.*.Release.?(settings);
-        const debug: c.BOOL = if (builtin.mode == .Debug) c.TRUE else c.FALSE;
+        const debug: c.BOOL = if (builtin.mode == std.builtin.OptimizeMode.Debug) c.TRUE else c.FALSE;
         _ = settings.*.lpVtbl.*.put_AreDevToolsEnabled.?(settings, debug);
         _ = settings.*.lpVtbl.*.put_AreDefaultContextMenusEnabled.?(settings, debug);
         _ = settings.*.lpVtbl.*.put_IsStatusBarEnabled.?(settings, c.FALSE);

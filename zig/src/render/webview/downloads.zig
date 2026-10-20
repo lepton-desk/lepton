@@ -58,14 +58,14 @@ fn exists(path: [:0]const u8) bool {
 
 /// `directory/name`, or `directory/stem (n).ext` with the first free `n`, NUL-terminated.
 pub fn uniquePath(directory: []const u8, name: []const u8, out: []u8) error{NoSpaceLeft}![:0]const u8 {
-    const first = try std.fmt.bufPrintZ(out, "{s}/{s}", .{ directory, name });
+    const first = try std.fmt.bufPrintSentinel(out, "{s}/{s}", .{ directory, name }, 0);
     if (!exists(first)) return first;
     // The extension is what follows the last dot, unless the dot starts the name.
     const dot = std.mem.lastIndexOfScalar(u8, name, '.');
     const split = if (dot) |at| (if (at == 0) name.len else at) else name.len;
     var n: u32 = 1;
     while (n < 10_000) : (n += 1) {
-        const candidate = try std.fmt.bufPrintZ(out, "{s}/{s} ({d}){s}", .{ directory, name[0..split], n, name[split..] });
+        const candidate = try std.fmt.bufPrintSentinel(out, "{s}/{s} ({d}){s}", .{ directory, name[0..split], n, name[split..] }, 0);
         if (!exists(candidate)) return candidate;
     }
     return error.NoSpaceLeft;
@@ -214,20 +214,24 @@ test "a suggested name is made safe" {
     try std.testing.expectEqualStrings("_bashrc", safeName(".bashrc", &out));
     try std.testing.expectEqualStrings("ab", safeName("a\nb", &out));
     try std.testing.expectEqualStrings("Rapor şubat.txt", safeName("Rapor şubat.txt", &out));
-    const long = "ş" ** 150; // 300 bytes
-    const cut = safeName(long, &out);
+    const long = comptime blk: {
+        var bytes: [300]u8 = undefined;
+        for (0..150) |at| @memcpy(bytes[at * 2 ..][0..2], "ş");
+        break :blk bytes;
+    }; // 300 bytes
+    const cut = safeName(&long, &out);
     try std.testing.expect(cut.len <= max_name);
     try std.testing.expect(std.unicode.utf8ValidateSlice(cut));
 }
 
 test "a name already taken gets the first free number" {
     var name_buffer: [96]u8 = undefined;
-    const directory = try std.fmt.bufPrintZ(&name_buffer, "/tmp/lepton-downloads-test-{d}", .{std.c.getpid()});
+    const directory = try std.fmt.bufPrintSentinel(&name_buffer, "/tmp/lepton-downloads-test-{d}", .{std.c.getpid()}, 0);
     _ = std.c.mkdir(directory.ptr, 0o700);
     var path: [256]u8 = undefined;
     defer {
         for ([_][]const u8{ "a.txt", "a (1).txt", ".hidden" }) |file| {
-            const full = std.fmt.bufPrintZ(&path, "{s}/{s}", .{ directory, file }) catch continue;
+            const full = std.fmt.bufPrintSentinel(&path, "{s}/{s}", .{ directory, file }, 0) catch continue;
             _ = std.c.unlink(full.ptr);
         }
         _ = std.c.rmdir(directory.ptr);
@@ -236,7 +240,7 @@ test "a name already taken gets the first free number" {
     const free = try uniquePath(directory, "a.txt", &out);
     try std.testing.expect(std.mem.endsWith(u8, free, "/a.txt"));
     for ([_][]const u8{ "a.txt", "a (1).txt", ".hidden" }) |file| {
-        const full = try std.fmt.bufPrintZ(&path, "{s}/{s}", .{ directory, file });
+        const full = try std.fmt.bufPrintSentinel(&path, "{s}/{s}", .{ directory, file }, 0);
         const fd = std.c.open(full.ptr, .{ .ACCMODE = .WRONLY, .CREAT = true, .CLOEXEC = true }, @as(std.c.mode_t, 0o600));
         _ = std.c.close(fd);
     }

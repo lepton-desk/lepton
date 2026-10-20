@@ -193,7 +193,7 @@ fn onTitle(_: ?*anyopaque, utf8: [*c]const u8, len: usize) callconv(.c) void {
 
 fn onConsole(_: ?*anyopaque, level: u32, utf8: [*c]const u8, len: usize) callconv(.c) void {
     // Debug builds print the page's console, as on WebKit.
-    if (builtin.mode != .Debug or utf8 == null) return;
+    if (builtin.mode != std.builtin.OptimizeMode.Debug or utf8 == null) return;
     const names = [_][]const u8{ "log", "debug", "info", "warn", "error", "trace" };
     std.debug.print("console {s}: {s}\n", .{ if (level < names.len) names[level] else "log", utf8[0..len] });
 }

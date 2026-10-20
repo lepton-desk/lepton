@@ -143,7 +143,7 @@ pub fn create(allocator: Allocator, name: []const u8, len: usize) Error!Region {
     if (len == 0) return error.InvalidArgument;
     var wide: [max_name:0]u16 = undefined;
     try sectionName(name, &wide);
-    const z = try allocator.dupeZ(u8, name);
+    const z = try allocator.dupeSentinel(u8, name, 0);
     errdefer allocator.free(z);
 
     const total = std.mem.alignForward(usize, len + trailer, section_page);
@@ -171,7 +171,7 @@ pub fn create(allocator: Allocator, name: []const u8, len: usize) Error!Region {
 pub fn attach(allocator: Allocator, name: []const u8) Error!Region {
     var wide: [max_name:0]u16 = undefined;
     try sectionName(name, &wide);
-    const z = try allocator.dupeZ(u8, name);
+    const z = try allocator.dupeSentinel(u8, name, 0);
     errdefer allocator.free(z);
 
     const handle = OpenFileMappingW(file_map_all_access, .FALSE, &wide) orelse return mapError(GetLastError());
