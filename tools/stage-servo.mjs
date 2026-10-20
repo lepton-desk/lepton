@@ -7,7 +7,7 @@
 //   node tools/stage-servo.mjs <path to liblepton_servo.so or .so.xz>
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,6 +25,7 @@ if (source.endsWith(".xz")) {
 } else {
 	copyFileSync(source, target);
 }
+chmodSync(target, 0o755);
 const bytes = readFileSync(target);
 // ELF, 64-bit, little-endian, ET_DYN, x86-64.
 const elf = bytes.subarray(0, 4).toString("latin1") === "\x7fELF";
