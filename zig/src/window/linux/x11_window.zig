@@ -178,8 +178,11 @@ pub const X11Window = struct {
         // writes and reads a flat word list whose order the mask selects. Width
         // comes before height, and a wrong order here resizes the window
         // transposed rather than failing.
+        // The mask is XCB's named bits: it was `(1 << 0) | (1 << 1)`, which are X and Y,
+        // so a resize to 1200×800 moved the window to (1200, 800) at its old size
+        // (measured with `xwininfo` under Servo, 2026-10-20).
         var values = [_]u32{ size.width, size.height };
-        const mask: u32 = (1 << 0) | (1 << 1); // width | height
+        const mask: u32 = xcb.XCB_CONFIG_WINDOW_WIDTH | xcb.XCB_CONFIG_WINDOW_HEIGHT;
         _ = xcb.xcb_configure_window(
             self.conn,
             self.window_id,
@@ -206,6 +209,9 @@ pub const X11Window = struct {
             @intCast(n),
             &self.title,
         );
+        // Sent now: a window nothing else flushes (Servo draws through its own Xlib
+        // connection) kept its old name, the request waiting in XCB's buffer (measured).
+        _ = xcb.xcb_flush(self.conn);
     }
 
     /// Sets the window's class and instance, which is how a window manager groups
