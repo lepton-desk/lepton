@@ -40,7 +40,7 @@ jobs:
             libgstreamer-plugins-good1.0-dev \
             pkg-config libcairo2-dev libxcb1-dev libxcb-randr0-dev libxcb-image0-dev libwayland-dev libwayland-bin \
             libegl-dev libgles-dev libfontconfig-dev libvulkan-dev \
-            xvfb xdotool imagemagick
+            xvfb xdotool imagemagick x11-utils
 
       - name: Zig 0.16
         run: |
@@ -174,13 +174,19 @@ jobs:
           NO_COLOR=1 "$lepton" build --linux --servo 2>&1 | tee "$RUNNER_TEMP/app-build.log" | tail -25
           build=${PIPESTATUS[0]}
           app=$(ls src-lepton/zig-out/bin/ | head -1)
-          export DISPLAY=:99
-          pgrep Xvfb > /dev/null || (Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &)
+          # A second X server, larger than the app's 1200×800 window: the first run's capture
+          # of the whole 1024×768 screen was black, with the page running.
+          export DISPLAY=:98
+          Xvfb :98 -screen 0 1920x1080x24 > /dev/null 2>&1 &
           sleep 1
           LEPTON_SERVO_TRACE=1 RUST_LOG=warn timeout 12 "src-lepton/zig-out/bin/$app" > "$RUNNER_TEMP/app-run.log" 2>&1 &
           pid=$!
           sleep 9
           import -window root "$RUNNER_TEMP/app.png"
+          xwininfo -root -tree > "$RUNNER_TEMP/app-windows.txt" 2>&1
+          app_window=$(xdotool search --name "servo-app" | head -1)
+          [ -n "$app_window" ] && import -window "$app_window" "$RUNNER_TEMP/app-window.png"
+          [ -n "$app_window" ] && xwininfo -id "$app_window" >> "$RUNNER_TEMP/app-windows.txt" 2>&1
           wait $pid
           ran=$?
           {
@@ -188,6 +194,9 @@ jobs:
             grep -E "core|types|frontend|built|error" "$RUNNER_TEMP/app-build.log" | tail -8
             cat "$RUNNER_TEMP/app-run.log" | grep -v "memory profiler" | head -30
             echo "requests: $(grep -c '^servo request' "$RUNNER_TEMP/app-run.log"), region reads: $(grep -c '__lepton/region' "$RUNNER_TEMP/app-run.log")"
+            echo "app window: ${app_window:-none found}"
+            grep -E "Map State|Width|Height|Absolute upper-left" "$RUNNER_TEMP/app-windows.txt"
+            grep -E '"' "$RUNNER_TEMP/app-windows.txt" | head -10
             ldd "src-lepton/zig-out/bin/$app" | grep -E "lepton_servo|X11|wpe" 
           } | tee -a "$RUNNER_TEMP/report.txt"
           [ "$build" = 0 ] && grep -q '__lepton/region' "$RUNNER_TEMP/app-run.log"
@@ -206,6 +215,8 @@ jobs:
             ${{ runner.temp }}/screen-clicked.png
             ${{ runner.temp }}/servo-window.png
             ${{ runner.temp }}/app.png
+            ${{ runner.temp }}/app-window.png
+            ${{ runner.temp }}/app-windows.txt
             ${{ runner.temp }}/app-build.log
             ${{ runner.temp }}/app-run.log
           if-no-files-found: warn
