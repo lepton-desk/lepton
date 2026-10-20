@@ -79,7 +79,7 @@ pub fn resolve(base: Base, identifier: []const u8, out: []u8, scratch: []u8) Err
     switch (base) {
         .none => return error.Unavailable,
         .app_data, .app_config, .app_cache => {
-            if (identifier.len == 0 or std.mem.indexOfAny(u8, identifier, "/\\:") != null) return error.Unavailable;
+            if (!usableIdentifier(identifier)) return error.Unavailable;
             if (base == .app_cache) {
                 const local = try known(&folders.local_app_data, out);
                 const own = try join(out, local.len, identifier);
@@ -96,6 +96,23 @@ pub fn resolve(base: Base, identifier: []const u8, out: []u8, scratch: []u8) Err
         .music => return known(&folders.music, out),
         .video => return known(&folders.videos, out),
     }
+}
+
+/// An identifier that names one folder: not empty, no separator or drive, not `.` or `..`.
+fn usableIdentifier(identifier: []const u8) bool {
+    if (identifier.len == 0 or std.mem.indexOfAny(u8, identifier, "/\\:") != null) return false;
+    return !std.mem.eql(u8, identifier, ".") and !std.mem.eql(u8, identifier, "..");
+}
+
+/// The application's own state, `%LOCALAPPDATA%\<identifier>\State`: where the core keeps
+/// what a page must never write, such as the dialog grants (`platform/grants.zig`). No
+/// `fs` base names it (`$APPCACHE` is the sibling `Cache`, `$APPDATA` is roaming), so no
+/// scope short of `$HOME` reaches it.
+pub fn stateDirectory(identifier: []const u8, out: []u8) Error![]const u8 {
+    if (!usableIdentifier(identifier)) return error.Unavailable;
+    const local = try known(&folders.local_app_data, out);
+    const own = try join(out, local.len, identifier);
+    return join(out, own.len, "State");
 }
 
 /// Creates `path` and any missing parents. A folder under the user's profile is the

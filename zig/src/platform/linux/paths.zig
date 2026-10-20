@@ -141,7 +141,7 @@ pub fn resolveFrom(base: Base, identifier: []const u8, sources: Sources, out: []
         .none => return error.Unavailable,
         .home => return copy(home, out),
         .app_data, .app_config, .app_cache => {
-            if (identifier.len == 0 or std.mem.indexOfScalar(u8, identifier, '/') != null) return error.Unavailable;
+            if (!usableIdentifier(identifier)) return error.Unavailable;
             const parent = switch (base) {
                 .app_data => try xdgHome(sources.data_home, home, ".local/share", out),
                 .app_config => try xdgHome(sources.config_home, home, ".config", out),
@@ -161,6 +161,29 @@ pub fn resolveFrom(base: Base, identifier: []const u8, sources: Sources, out: []
             return copy(value, out);
         },
     }
+}
+
+/// An identifier that names one directory: not empty, no `/`, and not `.` or `..`, which
+/// would make `$APPDATA` the parent of every application's data (`~/.local`).
+fn usableIdentifier(identifier: []const u8) bool {
+    if (identifier.len == 0 or std.mem.indexOfScalar(u8, identifier, '/') != null) return false;
+    return !std.mem.eql(u8, identifier, ".") and !std.mem.eql(u8, identifier, "..");
+}
+
+/// The application's own state, `$XDG_STATE_HOME/<identifier>` (`~/.local/state/…`):
+/// where the core keeps what a page must never write, such as the dialog grants
+/// (`platform/grants.zig`). No `fs` base names it, so no scope short of `$HOME` reaches
+/// it — and a page with `$HOME` in scope can already write everything under it.
+pub fn stateDirectory(identifier: []const u8, out: []u8) Error![]const u8 {
+    return stateFrom(identifier, env("HOME"), env("XDG_STATE_HOME"), out);
+}
+
+fn stateFrom(identifier: []const u8, home: ?[]const u8, state_home: ?[]const u8, out: []u8) Error![]const u8 {
+    const own_home = home orelse return error.Unavailable;
+    if (own_home.len == 0 or own_home[0] != '/') return error.Unavailable;
+    if (!usableIdentifier(identifier)) return error.Unavailable;
+    const parent = try xdgHome(state_home, own_home, ".local/state", out);
+    return join(out, parent.len, identifier);
 }
 
 /// `$XDG_*_HOME` when it is set to an absolute path (the specification says to ignore a
@@ -266,6 +289,8 @@ test "application directories follow XDG, with the specification's fallbacks" {
     const homeless: Sources = .{ .home = null, .data_home = "/data", .config_home = null, .cache_home = null, .user_dirs = null };
     try std.testing.expectError(error.Unavailable, resolveFrom(.app_data, "style.app", homeless, &out));
     try std.testing.expectError(error.Unavailable, resolveFrom(.app_data, "../x", set, &out));
+    try std.testing.expectError(error.Unavailable, resolveFrom(.app_data, "..", set, &out));
+    try std.testing.expectError(error.Unavailable, resolveFrom(.app_config, ".", set, &out));
     try std.testing.expectError(error.Unavailable, resolveFrom(.app_data, "", set, &out));
 }
 
@@ -321,4 +346,15 @@ test "missing directories are made 0700, existing ones keep their mode" {
     _ = linux.unlinkat(linux.AT.FDCWD, target, linux.AT.REMOVEDIR);
     _ = linux.unlinkat(linux.AT.FDCWD, try std.fmt.bufPrintZ(&middle, "{s}/a", .{base}), linux.AT.REMOVEDIR);
     _ = linux.unlinkat(linux.AT.FDCWD, base, linux.AT.REMOVEDIR);
+}
+
+test "the state directory is outside every fs base" {
+    var out: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("/home/u/.local/state/style.app", try stateFrom("style.app", "/home/u", null, &out));
+    try std.testing.expectEqualStrings("/state/style.app", try stateFrom("style.app", "/home/u", "/state", &out));
+    // A relative XDG_STATE_HOME is ignored, as the specification says.
+    try std.testing.expectEqualStrings("/home/u/.local/state/style.app", try stateFrom("style.app", "/home/u", "rel", &out));
+    try std.testing.expectError(error.Unavailable, stateFrom("..", "/home/u", null, &out));
+    try std.testing.expectError(error.Unavailable, stateFrom("a/b", "/home/u", null, &out));
+    try std.testing.expectError(error.Unavailable, stateFrom("style.app", null, null, &out));
 }

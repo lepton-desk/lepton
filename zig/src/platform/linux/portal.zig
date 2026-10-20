@@ -139,7 +139,9 @@ fn start(options: Options, later: invoke.Later) error{Unavailable}!void {
     const grant_len = @min(options.grant_to.len, slot.grant_to.len);
     @memcpy(slot.grant_to[0..grant_len], options.grant_to[0..grant_len]);
     slot.grant_to_len = grant_len;
-    slot.directories = options.directory;
+    // A save dialog chooses a file, whatever `directory` the page passed: recorded as a
+    // folder, it granted everything beside the saved file (audit, 2026-10-20).
+    slot.directories = options.directory and options.mode == .open;
     slot.subscription = g.subscribe(bus, portal_name, "org.freedesktop.portal.Request", "Response", request_path.ptr, null, 0, &onResponse, slot, null);
 
     var z: Strings = .{};

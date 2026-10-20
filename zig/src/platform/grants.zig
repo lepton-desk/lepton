@@ -7,8 +7,10 @@
 //! (`"plugins": { "fs": { "chosen": true } }`); otherwise its scope is the fixed one.
 //!
 //! A chosen folder grants what is below it; a chosen file grants that file alone. The list
-//! is kept in `<application data>/lepton-grants` (`0600` on Linux), one `d <path>` or
-//! `f <path>` per line.
+//! is kept in the application's state directory, `~/.local/state/<id>/lepton-grants`
+//! (`0600`) on Linux and `%LOCALAPPDATA%\<id>\State\lepton-grants` on Windows — never
+//! under an `fs` base: kept in `$APPDATA`, a page with that scope could write grants into
+//! it. One `d <path>` or `f <path>` per line.
 //!
 //! Paths are compared as the host writes them: on Windows `C:\Users\u\Notlar` covers
 //! `c:/users/u/notlar/a.md` — either separator, letters without case, as NTFS compares.
@@ -62,6 +64,34 @@ pub const Style = enum {
         return true;
     }
 };
+
+/// Whether a folder grant of `path` would cover the whole home folder `home`: the root,
+/// home itself, or a folder above it.
+pub fn tooBroad(style: Style, path: []const u8, home: []const u8) bool {
+    var folder = path;
+    while (folder.len > 1 and style.isSeparator(folder[folder.len - 1])) folder = folder[0 .. folder.len - 1];
+    const root_len: usize = if (style == .windows) 3 else 1;
+    if (folder.len <= root_len) return true;
+    if (home.len == 0) return false;
+    var own = home;
+    while (own.len > 1 and style.isSeparator(own[own.len - 1])) own = own[0 .. own.len - 1];
+    if (folder.len > own.len) return false;
+    if (!style.same(folder, own[0..folder.len])) return false;
+    return folder.len == own.len or style.isSeparator(own[folder.len]);
+}
+
+test "the home folder, the root and what is above home are never granted" {
+    try std.testing.expect(tooBroad(.posix, "/", "/home/u"));
+    try std.testing.expect(tooBroad(.posix, "/home", "/home/u"));
+    try std.testing.expect(tooBroad(.posix, "/home/u", "/home/u"));
+    try std.testing.expect(tooBroad(.posix, "/home/u/", "/home/u"));
+    try std.testing.expect(!tooBroad(.posix, "/home/u/Notlar", "/home/u"));
+    try std.testing.expect(!tooBroad(.posix, "/home/user2", "/home/u"));
+    try std.testing.expect(!tooBroad(.posix, "/srv/notes", "/home/u"));
+    try std.testing.expect(tooBroad(.windows, "C:\\", "C:\\Users\\u"));
+    try std.testing.expect(tooBroad(.windows, "c:/users/U", "C:\\Users\\u"));
+    try std.testing.expect(!tooBroad(.windows, "C:\\Users\\u\\Notlar", "C:\\Users\\u"));
+}
 
 /// The grants of one application, in memory.
 pub const List = struct {
@@ -160,8 +190,10 @@ const path_max = 4096;
 
 fn fileOf(identifier: []const u8, out: []u8) ?[:0]const u8 {
     var directory_buffer: [path_max]u8 = undefined;
-    var scratch: [4096]u8 = undefined;
-    const directory = paths.resolve(.app_data, identifier, &directory_buffer, &scratch) catch return null;
+    // Not `$APPDATA`: that is an `fs` scope base, and a page whose scope included it wrote
+    // `d /home/<user>` into this file and gained the whole home directory (found by audit,
+    // 2026-10-20). The state directory is outside every base short of `$HOME`.
+    const directory = paths.stateDirectory(identifier, &directory_buffer) catch return null;
     var made: [path_max + 1]u8 = undefined;
     if (directory.len + 1 > made.len) return null;
     @memcpy(made[0..directory.len], directory);
@@ -272,6 +304,15 @@ const store = if (windows) struct {
 /// Grants `path` to application `identifier` and remembers it. Native code only: the
 /// path must be one the user chose in a dialog.
 pub fn add(identifier: []const u8, kind: Kind, path: []const u8) void {
+    // A page sets a dialog's title, button and starting folder; one click on "Continue"
+    // in the home folder granted all of it for good (audit, 2026-10-20). The home folder,
+    // the root and every folder above home are not granted; a folder inside them is.
+    if (kind == .directory) {
+        var home_buffer: [path_max]u8 = undefined;
+        var scratch: [4096]u8 = undefined;
+        const home = paths.resolve(.home, identifier, &home_buffer, &scratch) catch "";
+        if (tooBroad(.host, path, home)) return;
+    }
     const list = listFor(identifier);
     list.add(kind, path);
     var path_buffer: [path_max]u8 = undefined;
@@ -346,7 +387,7 @@ test "the list round-trips through its file format and forgets the oldest when f
     try std.testing.expect(full.covering("/d64") != null);
 }
 
-test "a grant is remembered in the application's data directory and read back" {
+test "a grant is remembered in the application's state directory and read back" {
     var identifier_buffer: [64]u8 = undefined;
     const pid = if (windows) std.os.windows.GetCurrentProcessId() else std.c.getpid();
     const identifier = try std.fmt.bufPrint(&identifier_buffer, "com.lepton.grants-test-{d}", .{pid});
@@ -361,4 +402,9 @@ test "a grant is remembered in the application's data directory and read back" {
     var text: [256]u8 = undefined;
     const got = store.read(file, &text);
     try std.testing.expectEqualStrings("d " ++ chosen ++ "\n", text[0..got]);
+    // Never under `$APPDATA`, which a page's `fs` scope may name.
+    var data_buffer: [path_max]u8 = undefined;
+    var scratch: [4096]u8 = undefined;
+    const data = try paths.resolve(.app_data, identifier, &data_buffer, &scratch);
+    try std.testing.expect(!std.mem.startsWith(u8, file, data));
 }

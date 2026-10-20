@@ -87,7 +87,9 @@ fn start(options: Options, later: invoke.Later) error{ Unavailable, TooLarge }!v
     const slot = for (&pending) |*candidate| {
         if (candidate.later == null) break candidate;
     } else return error.Unavailable;
-    slot.* = .{ .mode = options.mode, .multiple = options.multiple, .directory = options.directory };
+    // A save dialog chooses a file: `FOS_PICKFOLDERS` turned it into a folder picker and the
+    // grant into a folder's (audit, 2026-10-20).
+    slot.* = .{ .mode = options.mode, .multiple = options.multiple, .directory = options.directory and options.mode == .open };
     errdefer slot.* = .{};
     slot.title = try slot.keep(&.{options.title}, "");
     slot.accept_label = try slot.keep(&.{options.accept_label}, "");
