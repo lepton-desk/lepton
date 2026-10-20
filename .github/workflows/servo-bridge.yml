@@ -130,8 +130,11 @@ jobs:
           unset WAYLAND_DISPLAY
           sleep 2
           log="$RUNNER_TEMP/run.log"
-          /usr/bin/time -v -o "$RUNNER_TEMP/run-time.txt" ./zig-out/bin/lepton-servo-window-check > "$log" 2>&1 &
+          # Servo's own warnings go to the log beside the check's lines.
+          RUST_LOG=warn /usr/bin/time -v -o "$RUNNER_TEMP/run-time.txt" ./zig-out/bin/lepton-servo-window-check > "$log" 2>&1 &
           pid=$!
+          # A capture while the check is surely still running, whatever the page does.
+          (sleep 15; import -window root "$RUNNER_TEMP/screen-15s.png") &
           for i in $(seq 1 240); do grep -q "^title *ready" "$log" && break; kill -0 $pid 2>/dev/null || break; sleep 0.5; done
           import -window root "$RUNNER_TEMP/screen-ready.png"
           wid=$(xdotool search --name "Lepton on Servo" | head -1)
@@ -146,6 +149,7 @@ jobs:
           status=$?
           cat "$log"
           cp servo-window.png "$RUNNER_TEMP/" 2>/dev/null
+          cp "$log" "$RUNNER_TEMP/run-full.log"
           {
             echo "## window check (exit $status)"
             cat "$log"
@@ -162,6 +166,8 @@ jobs:
           path: |
             ${{ runner.temp }}/report.txt
             ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/screen-15s.png
+            ${{ runner.temp }}/run-full.log
             ${{ runner.temp }}/screen-ready.png
             ${{ runner.temp }}/screen-clicked.png
             ${{ runner.temp }}/servo-window.png

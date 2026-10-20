@@ -155,6 +155,11 @@ impl Engine {
             .protocol_registry(protocols)
             .event_loop_waker(Box::new(Waker(Arc::clone(&queue))))
             .build();
+        // Servo's own log, to stderr, only when asked for: `RUST_LOG=warn` and so on. Set
+        // once per process (a second logger would be refused), and Servo starts once.
+        if std::env::var_os("RUST_LOG").is_some() {
+            servo.setup_logging();
+        }
         let scripts = Rc::new(UserContentManager::new(&servo));
         Ok(Self {
             servo,

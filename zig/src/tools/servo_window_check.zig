@@ -93,6 +93,7 @@ fn onConsole(_: ?*anyopaque, level: u32, utf8: [*c]const u8, len: usize) callcon
 
 fn onLoaded(context: ?*anyopaque) callconv(.c) void {
     const state: *State = @ptrCast(@alignCast(context orelse return));
+    std.debug.print("loaded\n", .{});
     state.loaded = true;
 }
 
@@ -110,6 +111,10 @@ fn onRequest(context: ?*anyopaque, request: ?*c.LeptonServoRequest) callconv(.c)
     const url = bytesOf(url_ptr, c.lepton_servo_request_url(req, &url_ptr));
     var body_ptr: [*c]const u8 = null;
     const body = bytesOf(body_ptr, c.lepton_servo_request_body(req, &body_ptr));
+
+    var method_ptr: [*c]const u8 = null;
+    const method = bytesOf(method_ptr, c.lepton_servo_request_method(req, &method_ptr));
+    std.debug.print("request         {s} {s} ({d} bytes)\n", .{ method, url, body.len });
 
     const origin = "lepton://localhost";
     const path = if (std.mem.startsWith(u8, url, origin)) url[origin.len..] else url;
@@ -236,6 +241,7 @@ pub fn main() !u8 {
     var last_mask: u32 = 0;
     var clicked_at: ?i64 = null;
     var screenshot_asked = false;
+    var last_beat: i64 = 0;
 
     while (true) {
         const now = elapsedMs(started);
@@ -245,6 +251,12 @@ pub fn main() !u8 {
             try out.print("timeout          title \"{s}\"\n", .{state.titleText()});
             try out.flush();
             return 2;
+        }
+
+        if (now - last_beat >= 10_000) {
+            last_beat = now;
+            const woken = state.woken.load(.acquire);
+            std.debug.print("alive           {d} ms, calls {d}, loaded {}, woken {}\n", .{ now, state.calls, state.loaded, woken });
         }
 
         var fds = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
