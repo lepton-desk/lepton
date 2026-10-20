@@ -87,6 +87,14 @@ struct WakeTarget {
     wake: Option<extern "C" fn(*mut c_void)>,
 }
 
+impl WakeTarget {
+    fn call(&self) {
+        if let Some(wake) = self.wake {
+            wake(self.context);
+        }
+    }
+}
+
 // SAFETY: the header documents `wake` as callable from any thread; the context is
 // only passed back to it, never read here.
 unsafe impl Send for WakeTarget {}
@@ -184,11 +192,10 @@ fn create(
         surface.scale,
         scheme,
         Rc::new(CallbackHost(callbacks)),
-        Box::new(move || {
-            if let Some(wake) = target.wake {
-                wake(target.context);
-            }
-        }),
+        // A method call, so the closure captures the whole `WakeTarget` (Send + Sync)
+        // rather than its raw-pointer field alone, which edition 2021's per-field
+        // capture would take and which is neither.
+        Box::new(move || target.call()),
     )
 }
 
