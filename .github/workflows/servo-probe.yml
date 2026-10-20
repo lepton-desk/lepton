@@ -1,0 +1,110 @@
+# Measures what embedding Servo costs before Lepton commits to it: build time, disk,
+# memory, binary size, and whether a Lepton-style call (a binary body POSTed to the
+# app's own scheme) survives the trip. Run by hand; the project's machine never builds Servo.
+name: servo-probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Machine
+        run: |
+          {
+            echo "## machine"
+            nproc
+            free -m
+            df -h /
+          } | tee -a "$RUNNER_TEMP/report.txt"
+
+      # The image's preinstalled SDKs take most of the disk; Servo's target directory
+      # needs it. What was freed is in the report.
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          { echo "## after freeing"; df -h /; } | tee -a "$RUNNER_TEMP/report.txt"
+
+      # The list from the Servo book (Debian/Ubuntu), plus the Ubuntu extra it names.
+      - name: Servo's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ca-certificates ccache clang cmake curl g++ git gperf \
+            gstreamer1.0-libav gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-ugly gstreamer1.0-tools libdbus-1-dev libegl1-mesa-dev libfreetype6-dev \
+            libges-1.0-dev libgl1-mesa-dri libgles2-mesa-dev libglib2.0-dev libgstreamer-plugins-bad1.0-dev \
+            libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev libharfbuzz-dev liblzma-dev libudev-dev \
+            libunwind-dev libvulkan1 libx11-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-x11-0 libxkbcommon0 libxmu-dev libxmu6 llvm-dev m4 xorg-dev \
+            libgstreamer-plugins-good1.0-dev
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          { echo "## rust"; rustc --version; } | tee -a "$RUNNER_TEMP/report.txt"
+
+      # SpiderMonkey comes as the prebuilt archive mozjs_sys downloads by default; the
+      # build log says so ("Successfully downloaded mozjs archive").
+      - name: Build (timed)
+        working-directory: probes/servo
+        run: |
+          set +e
+          /usr/bin/time -v -o "$RUNNER_TEMP/build-time.txt" cargo build --release 2>&1 | tee "$RUNNER_TEMP/build.log" | tail -40
+          status=${PIPESTATUS[0]}
+          {
+            echo "## build (exit $status)"
+            grep -E "Elapsed|Maximum resident|Percent of CPU" "$RUNNER_TEMP/build-time.txt"
+            grep -iE "mozjs archive|Building from source" "$RUNNER_TEMP/build.log" | head -5
+            echo "crates compiled: $(grep -c '^ *Compiling ' "$RUNNER_TEMP/build.log")"
+            du -sh target
+            df -h /
+          } | tee -a "$RUNNER_TEMP/report.txt"
+          exit "$status"
+
+      - name: Binary
+        working-directory: probes/servo
+        run: |
+          {
+            echo "## binary"
+            ls -l target/release/lepton-servo-probe
+            strip -o "$RUNNER_TEMP/stripped" target/release/lepton-servo-probe
+            ls -l "$RUNNER_TEMP/stripped"
+            ldd target/release/lepton-servo-probe
+          } | tee -a "$RUNNER_TEMP/report.txt"
+
+      - name: Run (timed)
+        working-directory: probes/servo
+        run: |
+          set +e
+          /usr/bin/time -v -o "$RUNNER_TEMP/run-time.txt" timeout 300 ./target/release/lepton-servo-probe > "$RUNNER_TEMP/run.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/run.log"
+          {
+            echo "## run (exit $status)"
+            cat "$RUNNER_TEMP/run.log"
+            grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/run-time.txt"
+          } | tee -a "$RUNNER_TEMP/report.txt"
+          cp servo-probe.png "$RUNNER_TEMP/" 2>/dev/null
+          exit "$status"
+
+      - name: Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: servo-probe
+          path: |
+            ${{ runner.temp }}/report.txt
+            ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/servo-probe.png
+          if-no-files-found: warn

@@ -17,3 +17,4 @@ zig-out/
 /docs/plans/
 /.impeccable/
 /packaging/wpewebkit/out/
+/probes/*/target/
