@@ -20,14 +20,25 @@ use lepton_orchestrator::{Step, display};
 
 use crate::style::{AMBER, CYAN, GREEN, Painter, RED, VIOLET};
 
+/// Whether a step's program is a Zig: `build` and `run` name the one the toolchain chose
+/// (`zig-0.16`, `/opt/zig0.16/zig`), not always `zig`. Read by its name alone, the core's
+/// build was framed as "frontend" once Arch's Zig moved to 0.17 (measured).
+fn is_zig(program: &str) -> bool {
+    std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "zig" || name.starts_with("zig-"))
+}
+
 /// What a step is, in the word the frame shows.
 pub fn label(step: &Step) -> &'static str {
     let first = step.args.first().map(String::as_str);
+    let zig = is_zig(&step.program);
     match (step.program.as_str(), first) {
-        ("zig", Some("build")) if step.args.get(1).map(String::as_str) == Some("commands") => {
+        (_, Some("build")) if zig && step.args.get(1).map(String::as_str) == Some("commands") => {
             "types"
         }
-        ("zig", _) => "core",
+        _ if zig => "core",
         (_, Some("--dir")) => "package",
         (_, Some("install")) => "install",
         // `lepton update` handing over to the project's newer CLI.
@@ -245,6 +256,13 @@ mod tests {
             "types"
         );
         assert_eq!(label(&step("zig", &["build", "-Doptimize=Debug"])), "core");
+        // The Zig the toolchain chose beside a 0.17 system `zig`.
+        assert_eq!(
+            label(&step("zig-0.16", &["build", "--release=safe"])),
+            "core"
+        );
+        assert_eq!(label(&step("/opt/zig0.16/zig", &["build"])), "core");
+        assert_eq!(label(&step("zig-0.16", &["build", "commands"])), "types");
         assert_eq!(label(&step("pnpm", &["run", "build"])), "frontend");
         assert_eq!(
             label(&step("pnpm", &["--dir", "/x/packages/api", "run", "build"])),
