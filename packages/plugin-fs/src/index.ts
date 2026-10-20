@@ -22,6 +22,13 @@
  */
 
 import { InvokeError, invoke } from "@lepton-desk/api/core";
+import { listen, type UnlistenFn } from "@lepton-desk/api/event";
+
+declare module "@lepton-desk/api/event" {
+  interface AppEvents {
+    "fs.changed": true;
+  }
+}
 
 declare module "@lepton-desk/api/core" {
   interface AppCommands {
@@ -33,6 +40,8 @@ declare module "@lepton-desk/api/core" {
     "fs.stat": true;
     "fs.exists": true;
     "fs.rename": true;
+    "fs.watch": true;
+    "fs.unwatch": true;
   }
 }
 
@@ -46,6 +55,8 @@ export const commands = [
   "fs.stat",
   "fs.exists",
   "fs.rename",
+  "fs.watch",
+  "fs.unwatch",
 ] as const;
 
 /** Directories a path may be relative to; the numbers are the core's (`core.paths.Base`). */
@@ -268,4 +279,65 @@ export async function stat(path: string, options: PathOptions = {}): Promise<Fil
 export async function exists(path: string, options: PathOptions = {}): Promise<boolean> {
   const bytes = await call("fs.exists", request(path, options), options);
   return bytes[0] === 1;
+}
+
+/** What happened to an entry a watch sees (`fs.Change` in `zig/fs_linux.zig`). */
+export type WatchChange = "created" | "modified" | "removed" | "renamedFrom" | "renamedTo" | "gone";
+
+const changeNames: Record<number, WatchChange> = {
+  1: "created",
+  2: "modified",
+  3: "removed",
+  4: "renamedFrom",
+  5: "renamedTo",
+  6: "gone",
+};
+
+/** One change a watch saw. */
+export interface WatchEvent {
+  readonly change: WatchChange;
+  /** The entry's name inside a watched directory; `""` for the watched path itself. */
+  readonly name: string;
+}
+
+/**
+ * Calls `handler` for every change to `path`: for a directory, its entries being created,
+ * written, removed or renamed (not those of its subdirectories); for a file, the file
+ * itself. `modified` is reported once a writer closes the file. The core pushes each
+ * change as it reads it (within a quarter of a second); nothing is polled. Resolves with
+ * a function that stops watching. Linux only for now: on Windows it rejects with `failed`.
+ */
+export async function watch(
+  path: string,
+  handler: (event: WatchEvent) => void,
+  options: PathOptions = {},
+): Promise<UnlistenFn> {
+  const decoder = new TextDecoder();
+  let number: number | undefined;
+  const early: Uint8Array[] = [];
+  const deliver = (payload: Uint8Array) => {
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    if (payload.byteLength < 5 || view.getUint32(0, true) !== number) return;
+    const change = changeNames[payload[4] ?? 0];
+    if (change !== undefined) handler({ change, name: decoder.decode(payload.subarray(5)) });
+  };
+  // Listening first, so no change between the watch starting and the listener is lost.
+  const stop = await listen("fs.changed", (event) => {
+    if (number === undefined) early.push(event.payload);
+    else deliver(event.payload);
+  });
+  try {
+    const reply = await call("fs.watch", request(path, options), options);
+    number = new DataView(reply.buffer, reply.byteOffset, reply.byteLength).getUint32(0, true);
+  } catch (error) {
+    stop();
+    throw error;
+  }
+  for (const payload of early.splice(0)) deliver(payload);
+  const id = new Uint8Array(4);
+  new DataView(id.buffer).setUint32(0, number, true);
+  return () => {
+    stop();
+    void call("fs.unwatch", id, {}).catch(() => undefined);
+  };
 }

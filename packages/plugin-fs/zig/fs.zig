@@ -81,6 +81,10 @@ pub const remove = ops.remove;
 pub const exists = ops.exists;
 pub const stat = ops.stat;
 pub const readDirectory = ops.readDirectory;
+pub const Change = ops.Change;
+pub const watch = ops.watch;
+pub const unwatch = ops.unwatch;
+pub const drainWatch = ops.drainWatch;
 
 /// Matches `path` to the first root it lies in, writing the part below the root into
 /// `buffer`. Only words are compared here; the kernel enforces the boundary later.

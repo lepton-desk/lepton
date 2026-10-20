@@ -101,6 +101,8 @@ pub const BIOME_CONFIG: &str = include_str!("../assets/biome.json");
 /// core's own build logic, and the path to that core is the one thing about a project
 /// that is not known until the project exists.
 pub const ZIG_BUILD: &str = include_str!("../assets/lepton-build.zig");
+/// A new project's icon: Lepton's mark (the site's favicon).
+pub const ICON_SVG: &str = include_str!("../assets/icon.svg");
 
 /// The Vue, Svelte and Solid screens and entries: the same measures screen as React's,
 /// in each framework's own idiom, over the same `measures.ts` and `lepton-sdk.css`.

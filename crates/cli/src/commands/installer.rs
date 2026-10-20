@@ -64,6 +64,8 @@ pub struct Installer<'a> {
     pub program: &'a str,
     /// `bundle.icon`, for the shortcut and Settings → Apps; the program's own icon without.
     pub icon: Option<&'a Path>,
+    /// `deepLinks`: URL schemes registered for the user, opening the program with the link.
+    pub schemes: &'a [String],
     pub mtime: u64,
     pub out: &'a Path,
 }
@@ -74,8 +76,10 @@ pub(super) struct Extras {
     pub program: String,
     /// The shortcut's `short|long` name in the Start menu.
     pub shortcut: String,
-    /// The `.ico` bytes, when `bundle.icon` names one.
+    /// The `.ico` bytes: `bundle.icon`, else Lepton's mark.
     pub icon: Option<Vec<u8>>,
+    /// `deepLinks`.
+    pub schemes: Vec<String>,
 }
 
 /// One directory of the install, as the Directory table holds it.
@@ -134,12 +138,14 @@ pub fn write(spec: &Installer<'_>) -> Result<String, CliError> {
             }
             Some(bytes)
         }
-        None => None,
+        // Lepton's own mark rather than Windows' blank one.
+        None => Some(super::desktop_entry::DEFAULT_ICO.to_vec()),
     };
     let extras = Extras {
         program,
         shortcut,
         icon,
+        schemes: spec.schemes.to_vec(),
     };
 
     let mut texts: Vec<&str> = vec![spec.product, spec.manufacturer, &extras.shortcut];
@@ -517,6 +523,7 @@ mod tests {
         let icon = scratch.path().join("notes.ico");
         std::fs::write(&icon, [0, 0, 1, 0, 1, 0, 16, 16])
             .map_err(|error| lepton_orchestrator::testing::fail("the icon", error))?;
+        let schemes = vec![String::from("notes")];
         let make = |out| Installer {
             bundle: &tree,
             skip: &[".lepton-package"],
@@ -526,6 +533,7 @@ mod tests {
             manufacturer: "Lepton",
             program: "notes.exe",
             icon: Some(&icon),
+            schemes: &schemes,
             mtime: 0,
             out,
         };
@@ -563,6 +571,30 @@ mod tests {
         .map(|row| row[3].as_str().unwrap_or_default().to_owned())
         .collect::<Vec<_>>();
         assert_eq!(aumid, vec![String::from("style.lepton.notes")]);
+        // `deepLinks`: notes:// opens the program with the link.
+        let opens = assert_ok!(
+            package.select_rows(::msi::Select::table("Registry")),
+            "registry"
+        )
+        .filter(|row| {
+            row[2]
+                .as_str()
+                .is_some_and(|key| key.ends_with("\\shell\\open\\command"))
+        })
+        .map(|row| {
+            (
+                row[2].as_str().unwrap_or_default().to_owned(),
+                row[4].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+        assert_eq!(
+            opens,
+            vec![(
+                String::from("Software\\Classes\\notes\\shell\\open\\command"),
+                String::from("\"[#f1]\" \"%1\"")
+            )]
+        );
 
         // Laid out again from its own tables and cabinet, as `--verify` does.
         let unpacked = scratch.path().join("unpacked");

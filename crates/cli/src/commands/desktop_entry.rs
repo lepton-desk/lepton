@@ -15,10 +15,23 @@ use super::CliError;
 /// The text of the entry, per the Desktop Entry Specification.
 ///
 /// `StartupWMClass` repeats the `app_id`: some shells match on it rather than on the file
-/// name, and it costs nothing to be matched both ways.
-pub fn entry_text(app_id: &str, name: &str, exec: &Path) -> String {
+/// name, and it costs nothing to be matched both ways. `Icon` names the icon theme entry
+/// `install_icon` writes under the same `app_id`.
+///
+/// With `schemes` (`deepLinks`), the entry handles them (`MimeType`) and takes the link as
+/// its argument (`%u`).
+pub fn entry_text(app_id: &str, name: &str, exec: &Path, schemes: &[String]) -> String {
+    let (field_code, mime) = if schemes.is_empty() {
+        (String::new(), String::new())
+    } else {
+        let kinds: String = schemes
+            .iter()
+            .map(|scheme| format!("x-scheme-handler/{scheme};"))
+            .collect();
+        (" %u".to_owned(), format!("MimeType={kinds}\n"))
+    };
     format!(
-        "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nExec={exec}\nTerminal=false\nStartupWMClass={app_id}\nCategories=Development;\nX-Lepton-Generated=true\n",
+        "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nExec={exec}{field_code}\nIcon={app_id}\nTerminal=false\nStartupWMClass={app_id}\nCategories=Development;\n{mime}X-Lepton-Generated=true\n",
         name = escape_value(name),
         exec = quote_exec(&exec.to_string_lossy()),
         // Escaped too: a newline in it once added keys of its own (`Exec=…`) to the entry.
@@ -69,8 +82,35 @@ pub fn install(dir: &Path, app_id: &str, text: &str) -> Result<PathBuf, CliError
     Ok(path)
 }
 
-/// Installs the entry for a freshly built project in the user's applications directory.
-pub fn register(app_id: &str, name: &str, exec: &Path) -> Result<PathBuf, CliError> {
+/// Lepton's own mark, the icon of a project that has none (`src-lepton/icon.svg`).
+pub const DEFAULT_SVG: &str = include_str!("../../assets/icon.svg");
+/// The same mark for Windows installers, 16 to 256 px.
+pub const DEFAULT_ICO: &[u8] = include_bytes!("../../assets/icon.ico");
+
+/// The project's icon, `src-lepton/icon.svg`, or Lepton's own when the project has none.
+pub fn project_icon(root: &Path) -> String {
+    std::fs::read_to_string(root.join("src-lepton").join("icon.svg"))
+        .unwrap_or_else(|_| DEFAULT_SVG.to_owned())
+}
+
+/// Writes `svg` as the `app_id` icon under `share` (`icons/hicolor/scalable/apps/`), the
+/// name the entry's `Icon` gives. Call after `install`, which refuses an `app_id` another
+/// application's entry holds, so this never replaces that application's icon.
+pub fn install_icon(share: &Path, app_id: &str, svg: &str) -> Result<PathBuf, CliError> {
+    let dir = share.join("icons/hicolor/scalable/apps");
+    std::fs::create_dir_all(&dir).map_err(|error| {
+        CliError::Invalid(format!("could not create {}: {error}", dir.display()))
+    })?;
+    let path = dir.join(format!("{app_id}.svg"));
+    std::fs::write(&path, svg).map_err(|error| {
+        CliError::Invalid(format!("could not write {}: {error}", path.display()))
+    })?;
+    Ok(path)
+}
+
+/// Installs the entry for a freshly built project in the user's applications directory,
+/// with the project's icon beside it.
+pub fn register(root: &Path, app_id: &str, name: &str, exec: &Path) -> Result<PathBuf, CliError> {
     let xdg = std::env::var("XDG_DATA_HOME").ok();
     let home = std::env::var("HOME").ok();
     let dir = applications_dir(xdg.as_deref(), home.as_deref()).ok_or_else(|| {
@@ -78,19 +118,27 @@ pub fn register(app_id: &str, name: &str, exec: &Path) -> Result<PathBuf, CliErr
             "neither XDG_DATA_HOME nor HOME is set; no place for a desktop entry",
         ))
     })?;
-    install(&dir, app_id, &entry_text(app_id, name, exec))
+    let schemes = super::deep_links::read(root)?;
+    let entry = install(&dir, app_id, &entry_text(app_id, name, exec, &schemes))?;
+    if let Some(share) = dir.parent() {
+        install_icon(share, app_id, &project_icon(root))?;
+    }
+    for line in super::deep_links::register_handlers(app_id, &schemes) {
+        super::report::Report::new().fact("deep link", &line);
+    }
+    Ok(entry)
 }
 
 /// Registers the entry and says where, or why not, without stopping the run.
 ///
 /// A missing entry costs the application its name in the dock, not its window, so a
 /// failure is reported and the command carries on.
-pub fn announce(app_id: &str, name: &str, exec: &Path) {
+pub fn announce(root: &Path, app_id: &str, name: &str, exec: &Path) {
     // XDG desktop entries are a Linux desktop's; Windows and macOS find applications otherwise.
     if !cfg!(target_os = "linux") {
         return;
     }
-    match register(app_id, name, exec) {
+    match register(root, app_id, name, exec) {
         Ok(path) => {
             super::report::Report::new().fact("desktop entry", &super::report::home_short(&path))
         }
@@ -114,6 +162,14 @@ fn escape_value(value: &str) -> String {
 /// argument; inside quotes the specification reserves `"`, `` ` ``, `$` and `\`. `%` is
 /// a field code everywhere and is doubled.
 fn quote_exec(program: &str) -> String {
+    // Bare when nothing in it needs quoting: `xdg-open` without a desktop of its own
+    // (COSMIC, for one) takes `Exec`'s first word as the command with its quotes on, finds
+    // no such program and hands the link to the browser instead (measured: a quoted path
+    // sent `myapp://` to Firefox).
+    let plain = |ch: char| ch.is_ascii_alphanumeric() || "/._-+".contains(ch);
+    if !program.is_empty() && program.chars().all(plain) {
+        return program.to_owned();
+    }
     let mut quoted = String::with_capacity(program.len() + 2);
     quoted.push('"');
     for ch in program.chars() {
@@ -141,16 +197,30 @@ mod tests {
 
     #[test]
     fn the_entry_is_matched_by_the_app_id() -> Result<(), Failure> {
-        let text = entry_text("run-app", "run-app", Path::new("/opt/run-app/bin/run-app"));
+        let text = entry_text(
+            "run-app",
+            "run-app",
+            Path::new("/opt/run-app/bin/run-app"),
+            &[],
+        );
         assert_contains!(&text, "[Desktop Entry]\n");
         assert_contains!(&text, "StartupWMClass=run-app\n");
-        assert_contains!(&text, "Exec=\"/opt/run-app/bin/run-app\"\n");
+        assert_contains!(&text, "Exec=/opt/run-app/bin/run-app\n");
+        assert_contains!(&text, "Icon=run-app\n");
+        Ok(())
+    }
+
+    #[test]
+    fn a_deep_link_scheme_is_handled_and_passed_as_the_argument() -> Result<(), Failure> {
+        let text = entry_text("a", "a", Path::new("/opt/a"), &["myapp".to_owned()]);
+        assert_contains!(&text, "Exec=/opt/a %u\n");
+        assert_contains!(&text, "MimeType=x-scheme-handler/myapp;\n");
         Ok(())
     }
 
     #[test]
     fn a_path_with_spaces_and_reserved_characters_stays_one_argument() -> Result<(), Failure> {
-        let text = entry_text("a", "a", Path::new("/home/x/My Apps/100% $cash/app"));
+        let text = entry_text("a", "a", Path::new("/home/x/My Apps/100% $cash/app"), &[]);
         // Quoted, `$` escaped inside quotes, `%` doubled, and the escaping backslash
         // itself doubled by the string-value rule.
         assert_contains!(&text, "Exec=\"/home/x/My Apps/100%% \\\\$cash/app\"\n");

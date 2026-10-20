@@ -41,6 +41,10 @@ pub const Command = enum(u32) {
     /// The page's answer to a `permission.request` event: `u32` id (LE), then one byte,
     /// 1 to allow. `failed` when that id is not waiting (`permissions.zig`).
     permission_respond = 8,
+    /// Arguments, each ended by a NUL: with no argument this start's own after the
+    /// program's (a deep link, a file); with an `app.opened` event's `u32` number, the
+    /// ones a later start handed over (`single_instance.zig`).
+    app_args = 9,
     _,
 
     /// The name the page uses: `<group>.<name>`.
@@ -54,13 +58,14 @@ pub const Command = enum(u32) {
             .window_unmaximize => "window.unmaximize",
             .window_state => "window.state",
             .permission_respond => "permission.respond",
+            .app_args => "app.args",
             _ => @compileError("a command without a public name cannot reach the page"),
         };
     }
 };
 
 /// The named commands, for code generated from them.
-pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond };
+pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond, .app_args };
 
 /// What the window commands ask the platform to do.
 pub const WindowAction = enum { minimize, maximize, unmaximize };
@@ -206,6 +211,16 @@ pub fn handle(frame: []const u8, registry: *const Registry, window: Window, effe
             var bytes: [4]u8 = undefined;
             std.mem.writeInt(u32, &bytes, bits, .little);
             break :blk reply(out, sequence, .ok, &bytes);
+        },
+        .app_args => blk: {
+            const instance = @import("../../platform/single_instance.zig");
+            // No argument: this start's own. A `u32` (LE): the `app.opened` event's.
+            const args = switch (argument.len) {
+                0 => instance.launchArgs(),
+                4 => instance.opened(std.mem.readInt(u32, argument[0..4], .little)) orelse break :blk reply(out, sequence, .failed, &.{}),
+                else => break :blk reply(out, sequence, .malformed, &.{}),
+            };
+            break :blk reply(out, sequence, .ok, args) catch reply(out, sequence, .too_large, &.{});
         },
         .permission_respond => blk: {
             if (argument.len != 5) break :blk reply(out, sequence, .malformed, &.{});

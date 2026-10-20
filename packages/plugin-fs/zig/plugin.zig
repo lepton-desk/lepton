@@ -27,10 +27,16 @@ pub const commands = [_]Registry.PluginCommand{
     .{ .name = "fs.stat", .run = &stat },
     .{ .name = "fs.exists", .run = &exists },
     .{ .name = "fs.rename", .run = &rename },
+    .{ .name = "fs.watch", .run = &watchPath },
+    .{ .name = "fs.unwatch", .run = &unwatchPath },
 };
 
+/// What a watch reports: `u32` watch number (LE), one `fs.Change` byte, then the name of
+/// the entry that changed (empty for the watched path itself).
+pub const events = .{"fs.changed"};
+
 /// Paths and file contents are the user's own: a recording keeps their sizes, not their bytes.
-pub const private = .{ "fs.read_file", "fs.write_file", "fs.read_dir", "fs.mkdir", "fs.remove", "fs.stat", "fs.exists", "fs.rename" };
+pub const private = .{ "fs.read_file", "fs.write_file", "fs.read_dir", "fs.mkdir", "fs.remove", "fs.stat", "fs.exists", "fs.rename", "fs.watch", "fs.unwatch" };
 
 /// `flags` bits.
 pub const Flag = struct {
@@ -267,4 +273,38 @@ fn exists(argument: []const u8, out: []u8) Registry.HandlerError!usize {
     defer target.close();
     out[0] = @intFromBool(fs.exists(target.root_fd, target.relative) catch |err| return mapFs(err));
     return 1;
+}
+
+/// `fs.watch`: the usual path request; answers the watch's `u32` number (LE). Changes
+/// arrive as `fs.changed` events, read on every turn of the loop (`tick`). Linux only for
+/// now: Windows answers `failed`.
+fn watchPath(argument: []const u8, out: []u8) Registry.HandlerError!usize {
+    if (out.len < 4) return error.TooLarge;
+    var target: Target = undefined;
+    try open(try parse(argument), &target);
+    defer target.close();
+    const number = fs.watch(target.root_fd, target.relative) catch |err| return mapFs(err);
+    std.mem.writeInt(u32, out[0..4], number, .little);
+    return 4;
+}
+
+/// `fs.unwatch`: a `u32` watch number (LE).
+fn unwatchPath(argument: []const u8, _: []u8) Registry.HandlerError!usize {
+    if (argument.len != 4) return error.Failed;
+    fs.unwatch(std.mem.readInt(u32, argument[0..4], .little));
+    return 0;
+}
+
+/// Called by the application's loop on every turn: emits the changes waiting.
+pub fn tick(bridge: anytype) void {
+    fs.drainWatch(bridge, struct {
+        fn report(target: @TypeOf(bridge), number: u32, change: fs.Change, name: []const u8) void {
+            var data: [core.webviewEvents.max_data]u8 = undefined;
+            std.mem.writeInt(u32, data[0..4], number, .little);
+            data[4] = @intFromEnum(change);
+            const kept = @min(name.len, data.len - 5);
+            @memcpy(data[5..][0..kept], name[0..kept]);
+            _ = target.emit("fs.changed", data[0 .. 5 + kept]) catch {};
+        }
+    }.report);
 }

@@ -137,6 +137,7 @@ impl Flags {
         }
 
         super::desktop_entry::announce(
+            root,
             &manifest.identifier,
             &manifest.product_name,
             &artifact_dir(root).join(&binary),

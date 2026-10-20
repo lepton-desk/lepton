@@ -236,6 +236,7 @@ pub fn write_target(
                 manufacturer,
                 program: &program,
                 icon: icon.as_deref(),
+                schemes: &super::deep_links::read(root)?,
                 mtime: super::archive::release_time(),
                 out: &out,
             })?;
@@ -374,9 +375,24 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
         let applications = bundle.join("share").join("applications");
         // A bare `Exec`: installed, the binary is on `PATH`; the entry is for an install,
         // not for this directory.
-        let entry =
-            super::desktop_entry::entry_text(&spec.app_id, &spec.product, Path::new(&spec.binary));
+        let root = spec
+            .prefix
+            .parent()
+            .and_then(Path::parent)
+            .unwrap_or(&spec.prefix);
+        let schemes = super::deep_links::read(root)?;
+        let entry = super::desktop_entry::entry_text(
+            &spec.app_id,
+            &spec.product,
+            Path::new(&spec.binary),
+            &schemes,
+        );
         super::desktop_entry::install(&applications, &spec.app_id, &entry)?;
+        super::desktop_entry::install_icon(
+            &bundle.join("share"),
+            &spec.app_id,
+            &super::desktop_entry::project_icon(root),
+        )?;
     }
 
     write(&bundle.join(MARKER), &format!("{}\n", bundle_name(spec)))?;
@@ -487,7 +503,7 @@ mod tests {
         let entry = scratch.read(&format!(
             "bundle/{name}/share/applications/dev.example.notes.desktop"
         ))?;
-        assert_contains!(&entry, "Exec=\"notes\"\n");
+        assert_contains!(&entry, "Exec=notes\n");
         assert_contains!(&entry, "Name=Notes\n");
         Ok(())
     }

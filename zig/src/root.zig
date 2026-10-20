@@ -41,6 +41,8 @@ pub const scope = @import("platform/linux/scope.zig");
 pub const report = @import("report.zig");
 /// Paths the user chose in a dialog, granted at run time and remembered (`plugin-fs` `chosen`).
 pub const grants = @import("platform/grants.zig");
+/// One running copy per application and user; a second start hands over its arguments.
+pub const singleInstance = @import("platform/single_instance.zig");
 /// SIGTERM, SIGINT and SIGHUP as a request the loop ends on, so the channel is unlinked.
 pub const termination = if (@import("builtin").os.tag == .windows) @import("platform/windows/termination.zig") else @import("platform/linux/termination.zig");
 /// The Vulkan the native GPU renderer requires (the baseline R7 240's set); pure, no driver.
@@ -98,6 +100,9 @@ pub const webviewRegistry = @import("render/webview/registry.zig");
 /// (`LEPTON_REPLAY`): `lepton record` / `lepton replay`.
 pub const webviewRecord = @import("render/webview/record.zig");
 pub const webviewReplay = @import("render/webview/replay.zig");
+/// Whether the user has just pressed a key or button in the window: what lets a command
+/// answer only right after the user acts (`clipboard.read_text`).
+pub const activation = @import("render/webview/activation.zig");
 pub const webviewPageReplay = @import("render/webview/page_replay.zig");
 /// The event log the page reads from (`/__lepton/events`).
 pub const webviewEvents = @import("render/webview/events.zig");
@@ -126,6 +131,7 @@ test {
     _ = @import("metrics/probe_test.zig");
     _ = @import("metrics/latency.zig");
     _ = @import("platform/linux/termination.zig");
+    _ = @import("platform/single_instance.zig");
     _ = @import("render/gpu/vulkan_threshold.zig");
     _ = @import("render/scene.zig");
     _ = @import("render/atlas.zig");

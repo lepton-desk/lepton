@@ -110,6 +110,7 @@ pub fn pumpBlocking() bool {
 
 /// `gulong g_signal_connect_data(gpointer, const gchar *, GCallback, gpointer,
 /// GClosureNotify, GConnectFlags)` — gobject/gsignal.h.
+const e_event_type = @extern(*const fn (?*anyopaque) callconv(.c) c_int, .{ .name = "wpe_event_get_event_type" });
 const e_signal_connect = @extern(
     *const fn (?*anyopaque, [*:0]const u8, ?*const anyopaque, ?*anyopaque, ?*const anyopaque, c_int) callconv(.c) c_ulong,
     .{ .name = "g_signal_connect_data" },
@@ -345,6 +346,8 @@ pub const View = struct {
         self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState, .permission = &@import("permissions.zig").answer };
         _ = e_signal_connect(@ptrCast(self.view), "toplevel-state-changed", @ptrCast(&onToplevelState), self, null, 0);
         _ = e_signal_connect(@ptrCast(self.view), "resized", @ptrCast(&onResized), self, null, 0);
+        // Every input event passes here before WebKit's: a press marks the user acting.
+        _ = e_signal_connect(@ptrCast(self.view), "event", @ptrCast(&onInput), null, null, 0);
         // The default context only when it is a different object: a view built on the
         // default context would otherwise register the scheme twice, which WebKit
         // reports as CRITICAL ("Cannot register URI scheme lepton more than once").
@@ -379,6 +382,16 @@ pub const View = struct {
 
     /// `WPEView::resized`: the page gets `window.resized` with width and height, each a
     /// little-endian `u32`, in logical pixels as WPE reports them.
+    /// `WPEView::event`: notes a press, then lets the event go on to the page (FALSE).
+    fn onInput(_: ?*anyopaque, event: ?*anyopaque, _: ?*anyopaque) callconv(.c) c_int {
+        // `WPEEventType` (WPEEvent.h): POINTER_DOWN = 1, KEYBOARD_KEY_DOWN = 7, TOUCH_DOWN = 9.
+        switch (e_event_type(event)) {
+            1, 7, 9 => @import("activation.zig").press(),
+            else => {},
+        }
+        return 0;
+    }
+
     fn onResized(view: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
         const self: *View = @ptrCast(@alignCast(data orelse return));
         var bytes: [8]u8 = undefined;

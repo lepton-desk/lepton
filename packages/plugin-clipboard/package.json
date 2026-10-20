@@ -23,7 +23,8 @@
     "LICENSE*"
   ],
   "lepton": {
-    "plugin": "zig/plugin.zig"
+    "plugin": "zig/plugin.zig",
+    "settings": "clipboard"
   },
   "peerDependencies": {
     "@lepton-desk/api": "^0.1.9-beta.1"

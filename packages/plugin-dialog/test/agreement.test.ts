@@ -5,6 +5,20 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+/** The Zig Lepton builds with, as the CLI picks it: `LEPTON_ZIG`, else `zig-0.16`, else `zig`. */
+function zig(): string {
+  if (process.env.LEPTON_ZIG) return process.env.LEPTON_ZIG;
+  try {
+    execFileSync("zig-0.16", ["version"], { stdio: "ignore" });
+    return "zig-0.16";
+  } catch {
+    return "zig";
+  }
+}
+
+/** Linux tests link through LLD: Zig 0.16's own linker stops at glibc 2.44's `.sframe`. */
+const lld = process.platform === "linux" ? ["-fllvm", "-flld"] : [];
+
 const here = (path: string): string => fileURLToPath(new URL(path, import.meta.url));
 const source = readFileSync(here("../src/index.ts"), "utf8");
 
@@ -31,7 +45,7 @@ test("flags and outcomes match the Zig side", () => {
 });
 
 test("the request decoder passes its own tests", () => {
-  const output = execFileSync("zig", ["test", here("../zig/request.zig")], {
+  const output = execFileSync(zig(), ["test", here("../zig/request.zig"), ...lld], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });

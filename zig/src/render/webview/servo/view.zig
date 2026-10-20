@@ -317,6 +317,7 @@ pub const View = struct {
             const bit: u32 = @intFromEnum(b.which);
             if ((input.held_mask ^ self.last_mask) & bit == 0) continue;
             const pressed: i32 = if (input.held_mask & bit != 0) 1 else 0;
+            if (pressed == 1) @import("../activation.zig").press();
             c.lepton_servo_pointer_button(self.servo, b.number, pressed, input.x, input.y);
         }
         self.last_mask = input.held_mask;

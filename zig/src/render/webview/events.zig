@@ -23,7 +23,9 @@ pub const download_progress = "download.progress";
 pub const download_finished = "download.finished";
 pub const download_failed = "download.failed";
 pub const permission_request = "permission.request";
-pub const builtin = [_][]const u8{ window_state, window_resized, download_started, download_progress, download_finished, download_failed, permission_request };
+/// A second start of the application handed over its arguments (NUL-ended each).
+pub const app_opened = "app.opened";
+pub const builtin = [_][]const u8{ window_state, window_resized, download_started, download_progress, download_finished, download_failed, permission_request, app_opened };
 
 /// The events an application emits, declared once in its `main.zig`:
 ///

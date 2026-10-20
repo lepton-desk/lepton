@@ -31,6 +31,10 @@
       "types": "./dist/permission.d.ts",
       "default": "./dist/permission.js"
     },
+    "./app": {
+      "types": "./dist/app.d.ts",
+      "default": "./dist/app.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

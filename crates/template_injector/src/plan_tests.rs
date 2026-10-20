@@ -63,6 +63,7 @@ fn a_plan_covers_the_configuration_the_sdk_and_the_core_entry_points() -> Result
         // `src/` would make the frontend's own watcher try to compile it.
         "src-lepton/main.zig",
         "src-lepton/build.zig",
+        "src-lepton/icon.svg",
     ] {
         ensure!(
             paths.contains(&required),
@@ -376,9 +377,13 @@ fn no_template_reaches_the_network() -> Result<(), Failure> {
     let planned = planned_for(&Manifest::new("Ledger"))?;
 
     for file in &planned.files {
+        // An SVG's namespace is a name, never fetched.
+        let contents = file
+            .contents
+            .replace(r#"xmlns="http://www.w3.org/2000/svg""#, "");
         for banned in ["http://", "https://fonts.", "cdn.", "unpkg", "jsdelivr"] {
             ensure!(
-                !file.contents.contains(banned),
+                !contents.contains(banned),
                 "{} reaches the network via {banned:?}",
                 file.path
             );

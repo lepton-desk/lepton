@@ -78,7 +78,7 @@ fn appName(state: *AppState, _: []const u8, out: []u8) core.webviewRegistry.Hand
     return state.product.len;
 }}
 
-pub fn main() !void {{
+pub fn main(init: std.process.Init.Minimal) !void {{
     var gpa: std.heap.DebugAllocator(.{{}}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -90,6 +90,28 @@ pub fn main() !void {{
         if (core.webviewReplay.requested() != null) {{
             const registry = commands.bind(&app_state);
             core.webviewReplay.runFromEnvironment(allocator, &registry);
+        }}
+    }}
+
+    // One copy per user: a second start (a deep link, a file opened from the desktop)
+    // hands its arguments to this one and ends; this one emits them to the page as the
+    // `app.opened` event in the loop below. The page reads its own start's with `app.args`.
+    var instance: ?core.singleInstance.Instance = null;
+    defer if (instance) |*held| held.deinit();
+    if (comptime !core.render.is_native) {{
+        var args = try init.args.iterateAllocator(allocator);
+        defer args.deinit();
+        _ = args.next();
+        var given: [32][]const u8 = undefined;
+        var count: usize = 0;
+        while (args.next()) |arg| : (count += 1) {{
+            if (count == given.len) break;
+            given[count] = arg;
+        }}
+        switch (core.singleInstance.claim("{identifier}", given[0..count])) {{
+            .primary => |held| instance = held,
+            .forwarded => return,
+            .alone => {{}},
         }}
     }}
 
@@ -239,6 +261,20 @@ pub fn main() !void {{
 
     while (!view.bridge.close_requested and !view.closed and !core.termination.requested()) {{
         _ = core.render.pump_webview_blocking();
+
+        // Plugins that watch something (`fs.watch`) emit what changed.
+        inline for (@import("lepton_plugins").all) |plugin| {{
+            if (comptime @hasDecl(plugin, "tick")) plugin.tick(&view.bridge);
+        }}
+
+        if (instance) |*held| {{
+            var opened: [core.singleInstance.max_message]u8 = undefined;
+            while (held.take(&opened)) |message| {{
+                var number: [4]u8 = undefined;
+                std.mem.writeInt(u32, &number, core.singleInstance.remember(message), .little);
+                _ = view.bridge.emit(core.webviewEvents.app_opened, &number) catch {{}};
+            }}
+        }}
 
         const now = std.Io.Clock.Timestamp.now(io, .awake);
         if (last_publish) |at| {{

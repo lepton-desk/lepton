@@ -50,6 +50,8 @@ pub const CATALOG: [Plugin; 4] = [
             "fs.stat",
             "fs.exists",
             "fs.rename",
+            "fs.watch",
+            "fs.unwatch",
         ],
     },
     Plugin {

@@ -209,6 +209,7 @@ impl Flags {
         // The application's own binary, started last and in the foreground: a development
         // loop that returned while its window closed behind it is not a loop.
         super::desktop_entry::announce(
+            root,
             &manifest.identifier,
             &manifest.product_name,
             &super::build::artifact_dir(root).join(&binary),

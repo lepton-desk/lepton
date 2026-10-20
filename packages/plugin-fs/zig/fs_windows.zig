@@ -625,3 +625,22 @@ test "large files are read in ranges, saved by renaming, and trees removed witho
     try std.testing.expect(sameDirectory(root_fd, again));
     try std.testing.expect(!sameDirectory(root_fd, outside_fd));
 }
+
+// --- Watching ------------------------------------------------------------------------
+// Not on Windows yet (`ReadDirectoryChangesW` is the way): `fs.watch` answers `failed`.
+
+pub const Change = enum(u8) { created = 1, modified = 2, removed = 3, renamed_from = 4, renamed_to = 5, gone = 6 };
+
+pub fn watch(root: Handle, relative: [:0]const u8) Error!u32 {
+    _ = root;
+    _ = relative;
+    return error.Failed;
+}
+
+pub fn unwatch(number: u32) void {
+    _ = number;
+}
+
+pub fn drainWatch(context: anytype, report: fn (@TypeOf(context), u32, Change, []const u8) void) void {
+    _ = report;
+}

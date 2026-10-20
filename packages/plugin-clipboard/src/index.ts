@@ -2,10 +2,16 @@
  * `@lepton-desk/plugin-clipboard` — the system clipboard as text, from the core.
  *
  * Familiar from Tauri's `@tauri-apps/plugin-clipboard-manager`: `writeText(text)` and
- * `readText()`. Unlike `navigator.clipboard`, neither needs a user gesture or a
- * permission prompt in the page: the application grants them instead, by listing
- * `clipboard.read_text` and `clipboard.write_text` under `permissions` in
- * `lepton.config.json`; an unlisted one rejects with reason `denied`.
+ * `readText()`. The application grants them by listing `clipboard.read_text` and
+ * `clipboard.write_text` under `permissions` in `lepton.config.json`; an unlisted one
+ * rejects with reason `denied`.
+ *
+ * **Reading needs the user.** As with `navigator.clipboard`, `readText` answers only
+ * within five seconds of the user pressing a key or button in the window; otherwise it
+ * rejects with a `NotAllowedError` `DOMException`. The core decides this from the input it
+ * sees, so a script that got into the page cannot read what the user copied elsewhere. An
+ * application that must read without that, a clipboard manager, sets
+ * `"plugins": { "clipboard": { "read": "always" } }`.
  *
  * **Focus.** Wayland tells a window what the selection is only once it has focus, and
  * ignores a selection set by a window without it. Measured: at page load the window has
@@ -37,6 +43,7 @@ export interface ClipboardOptions {
 
 /** The first byte of a `clipboard.read_text` reply (`Known` in `zig/plugin.zig`). */
 const notYet = 0;
+const noInput = 2;
 /** How long a focused window waits for the selection before giving up (measured: ≤ 160 ms). */
 const selectionDeadlineMs = 2000;
 const retryMs = 20;
@@ -106,6 +113,12 @@ export async function readText(options: ClipboardOptions = {}): Promise<string> 
   let waited = 0;
   for (;;) {
     const reply = await invoke("clipboard.read_text", undefined, options);
+    if (reply[0] === noInput) {
+      throw new DOMException(
+        "reading the clipboard needs the user to have just pressed a key or button in the window",
+        "NotAllowedError",
+      );
+    }
     if (reply[0] !== notYet) return new TextDecoder().decode(reply.subarray(1));
     if (!document.hasFocus()) {
       await focused(options.signal);

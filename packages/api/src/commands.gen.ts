@@ -11,6 +11,7 @@ export interface BuiltinCommands {
   "window.unmaximize": true;
   "window.state": true;
   "permission.respond": true;
+  "app.args": true;
 }
 
 /** The events the core itself emits. */
@@ -22,6 +23,7 @@ export interface BuiltinEvents {
   "download.finished": true;
   "download.failed": true;
   "permission.request": true;
+  "app.opened": true;
 }
 
 /** Every status, by name; `ok` is success. */

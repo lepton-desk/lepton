@@ -53,6 +53,57 @@ fn beneath(root_fd: i32, relative: [*:0]const u8, flags: linux.O, mode: u32) Err
     return @intCast(try check(result));
 }
 
+// --- Watching ------------------------------------------------------------------------
+
+/// What `drainWatch` reports for one change.
+pub const Change = enum(u8) { created = 1, modified = 2, removed = 3, renamed_from = 4, renamed_to = 5, gone = 6 };
+
+/// The process's one inotify descriptor, made on the first watch.
+var inotify_fd: i32 = -1;
+
+/// Watches `relative` (a directory: its entries; a file: itself) and returns the watch's
+/// number. Opened beneath the root first, then watched through `/proc/self/fd/N`, so a link
+/// planted in the path cannot point the watch outside the scope.
+pub fn watch(root_fd: i32, relative: [:0]const u8) Error!u32 {
+    if (inotify_fd < 0) {
+        const made = linux.inotify_init1(linux.IN.NONBLOCK | linux.IN.CLOEXEC);
+        inotify_fd = @intCast(try check(made));
+    }
+    const fd = try beneath(root_fd, relative, .{ .PATH = true, .CLOEXEC = true }, 0);
+    defer _ = linux.close(fd);
+    var through: [32]u8 = undefined;
+    const path = std.fmt.bufPrintZ(&through, "/proc/self/fd/{d}", .{fd}) catch return error.Failed;
+    const mask: u32 = linux.IN.CREATE | linux.IN.CLOSE_WRITE | linux.IN.DELETE | linux.IN.MOVED_FROM |
+        linux.IN.MOVED_TO | linux.IN.DELETE_SELF | linux.IN.MOVE_SELF;
+    const wd = linux.inotify_add_watch(inotify_fd, path.ptr, mask);
+    return @intCast(try check(wd));
+}
+
+pub fn unwatch(number: u32) void {
+    if (inotify_fd < 0) return;
+    _ = linux.inotify_rm_watch(inotify_fd, @intCast(number));
+}
+
+/// Calls `report(context, number, change, name)` for every change waiting; never blocks.
+pub fn drainWatch(context: anytype, report: fn (@TypeOf(context), u32, Change, []const u8) void) void {
+    if (inotify_fd < 0) return;
+    var buffer: [4096]u8 align(@alignOf(linux.inotify_event)) = undefined;
+    while (true) {
+        const got = linux.read(inotify_fd, &buffer, buffer.len);
+        if (linux.errno(got) != .SUCCESS or got == 0) return;
+        var at: usize = 0;
+        while (at + @sizeOf(linux.inotify_event) <= got) {
+            const event: *const linux.inotify_event = @ptrCast(@alignCast(&buffer[at]));
+            const name_bytes = buffer[at + @sizeOf(linux.inotify_event) ..][0..event.len];
+            const name = std.mem.sliceTo(name_bytes, 0);
+            const mask = event.mask;
+            const change: ?Change = if (mask & linux.IN.CREATE != 0) .created else if (mask & linux.IN.CLOSE_WRITE != 0) .modified else if (mask & linux.IN.DELETE != 0) .removed else if (mask & linux.IN.MOVED_FROM != 0) .renamed_from else if (mask & linux.IN.MOVED_TO != 0) .renamed_to else if (mask & (linux.IN.DELETE_SELF | linux.IN.MOVE_SELF) != 0) .gone else null;
+            if (change) |which| report(context, @intCast(event.wd), which, name);
+            at += @sizeOf(linux.inotify_event) + event.len;
+        }
+    }
+}
+
 /// The root as a directory handle, created first when it may be.
 pub fn openRoot(root: Root) Error!i32 {
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
@@ -516,4 +567,33 @@ test "large files are read in ranges, saved by renaming, and trees removed witho
     try std.testing.expect(try exists(outside_fd, "secret.txt"));
     try std.testing.expectError(error.Denied, removeTree(root_fd, ""));
     try std.testing.expectError(error.Denied, removeTree(root_fd, "escape/secret.txt"));
+}
+
+test "a watched directory reports its entries' changes, and its number is the watch's" {
+    const tree = try Tree.make();
+    defer tree.remove();
+    var root_buffer: [256]u8 = undefined;
+    const root_fd = try openRoot(try tree.root(&root_buffer, "root", false));
+    defer _ = linux.close(root_fd);
+
+    const number = try watch(root_fd, "");
+    defer unwatch(number);
+    try writeFile(root_fd, "note.md", "x", false);
+    try remove(root_fd, "note.md");
+
+    const Seen = struct {
+        changes: [8]Change = undefined,
+        count: usize = 0,
+        number: u32,
+        fn note(self: *@This(), from: u32, change: Change, name: []const u8) void {
+            if (from != self.number or !std.mem.eql(u8, name, "note.md") or self.count == self.changes.len) return;
+            self.changes[self.count] = change;
+            self.count += 1;
+        }
+    };
+    var seen: Seen = .{ .number = number };
+    drainWatch(&seen, Seen.note);
+    try std.testing.expectEqualSlices(Change, &.{ .created, .modified, .removed }, seen.changes[0..seen.count]);
+    // A path that leaves the root is refused before anything is watched.
+    try std.testing.expectError(error.Denied, watch(root_fd, "../outside"));
 }

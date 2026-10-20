@@ -3,8 +3,26 @@
 //! The WPE calls are the core's (`core.webviewClipboard`), so this file compiles into a
 //! native application too, where both commands answer `failed`. A page may call a command
 //! only when the application lists it under `permissions`.
+//!
+//! Reading answers only within a few seconds of the user pressing a key or button in the
+//! window (`core.activation`), as a browser reads the clipboard only during a gesture: a
+//! script that got into the page cannot read whatever the user copied elsewhere. An
+//! application that must read without one, a clipboard manager, sets
+//! `"plugins": { "clipboard": { "read": "always" } }`.
 
 const core = @import("lepton_core");
+const config = @import("lepton_plugin_config").text;
+
+/// `clipboard.read`: `"input"` (the default) or `"always"`, checked at compile time.
+const read_always: bool = blk: {
+    const given = core.pluginConfig.values(config, "clipboard.read");
+    if (given.len == 0) break :blk false;
+    if (given.len > 1) @compileError("clipboard \"read\" is set more than once");
+    if (std.mem.eql(u8, given[0], "always")) break :blk true;
+    if (std.mem.eql(u8, given[0], "input")) break :blk false;
+    @compileError("clipboard \"read\" must be \"input\" or \"always\", not \"" ++ given[0] ++ "\"");
+};
+const std = @import("std");
 
 const Registry = core.webviewRegistry;
 const clipboard = core.webviewClipboard;
@@ -24,6 +42,9 @@ pub const Known = enum(u8) {
     not_yet = 0,
     /// The text follows (possibly empty: the clipboard holds no text).
     text = 1,
+    /// Not read: the user has not pressed a key or button in the window within the last
+    /// few seconds, and the application did not set `"read": "always"`.
+    no_input = 2,
 };
 
 /// No argument. Answers one [`Known`] byte, then the clipboard's text.
@@ -32,6 +53,10 @@ pub const Known = enum(u8) {
 /// selection counts too (measured) — so 0 is "not told yet", never "empty".
 fn readText(_: []const u8, out: []u8) Registry.HandlerError!usize {
     if (out.len == 0) return error.TooLarge;
+    if (!read_always and !core.activation.recent()) {
+        out[0] = @intFromEnum(Known.no_input);
+        return 1;
+    }
     if (clipboard.changeCount() == 0) {
         out[0] = @intFromEnum(Known.not_yet);
         return 1;

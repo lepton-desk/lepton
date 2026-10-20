@@ -386,6 +386,40 @@ pub(super) fn rows(
             text("shortcut"),
         ]],
     )?;
+    // `deepLinks`: each scheme opens the program with the link as its argument, for this
+    // user (`HKCU\Software\Classes`), kept with the shortcut's component.
+    let mut scheme_rows = Vec::new();
+    for (index, scheme) in extras.schemes.iter().enumerate() {
+        let key = format!("Software\\Classes\\{scheme}");
+        scheme_rows.push(vec![
+            text(&format!("scheme{index}")),
+            Cell::Int(1),
+            text(&key),
+            Cell::Null,
+            text(&format!("URL:{}", spec.product)),
+            text("shortcut"),
+        ]);
+        // Windows reads only that the value exists.
+        scheme_rows.push(vec![
+            text(&format!("scheme{index}_protocol")),
+            Cell::Int(1),
+            text(&key),
+            text("URL Protocol"),
+            text("1"),
+            text("shortcut"),
+        ]);
+        scheme_rows.push(vec![
+            text(&format!("scheme{index}_open")),
+            Cell::Int(1),
+            text(&format!("{key}\\shell\\open\\command")),
+            Cell::Null,
+            text(&format!("\"[#{}]\" \"%1\"", extras.program)),
+            text("shortcut"),
+        ]);
+    }
+    if !scheme_rows.is_empty() {
+        db.rows("Registry", scheme_rows)?;
+    }
     // The shortcut belongs to its target's component (ICE69): it comes and goes with the
     // program, whose key path is an HKCU value (ICE43).
     let program_component = files
