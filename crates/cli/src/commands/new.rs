@@ -79,9 +79,14 @@ pub struct Flags {
     #[arg(long, default_value_t = 800)]
     pub height: u32,
 
-    /// Overrides the reverse-DNS identifier derived from the name.
+    /// The app's reverse-DNS identifier. Omitted: `com.<owner>.<name>`.
     #[arg(long)]
     pub identifier: Option<String>,
+
+    /// Who publishes the app, the middle of `com.<owner>.<name>`: a domain's name or
+    /// yours. Omitted: the wizard asks, defaulting to Git's `user.name`, else `example`.
+    #[arg(long)]
+    pub owner: Option<String>,
 
     /// Creates the project here rather than in a directory named after it.
     #[arg(long)]
@@ -124,7 +129,10 @@ impl Flags {
                 target: self.target.unwrap_or(RenderMode::Native),
                 plugins: super::new_setup::plugins_from_flag(self.plugins.as_deref())?,
                 identifier: self.identifier.clone().unwrap_or_else(|| {
-                    lepton_template_injector::manifest::identifier_for(self.name())
+                    lepton_template_injector::manifest::reverse_dns(
+                        &self.owner.clone().unwrap_or_else(git_owner),
+                        self.name(),
+                    )
                 }),
             },
             None if self.non_interactive => {
@@ -466,9 +474,22 @@ fn wizard(flags: &Flags, paint: crate::style::Painter) -> Result<Resolved, CliEr
         None => Vec::new(),
     };
 
-    let default_identifier = lepton_template_injector::manifest::identifier_for(flags.name());
+    let owner = match &flags.owner {
+        Some(owner) => owner.clone(),
+        None => inquire::Text::new(&question("Owner"))
+            .with_default(&git_owner())
+            .with_help_message(
+                "who publishes the app: your name or a domain's, as in com.<owner>.<app>",
+            )
+            .prompt()
+            .map_err(|failure| CliError::Invalid(format!("could not read the owner: {failure}")))?,
+    };
+    let default_identifier = lepton_template_injector::manifest::reverse_dns(&owner, flags.name());
     let identifier = inquire::Text::new(&question("Identifier"))
         .with_default(&default_identifier)
+        .with_help_message(
+            "reverse-DNS, unique per app: it names the app's state folder and channel",
+        )
         .prompt()
         .map_err(|failure| {
             CliError::Invalid(format!("could not read the identifier: {failure}"))
@@ -480,6 +501,21 @@ fn wizard(flags: &Flags, paint: crate::style::Painter) -> Result<Resolved, CliEr
         identifier,
         plugins,
     })
+}
+
+/// Git's `user.name` as an identifier word, or `example` when Git has none.
+fn git_owner() -> String {
+    std::process::Command::new("git")
+        .args(["config", "--get", "user.name"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|name| name.chars().any(|c| c.is_ascii_alphanumeric()))
+        .map_or_else(
+            || "example".to_owned(),
+            |name| lepton_template_injector::manifest::identifier_for(&name),
+        )
 }
 
 /// What the wizard produced, or what the command line already said.

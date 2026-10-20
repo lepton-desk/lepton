@@ -10,6 +10,7 @@ const valued = new Set([
   "--plugins",
   "--package-manager",
   "--identifier",
+  "--owner",
   "--directory",
   "--width",
   "--height",

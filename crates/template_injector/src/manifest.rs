@@ -219,7 +219,8 @@ impl Manifest {
     }
 }
 
-/// Turns a project name into a reverse-DNS identifier.
+/// Turns a project name into one lowercase word of an identifier, and a directory name:
+/// `Rec Notes` → `rec-notes`.
 ///
 /// Spaces and punctuation become separators, and anything that cannot appear in an
 /// identifier is dropped. An empty result is replaced rather than emitted, because
@@ -247,6 +248,18 @@ pub fn identifier_for(product_name: &str) -> String {
     } else {
         out
     }
+}
+
+/// A new project's identifier, reverse-DNS: `com.<owner>.<app>`. The owner comes first
+/// because the identifier names the app on the system: its state folder (where its grants
+/// live), its `/dev/shm` channel and its desktop entry. Two apps with one identifier
+/// would share all three, so the app's own name is always part of it.
+pub fn reverse_dns(owner: &str, product_name: &str) -> String {
+    let owner = match identifier_for(owner) {
+        word if word == "app" && owner.trim().is_empty() => "example".to_owned(),
+        word => word,
+    };
+    format!("com.{owner}.{}", identifier_for(product_name))
 }
 
 /// Renders the manifest as the JSON a developer will read.
@@ -504,12 +517,23 @@ pub fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Manifest, RenderPath, Target, identifier_for, json_string, render_manifest, validate,
+        Manifest, RenderPath, Target, identifier_for, json_string, render_manifest, reverse_dns,
+        validate,
     };
     use lepton_orchestrator::testing::{Failure, balanced};
     use lepton_orchestrator::{
         assert_contains, assert_eq, assert_err, assert_ne, assert_ok, ensure,
     };
+
+    #[test]
+    fn a_new_identifier_is_owner_then_app() -> Result<(), Failure> {
+        assert_eq!(
+            reverse_dns("GalaxySal", "Rec Notes"),
+            "com.galaxysal.rec-notes"
+        );
+        assert_eq!(reverse_dns("", "Ledger"), "com.example.ledger");
+        Ok(())
+    }
 
     #[test]
     fn names_identifiers_and_versions_cannot_carry_code_or_paths() -> Result<(), Failure> {
