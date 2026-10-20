@@ -45,6 +45,7 @@ const npmPackages = [
 	"cli-win32-x64",
 	...plugins,
 	"create-lepton-app",
+	"servo-linux-x64",
 ];
 
 function fail(message) {

@@ -109,9 +109,21 @@ jobs:
             echo "## library"
             strip -o "$RUNNER_TEMP/liblepton_servo.so" target/release/liblepton_servo.so
             ls -l target/release/liblepton_servo.so "$RUNNER_TEMP/liblepton_servo.so"
-            xz -T0 -6 -k -c "$RUNNER_TEMP/liblepton_servo.so" | wc -c | sed 's/^/xz bytes: /'
+            # Kept as an artifact: what `tools/stage-servo.mjs` puts into
+            # @lepton-desk/servo-linux-x64 before it is published.
+            xz -T0 -6 -k -c "$RUNNER_TEMP/liblepton_servo.so" > "$RUNNER_TEMP/liblepton_servo.so.xz"
+            wc -c < "$RUNNER_TEMP/liblepton_servo.so.xz" | sed 's/^/xz bytes: /'
+            sha256sum "$RUNNER_TEMP/liblepton_servo.so" | sed 's/^/sha256: /'
             nm -D --defined-only target/release/liblepton_servo.so | grep -c ' T lepton_servo_' | sed 's/^/exported lepton_servo_* functions: /'
           } | tee -a "$RUNNER_TEMP/report.txt"
+
+      - name: Keep the library
+        uses: actions/upload-artifact@v4
+        with:
+          name: liblepton_servo
+          path: ${{ runner.temp }}/liblepton_servo.so.xz
+          compression-level: 0
+          retention-days: 30
 
       - name: Build the window check
         working-directory: zig

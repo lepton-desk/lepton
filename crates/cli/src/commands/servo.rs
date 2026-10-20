@@ -3,8 +3,9 @@
 //! Servo renders through `liblepton_servo.so`, the bridge built from `servo/bridge` in
 //! the Lepton repository (in CI: Servo's ~750 crates take about 11 minutes there, far
 //! longer on a small machine). A build with `--servo` links the core to it
-//! (`-Dservo-lib=<dir>`, `zig/src/build_servo.zig`). Until the library is published as
-//! `@lepton-desk/servo-linux-x64`, its directory is named with `LEPTON_SERVO_LIB`.
+//! (`-Dservo-lib=<dir>`, `zig/src/build_servo.zig`). The library comes with the npm
+//! package `@lepton-desk/servo-linux-x64` (CI builds it; `tools/stage-servo.mjs` puts it in),
+//! installed as a dev dependency of the project; `LEPTON_SERVO_LIB` names another directory.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -43,9 +44,10 @@ pub fn find(root: &Path, explicit: Option<&OsStr>) -> Result<PathBuf, CliError> 
         return Ok(absolute(root, &packaged));
     }
     Err(CliError::Invalid(format!(
-        "--servo: no {LIBRARY} found. Servo is experimental and its library is not published \
-         yet: build it from servo/bridge in the Lepton repository (`cargo build --release`) \
-         and set {ENV} to the directory that holds it."
+        "--servo: no {LIBRARY} found. Servo is experimental; install its library with \
+         `npm install -D @lepton-desk/servo-linux-x64@{version}` (or pnpm add -D), or set {ENV} \
+         to a directory that holds one built from servo/bridge.",
+        version = env!("CARGO_PKG_VERSION")
     )))
 }
 
@@ -93,7 +95,10 @@ mod tests {
     {
         let scratch = assert_ok!(Scratch::new("servo-lib-package"), "scratch");
         match find(scratch.path(), None) {
-            Err(error) => assert_contains!(&error.to_string(), "not published yet"),
+            Err(error) => assert_contains!(
+                &error.to_string(),
+                "npm install -D @lepton-desk/servo-linux-x64@"
+            ),
             Ok(dir) => {
                 return Err(Failure {
                     claim: "no library anywhere is refused with the reason".into(),

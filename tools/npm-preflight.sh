@@ -7,7 +7,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 plugins=(plugin-os plugin-clipboard plugin-fs plugin-dialog)
-packages=(cli-linux-x64 cli-win32-x64 cli api "${plugins[@]}" create-lepton-app)
+packages=(cli-linux-x64 cli-win32-x64 cli api "${plugins[@]}" create-lepton-app servo-linux-x64)
 # Published from Windows first (docs/yayin.md): the Windows binary, and the packages with
 # no Linux-only half. plugin-os and plugin-fs have one each (`uname`, `openat2`), which
 # their prepublish tests only here, so they, the Linux binary, `cli` and create-lepton-app
@@ -30,6 +30,8 @@ for plugin in "${plugins[@]}"; do
   # `^0.1.6` does not admit `0.2.0-beta.1`: a plugin must name the API it ships with.
   [ "$peer" = "^$version" ] || fail "packages/$plugin wants @lepton-desk/api $peer, not ^$version"
 done
+have="$(node -p "require('$root/packages/servo-linux-x64/package.json').version")"
+[ "$have" = "$version" ] || fail "packages/servo-linux-x64 is $have, the CLI is $version"
 for platform in cli-linux-x64 cli-win32-x64; do
   wanted="$(node -p "require('$root/packages/cli/package.json').optionalDependencies['@lepton-desk/$platform']")"
   [ "$wanted" = "$version" ] || fail "@lepton-desk/cli wants $platform $wanted, not $version"
@@ -92,6 +94,13 @@ step "create-lepton-app: test, lint"
 
 step "@lepton-desk/cli: test, lint"
 (cd "$root/packages/cli" && node --test "test/*.test.*" && "$root/packages/api/node_modules/.bin/biome" check .)
+
+# Servo is built in CI (`servo-bridge`, ~11 minutes there; far longer here) and staged
+# from its `liblepton_servo` artifact: `node tools/stage-servo.mjs liblepton_servo.so.xz`.
+step "the Servo library"
+[ -f "$root/packages/servo-linux-x64/lib/liblepton_servo.so" ] || fail "packages/servo-linux-x64/lib has no liblepton_servo.so: download the servo-bridge run's liblepton_servo artifact and run node tools/stage-servo.mjs on it"
+[ -f "$root/packages/servo-linux-x64/LICENSE-MPL" ] || fail "packages/servo-linux-x64 has no LICENSE-MPL (stage-servo.mjs copies it)"
+echo "staged"
 
 step "what each tarball will contain"
 for package in "${packages[@]}"; do

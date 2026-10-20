@@ -19,3 +19,6 @@ zig-out/
 /packaging/wpewebkit/out/
 /probes/*/target/
 /servo/*/target/
+
+# Staged by tools/stage-servo.mjs from the CI artifact; published to npm, not kept in git
+/packages/servo-linux-x64/lib/

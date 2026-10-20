@@ -1,0 +1,29 @@
+{
+  "name": "@lepton-desk/servo-linux-x64",
+  "version": "0.1.9-beta.1",
+  "description": "Servo for Lepton on linux-x64 (experimental): the bridge library `lepton build --servo` links. Install it as a dev dependency of a project built with --servo.",
+  "license": "MPL-2.0 AND (MIT OR Apache-2.0)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lepton-desk/lepton.git",
+    "directory": "packages/servo-linux-x64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "lib",
+    "LICENSE*",
+    "README.md"
+  ],
+  "preferUnplugged": true,
+  "publishConfig": {
+    "access": "public"
+  }
+}
