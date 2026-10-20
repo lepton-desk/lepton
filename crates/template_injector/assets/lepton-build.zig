@@ -152,10 +152,10 @@ pub fn build(b: *std.Build) !void {
     });
     root.addImport("lepton_plugins", plugins_module);
 
-    const exe = b.addExecutable(.{
+    const exe = throughLld(b.addExecutable(.{
         .name = name,
         .root_module = root,
-    });
+    }));
 
     // The generated Wayland bindings, when there are any. Stated here rather than
     // assumed: forgetting it produces an undefined symbol at link time with nothing
@@ -183,7 +183,7 @@ pub fn build(b: *std.Build) !void {
     const commands_step = b.step("commands", "Write zig-out/lepton-commands.d.ts only");
     const host = b.graph.host.result;
     if (host.cpu.arch == target.result.cpu.arch and host.os.tag == target.result.os.tag) {
-        const command_types = b.addExecutable(.{
+        const command_types = throughLld(b.addExecutable(.{
             .name = "lepton-commands",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("lepton-commands.zig"),
@@ -195,7 +195,7 @@ pub fn build(b: *std.Build) !void {
                     .{ .name = "lepton_core", .module = configured.module },
                 },
             }),
-        });
+        }));
         if (configured.protocol_step) |generated| command_types.step.dependOn(generated);
         const print_types = b.addRunArtifact(command_types);
         const types_file = print_types.captureStdOut(.{});
@@ -255,4 +255,17 @@ fn check_render_options(render: []const u8, servo: bool) !void {
         std.log.err("lepton: -Dservo needs the webview render path: Servo is the engine the webview renders with, so there is nothing for it to serve in the native path", .{});
         return error.ServoNeedsWebview;
     }
+}
+
+/// Zig 0.16's own ELF linker, which Debug builds for Linux use, stops at the `.sframe`
+/// section glibc's `crt1.o` now carries ("unhandled relocation type R_X86_64_PC64";
+/// measured 2026-10-20 on Arch, glibc 2.44 with GCC 16). LLVM with LLD links it, and so
+/// does Zig 0.17's linker; until the core moves to 0.17 every Linux binary goes through LLD.
+/// Kept here rather than in the vendored core: an older project's core has no such function.
+fn throughLld(compile: *std.Build.Step.Compile) *std.Build.Step.Compile {
+    if (compile.rootModuleTarget().os.tag == .linux) {
+        compile.use_llvm = true;
+        compile.use_lld = true;
+    }
+    return compile;
 }

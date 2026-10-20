@@ -227,3 +227,15 @@ pub fn generateProtocols(b: *std.Build, root: []const u8, protocols: []const Pro
         .modules = b,
     };
 }
+
+/// Zig 0.16's own ELF linker, which Debug builds for Linux use, stops at the `.sframe`
+/// section glibc's `crt1.o` now carries ("unhandled relocation type R_X86_64_PC64";
+/// measured 2026-10-20 on Arch, glibc 2.44 with GCC 16). LLVM with LLD links it, and so
+/// does Zig 0.17's linker; until Lepton moves to 0.17 every Linux binary goes through LLD.
+pub fn throughLld(compile: *std.Build.Step.Compile) *std.Build.Step.Compile {
+    if (compile.rootModuleTarget().os.tag == .linux) {
+        compile.use_llvm = true;
+        compile.use_lld = true;
+    }
+    return compile;
+}

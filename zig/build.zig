@@ -426,7 +426,7 @@ pub fn build(b: *std.Build) void {
         }
         break :blk windows_tests;
     } else core;
-    const core_tests = b.addTest(.{ .root_module = tested });
+    const core_tests = support.throughLld(b.addTest(.{ .root_module = tested }));
     const run_core_tests = b.addRunArtifact(core_tests);
 
     if (configured.protocol_step) |generated| {
@@ -461,7 +461,7 @@ pub fn build(b: *std.Build) void {
         gpu_module.linkSystemLibrary("harfbuzz", .{});
         gpu_module.linkSystemLibrary("fontconfig", .{});
 
-        const gpu_tests = b.addTest(.{ .root_module = gpu_module });
+        const gpu_tests = support.throughLld(b.addTest(.{ .root_module = gpu_module }));
         const run_gpu_tests = b.addRunArtifact(gpu_tests);
         const gpu_test_step = b.step(
             "gpu-test",
@@ -482,10 +482,10 @@ pub fn build(b: *std.Build) void {
         gles3_module.linkSystemLibrary("freetype2", .{});
         gles3_module.linkSystemLibrary("harfbuzz", .{});
         gles3_module.linkSystemLibrary("fontconfig", .{});
-        const gles3_tests = b.addTest(.{ .root_module = gles3_module });
+        const gles3_tests = support.throughLld(b.addTest(.{ .root_module = gles3_module }));
         gpu_test_step.dependOn(&b.addRunArtifact(gles3_tests).step);
 
-        const scene_check = b.addExecutable(.{
+        const scene_check = support.throughLld(b.addExecutable(.{
             .name = "lepton-scene-check",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/scene_check.zig"),
@@ -495,7 +495,7 @@ pub fn build(b: *std.Build) void {
                 .link_libc = true,
                 .imports = &.{.{ .name = "gles3", .module = gles3_module }},
             }),
-        });
+        }));
         const scene_check_step = b.step(
             "scene-check",
             "Time a window-sized scene of cards on GLES 3 and say what crosses to the GPU",
@@ -505,7 +505,7 @@ pub fn build(b: *std.Build) void {
 
     // A measurement, not a demo: the round-trip figure the framework's claim rests
     // on is produced by this binary from the real shared region.
-    const roundtrip = b.addExecutable(.{
+    const roundtrip = support.throughLld(b.addExecutable(.{
         .name = "lepton-roundtrip",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tools/roundtrip.zig"),
@@ -518,14 +518,14 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "lepton_core", .module = core },
             },
         }),
-    });
+    }));
 
     const run_roundtrip = b.addRunArtifact(roundtrip);
     const roundtrip_step = b.step("roundtrip", "Measure the real IPC round trip");
     roundtrip_step.dependOn(&run_roundtrip.step);
 
     // The real `invoke` handler behind stdin/stdout, for `@lepton-desk/api`'s tests.
-    const invoke_check = b.addExecutable(.{
+    const invoke_check = support.throughLld(b.addExecutable(.{
         .name = "lepton-invoke-check",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tools/invoke_check.zig"),
@@ -534,13 +534,13 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
             .imports = &.{.{ .name = "lepton_core", .module = core }},
         }),
-    });
+    }));
     const install_invoke_check = b.addInstallArtifact(invoke_check, .{});
     b.step("invoke-check", "Build the invoke handler the SDK tests talk to").dependOn(&install_invoke_check.step);
 
     // Opens a real window on whatever display the machine has and reports what the
     // server said about it. The check that the window layer is not merely a struct.
-    const window_check = b.addExecutable(.{
+    const window_check = support.throughLld(b.addExecutable(.{
         .name = "lepton-window-check",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tools/window_check.zig"),
@@ -551,14 +551,14 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "lepton_core", .module = core },
             },
         }),
-    });
+    }));
 
     // The native path's proof: opens a real window, paints a real frame with the
     // render layer's own surface, presents it and reports what the server said. A
     // separate step from `window-check` because it answers a different question —
     // not "can the layer open a window" but "can a frame drawn without an engine
     // reach the screen".
-    const native_check = b.addExecutable(.{
+    const native_check = support.throughLld(b.addExecutable(.{
         .name = "lepton-native-check",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tools/native_check.zig"),
@@ -577,7 +577,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "lepton_core", .module = core },
             },
         }),
-    });
+    }));
 
     const run_native_check = b.addRunArtifact(native_check);
     const native_check_step = b.step("native-check", "Paint a real window with the native path and report what reached the screen");
@@ -591,7 +591,7 @@ pub fn build(b: *std.Build) void {
     // `window-check` and `native-check` because it answers a third question — not
     // "can a window open" and not "can a frame be drawn without an engine", but "can
     // an engine's pixels land in a frame this framework owns".
-    const webview_check = b.addExecutable(.{
+    const webview_check = support.throughLld(b.addExecutable(.{
         .name = "lepton-webview-check",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tools/webview_check.zig"),
@@ -606,7 +606,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "lepton_core", .module = core },
             },
         }),
-    });
+    }));
 
     const run_webview_check = b.addRunArtifact(webview_check);
     const webview_check_step = b.step("webview-check", "Load a real page into a real frame and report what changed");
@@ -619,7 +619,7 @@ pub fn build(b: *std.Build) void {
     // The WebView2 probe: Windows only, and on its own — the core does not build there yet
     // (POSIX IPC, the Linux window layer). `webview2/` holds Microsoft's header.
     if (target.result.os.tag == .windows) {
-        const webview2_check = b.addExecutable(.{
+        const webview2_check = support.throughLld(b.addExecutable(.{
             .name = "lepton-webview2-check",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/webview2_check.zig"),
@@ -627,7 +627,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = .Debug,
                 .link_libc = true,
             }),
-        });
+        }));
         webview2_check.root_module.addIncludePath(b.path("webview2"));
         for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi" }) |name| {
             webview2_check.root_module.linkSystemLibrary(name, .{});
@@ -643,7 +643,7 @@ pub fn build(b: *std.Build) void {
     // engine would report "no pixels reachable" for the uninteresting reason that there
     // is no engine, and that message would be indistinguishable from the real one.
     if (configured.engine_linked) {
-        const engine_caps_tool = b.addExecutable(.{
+        const engine_caps_tool = support.throughLld(b.addExecutable(.{
             .name = "lepton-engine-caps",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/engine_caps.zig"),
@@ -654,7 +654,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "lepton_core", .module = core },
                 },
             }),
-        });
+        }));
 
         const run_engine_caps = b.addRunArtifact(engine_caps_tool);
         const engine_caps_step = b.step(
@@ -665,7 +665,7 @@ pub fn build(b: *std.Build) void {
     }
 
     if (configured.engine_linked) {
-        const platform_check = b.addExecutable(.{
+        const platform_check = support.throughLld(b.addExecutable(.{
             .name = "lepton-platform-check",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/platform_check.zig"),
@@ -676,7 +676,7 @@ pub fn build(b: *std.Build) void {
                     .{ .name = "lepton_core", .module = core },
                 },
             }),
-        });
+        }));
         // The tool is pointed at the install prefix, so the module has to be installed —
         // building it is not enough. Depending on the install step is what makes the
         // directory the tool is told about actually contain what the tool is looking for.
@@ -726,10 +726,10 @@ pub fn build(b: *std.Build) void {
         // window's, which means it needs the Wayland client library directly instead of
         // inheriting it from the core module.
 
-        const gpu_check = b.addExecutable(.{
+        const gpu_check = support.throughLld(b.addExecutable(.{
             .name = "lepton-gpu-check",
             .root_module = gpu_module,
-        });
+        }));
 
         const run_gpu_check = b.addRunArtifact(gpu_check);
         const gpu_check_step = b.step(
@@ -738,7 +738,7 @@ pub fn build(b: *std.Build) void {
         );
         gpu_check_step.dependOn(&run_gpu_check.step);
 
-        const scene_window_check = b.addExecutable(.{
+        const scene_window_check = support.throughLld(b.addExecutable(.{
             .name = "lepton-scene-window-check",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/tools/scene_window_check.zig"),
@@ -747,7 +747,7 @@ pub fn build(b: *std.Build) void {
                 .link_libc = true,
                 .imports = &.{.{ .name = "lepton_core", .module = core }},
             }),
-        });
+        }));
         const scene_window_step = b.step(
             "scene-window-check",
             "Present the draw command list in a real window for 3 s and read the surface back",
@@ -770,10 +770,10 @@ pub fn build(b: *std.Build) void {
             },
         });
         vulkan_module.linkSystemLibrary("vulkan", .{});
-        const vulkan_check = b.addExecutable(.{
+        const vulkan_check = support.throughLld(b.addExecutable(.{
             .name = "lepton-vulkan-check",
             .root_module = vulkan_module,
-        });
+        }));
         const run_vulkan_check = b.addRunArtifact(vulkan_check);
         const vulkan_check_step = b.step(
             "vulkan-check",
