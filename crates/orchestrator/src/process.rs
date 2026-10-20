@@ -175,7 +175,14 @@ impl Step {
     }
 
     fn command(&self) -> Command {
-        let mut command = Command::new(&self.program);
+        // A step named `zig` runs the Zig Lepton builds with, which need not be the
+        // one called `zig` on PATH (`zig.rs`).
+        let program = if self.program == "zig" {
+            crate::zig::program()
+        } else {
+            self.program.clone()
+        };
+        let mut command = Command::new(program);
         command.args(&self.args);
         command.envs(self.env.iter().map(|(name, value)| (name, value)));
         // An empty directory means "here", not "the directory whose name is the empty

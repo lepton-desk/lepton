@@ -67,6 +67,8 @@ pub enum ToolProblem {
     NotExecutable,
     /// The tool ran and failed, which means it is broken rather than absent.
     Failed { status: String },
+    /// The tool runs, but as a version Lepton does not build with (`zig.rs`).
+    WrongVersion { found: String, needed: &'static str },
 }
 
 impl fmt::Display for ToolProblem {
@@ -75,6 +77,10 @@ impl fmt::Display for ToolProblem {
             Self::NotFound => write!(f, "not found on PATH"),
             Self::NotExecutable => write!(f, "found but could not be executed"),
             Self::Failed { status } => write!(f, "failed to run ({status})"),
+            Self::WrongVersion { found, needed } => write!(
+                f,
+                "is {found}; Lepton builds with {needed}: put a Zig {needed} on PATH as zig or zig-{needed} (Arch: zig{needed}-bin), or set LEPTON_ZIG to it"
+            ),
         }
     }
 }
@@ -104,7 +110,7 @@ impl Toolchain {
         };
 
         Self {
-            zig: probe("zig", &["version"]),
+            zig: crate::zig::probe(),
             node: probe("node", &["--version"]),
             package_manager,
             // Unprobed, not headless: this layer cannot answer the question without
@@ -177,7 +183,12 @@ pub enum ToolRequirement {
 
 /// Runs a tool and records what it said about itself.
 fn probe(name: &'static str, args: &[&str]) -> ToolStatus {
-    let output = Command::new(name).args(args).output();
+    probe_at(name, name, args)
+}
+
+/// [`probe`] running `program`, which may be a path, for the tool called `name`.
+pub(crate) fn probe_at(name: &'static str, program: &str, args: &[&str]) -> ToolStatus {
+    let output = Command::new(program).args(args).output();
 
     match output {
         Ok(output) => {

@@ -1,7 +1,7 @@
 pkgbase = lepton-desk
 	pkgdesc = Desktop app framework with a Zig core and a web frontend on WPE WebKit
 	pkgver = 0.1.8
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/lepton-desk/lepton
 	arch = x86_64
 	arch = aarch64
@@ -10,8 +10,7 @@ pkgbase = lepton-desk
 	makedepends = git
 	depends = glibc
 	depends = libgcc
-	depends = zig>=0.16.0
-	depends = zig<0.17
+	depends = zig0.16
 	depends = pkgconf
 	depends = wpewebkit>=2.54
 	optdepends = nodejs: frontend builds for npm, pnpm and Yarn projects

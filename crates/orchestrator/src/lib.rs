@@ -23,6 +23,9 @@ mod toolchain;
 /// free to drift into unwinding again.
 pub mod testing;
 
+/// Which Zig builds a project's core: Lepton builds with one release series.
+pub mod zig;
+
 pub use process::{
     Captured, OrchestratorError, Output, Result, Step, display, require, run, run_streaming,
 };

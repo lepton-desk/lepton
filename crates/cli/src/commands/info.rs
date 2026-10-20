@@ -137,10 +137,16 @@ fn blocker_phrase(requirement: ToolRequirement, problem: &ToolProblem) -> String
         // pnpm after a good Zig is the failure this line most often describes.
         ToolRequirement::Build => match problem {
             ToolProblem::Failed { status } => format!("the first build tool failed ({status})"),
+            ToolProblem::WrongVersion { needed, .. } => {
+                format!("use Zig {needed}, as the zig line says")
+            }
             _ => String::from("install Zig and a package manager"),
         },
         ToolRequirement::Develop => match problem {
             ToolProblem::Failed { status } => format!("a development tool failed ({status})"),
+            ToolProblem::WrongVersion { needed, .. } => {
+                format!("use Zig {needed}, as the zig line says")
+            }
             _ => String::from("install Zig, Node and a package manager"),
         },
     }
