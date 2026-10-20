@@ -8,6 +8,8 @@ derlemede buradan okur: `--version`, komut başlıkları, yeni projelerin `@lept
 Yayından sonra `node tools/release-version.mjs aur`: `-bin`'in sha512'si npm'den, kaynak paketin
 commit'i HEAD'den, `.SRCINFO`'lar yeniden. Platform paketini `stage.mjs` yazar.
 
+Sürüm hazırlığının nerede durduğu, neyin ölçüldüğü ve Windows'ta neyin ölçülmeyi beklediği: `docs/durum.md`.
+
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-win32-x64` (**Windows'ta**, aşağıda) → `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
 `@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `@lepton-desk/servo-linux-x64` (deneysel; kimse ona bağlı değil, projeler `-D` ile kurar) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
 
