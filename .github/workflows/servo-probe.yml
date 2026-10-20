@@ -60,12 +60,14 @@ jobs:
         working-directory: probes/servo
         run: |
           set +e
-          /usr/bin/time -v -o "$RUNNER_TEMP/build-time.txt" cargo build --release 2>&1 | tee "$RUNNER_TEMP/build.log" | tail -40
+          /usr/bin/time -v -o "$RUNNER_TEMP/build-time.txt" cargo build --release --timings 2>&1 | tee "$RUNNER_TEMP/build.log" | tail -40
           status=${PIPESTATUS[0]}
           {
             echo "## build (exit $status)"
             grep -E "Elapsed|Maximum resident|Percent of CPU" "$RUNNER_TEMP/build-time.txt"
-            grep -iE "mozjs archive|Building from source" "$RUNNER_TEMP/build.log" | head -5
+            # mozjs_sys says where SpiderMonkey came from only in its build script's output.
+            echo "mozjs: $(grep -hiE 'mozjs archive|Building from source' target/release/build/mozjs_sys-*/stderr target/release/build/mozjs_sys-*/output 2>/dev/null | head -3)"
+            cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/" 2>/dev/null
             echo "crates compiled: $(grep -c '^ *Compiling ' "$RUNNER_TEMP/build.log")"
             du -sh target
             df -h /
@@ -107,4 +109,5 @@ jobs:
             ${{ runner.temp }}/report.txt
             ${{ runner.temp }}/build.log
             ${{ runner.temp }}/servo-probe.png
+            ${{ runner.temp }}/cargo-timing.html
           if-no-files-found: warn

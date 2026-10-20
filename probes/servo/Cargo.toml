@@ -15,6 +15,7 @@ description = "Measures whether Servo can serve a Lepton page and carry its bina
 servo = "=0.6.0"
 # The request body reaches a protocol handler as a stream over IPC; reading it needs
 # the types the `servo` crate does not re-export. Same versions as Servo 0.6 uses.
+# Its library is named `net_traits`.
 servo-net-traits = "=0.6.0"
 ipc-channel = "0.22"
 dpi = "0.1"

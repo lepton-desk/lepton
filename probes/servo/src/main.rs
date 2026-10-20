@@ -23,6 +23,8 @@ use std::time::{Duration, Instant};
 
 use dpi::PhysicalSize;
 use http::HeaderValue;
+use net_traits::request::{BodyChunkRequest, BodyChunkResponse};
+use net_traits::{NetworkError, ResourceFetchTiming};
 use servo::protocol_handler::{
     DoneChannel, FetchContext, HttpStatus, ProtocolHandler, ProtocolRegistry, Request, Response,
     ResponseBody,
@@ -31,8 +33,6 @@ use servo::{
     ConsoleLogLevel, EventLoopWaker, RenderingContext, ServoBuilder, SoftwareRenderingContext,
     WebView, WebViewBuilder, WebViewDelegate,
 };
-use servo_net_traits::request::{BodyChunkRequest, BodyChunkResponse};
-use servo_net_traits::{NetworkError, ResourceFetchTiming};
 use url::Url;
 
 /// The body the page sends first; the handler must read exactly these bytes.
