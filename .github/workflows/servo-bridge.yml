@@ -1,0 +1,144 @@
+# Builds Lepton's Servo bridge (servo/bridge, the C ABI in zig/servo/lepton_servo.h) and
+# runs the check that has Servo draw a lepton:// page into the core's own X11 window,
+# on Xvfb, with a real click from xdotool going through the window's event handling.
+# Run by hand; the project's machine never builds Servo.
+name: servo-bridge
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  window:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          { echo "## machine"; nproc; free -m; df -h /; } | tee -a "$RUNNER_TEMP/report.txt"
+
+      # Servo's list from the Servo book, then the core's native path (window, text,
+      # GL), then the X server and the tools that drive and capture it.
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ca-certificates ccache clang cmake curl g++ git gperf \
+            gstreamer1.0-libav gstreamer1.0-plugins-bad gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-ugly gstreamer1.0-tools libdbus-1-dev libegl1-mesa-dev libfreetype6-dev \
+            libges-1.0-dev libgl1-mesa-dri libgles2-mesa-dev libglib2.0-dev libgstreamer-plugins-bad1.0-dev \
+            libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev libharfbuzz-dev liblzma-dev libudev-dev \
+            libunwind-dev libvulkan1 libx11-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-x11-0 libxkbcommon0 libxmu-dev libxmu6 llvm-dev m4 xorg-dev \
+            libgstreamer-plugins-good1.0-dev \
+            pkg-config libcairo2-dev libxcb1-dev libxcb-randr0-dev libwayland-dev libwayland-bin \
+            libegl-dev libgles-dev libfontconfig-dev \
+            xvfb xdotool imagemagick
+
+      - name: Zig 0.16
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
+          mkdir -p "$RUNNER_TEMP/zig" && tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          { echo "## tools"; rustc --version; "$RUNNER_TEMP/zig/zig" version; } | tee -a "$RUNNER_TEMP/report.txt"
+
+      - name: Build the bridge (timed)
+        working-directory: servo/bridge
+        run: |
+          set +e
+          /usr/bin/time -v -o "$RUNNER_TEMP/build-time.txt" cargo build --release 2>&1 | tee "$RUNNER_TEMP/build.log" | tail -60
+          status=${PIPESTATUS[0]}
+          {
+            echo "## bridge build (exit $status)"
+            grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/build-time.txt"
+            echo "mozjs: $(grep -hiE 'mozjs archive|Building from source' target/release/build/mozjs_sys-*/stderr 2>/dev/null | head -1)"
+            ls -l target/release/liblepton_servo.so 2>/dev/null
+            df -h /
+          } | tee -a "$RUNNER_TEMP/report.txt"
+          exit "$status"
+
+      - name: Bridge tests
+        working-directory: servo/bridge
+        run: |
+          set +e
+          cargo test --release 2>&1 | tee "$RUNNER_TEMP/test.log" | tail -30
+          status=${PIPESTATUS[0]}
+          { echo "## bridge tests (exit $status)"; grep -E "^test |test result" "$RUNNER_TEMP/test.log"; } | tee -a "$RUNNER_TEMP/report.txt"
+          exit "$status"
+
+      - name: Library
+        working-directory: servo/bridge
+        run: |
+          {
+            echo "## library"
+            strip -o "$RUNNER_TEMP/liblepton_servo.so" target/release/liblepton_servo.so
+            ls -l target/release/liblepton_servo.so "$RUNNER_TEMP/liblepton_servo.so"
+            xz -T0 -6 -k -c "$RUNNER_TEMP/liblepton_servo.so" | wc -c | sed 's/^/xz bytes: /'
+            nm -D --defined-only target/release/liblepton_servo.so | grep -c ' T lepton_servo_' | sed 's/^/exported lepton_servo_* functions: /'
+          } | tee -a "$RUNNER_TEMP/report.txt"
+
+      - name: Build the window check
+        working-directory: zig
+        run: |
+          zig build servo-window-check -Drender=native -Dservo-lib="$GITHUB_WORKSPACE/servo/bridge/target/release" 2>&1 | tail -40
+          ls -l zig-out/bin/lepton-servo-window-check
+
+      # The check prints each page title; the driver clicks at the button's place when
+      # the page says `ready`, and captures the X screen when it says `clicked`.
+      - name: Run in the core's window on Xvfb
+        working-directory: zig
+        run: |
+          set +e
+          Xvfb :99 -screen 0 1024x768x24 > "$RUNNER_TEMP/xvfb.log" 2>&1 &
+          export DISPLAY=:99
+          unset WAYLAND_DISPLAY
+          sleep 2
+          log="$RUNNER_TEMP/run.log"
+          /usr/bin/time -v -o "$RUNNER_TEMP/run-time.txt" ./zig-out/bin/lepton-servo-window-check > "$log" 2>&1 &
+          pid=$!
+          for i in $(seq 1 240); do grep -q "^title *ready" "$log" && break; kill -0 $pid 2>/dev/null || break; sleep 0.5; done
+          import -window root "$RUNNER_TEMP/screen-ready.png"
+          wid=$(xdotool search --name "Lepton on Servo" | head -1)
+          echo "window id: $wid" >> "$log.driver"
+          xdotool mousemove --window "$wid" 200 100 >> "$log.driver" 2>&1
+          sleep 0.3
+          xdotool click 1 >> "$log.driver" 2>&1
+          for i in $(seq 1 40); do grep -q "^title *clicked" "$log" && break; kill -0 $pid 2>/dev/null || break; sleep 0.25; done
+          sleep 0.5
+          import -window root "$RUNNER_TEMP/screen-clicked.png"
+          wait $pid
+          status=$?
+          cat "$log"
+          cp servo-window.png "$RUNNER_TEMP/" 2>/dev/null
+          {
+            echo "## window check (exit $status)"
+            cat "$log"
+            cat "$log.driver"
+            grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/run-time.txt"
+          } | tee -a "$RUNNER_TEMP/report.txt"
+          exit "$status"
+
+      - name: Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: servo-bridge
+          path: |
+            ${{ runner.temp }}/report.txt
+            ${{ runner.temp }}/build.log
+            ${{ runner.temp }}/screen-ready.png
+            ${{ runner.temp }}/screen-clicked.png
+            ${{ runner.temp }}/servo-window.png
+          if-no-files-found: warn

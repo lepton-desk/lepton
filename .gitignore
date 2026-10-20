@@ -18,3 +18,4 @@ zig-out/
 /.impeccable/
 /packaging/wpewebkit/out/
 /probes/*/target/
+/servo/*/target/

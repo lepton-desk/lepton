@@ -401,6 +401,9 @@ pub fn build(b: *std.Build) void {
         .render = render,
     });
     const core = configured.module;
+    if (b.option([]const u8, "servo-lib", "Directory holding liblepton_servo.so, for servo-window-check")) |dir| {
+        @import("src/build_servo.zig").windowCheck(b, target, core, configured.protocol_step, dir);
+    }
 
     const lib = b.addLibrary(.{
         .name = "lepton_core",

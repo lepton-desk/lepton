@@ -1,0 +1,43 @@
+[package]
+name = "lepton-servo"
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "Lepton's Servo bridge: Servo behind the C ABI in zig/servo/lepton_servo.h. Built in CI, never on the project's machine."
+
+# Not a member of the repository's workspace: Servo's dependency tree (about 750
+# crates) must never reach `cargo build` or `cargo test` at the root.
+[workspace]
+
+[lib]
+name = "lepton_servo"
+# cdylib for the core to link; rlib so the layout tests run with `cargo test`.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Servo's LTS line, pinned exactly: monthly releases break the embedding API.
+servo = "=0.6.0"
+# Its library is named `net_traits`: the request body's stream types, which `servo`
+# does not re-export.
+servo-net-traits = "=0.6.0"
+ipc-channel = "0.22"
+dpi = "0.1"
+euclid = "0.22"
+http = "1.4"
+keyboard-types = "0.8"
+# The body stream is shared behind `parking_lot::Mutex` (`RequestBody::clone_stream`).
+parking_lot = "0.12"
+raw-window-handle = "0.6"
+tokio = { version = "1", features = ["sync"] }
+url = "2.5"
+
+[lints.rust]
+# Denied, not forbidden: the C boundary (`src/abi.rs`) is the one module allowed it,
+# and every block there says what it relies on.
+unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
