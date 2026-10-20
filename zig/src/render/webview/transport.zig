@@ -22,11 +22,20 @@ const wire = @import("../../ipc/wire.zig");
 const invoke = @import("invoke.zig");
 const registry = @import("registry.zig");
 const events = @import("events.zig");
+const secret = @import("secret.zig");
 
-/// The path the page fetches the ring snapshot from, on its own origin.
-pub const region_path = "/__lepton/region";
-/// The path the page asks on when it is closing.
-pub const close_path = "/__lepton/close";
+/// The core's own paths, after `/__lepton/<this run's key>` (`secret.zig`): the ring
+/// snapshot, the close request, the event log and `invoke`.
+pub const region_name = "/region";
+pub const close_name = "/close";
+pub const events_name = "/events";
+pub const invoke_name = "/invoke";
+
+/// A core URL as written into the comptime layout: the key's place is `secret.marker`,
+/// filled in when the script is written (`script`).
+fn coreUrl(comptime name: []const u8) []const u8 {
+    return core_origin ++ "/__lepton/" ++ secret.marker ++ name;
+}
 
 /// Absolute, on the core's own origin. Same-origin for a packaged page (served from
 /// `lepton://localhost/`); a cross-origin read for a page served by the dev server,
@@ -96,7 +105,7 @@ const events_object = std.fmt.comptimePrint(
     "{{url:\"{s}\",holdMs:{d},kindNotice:{d},noticeBytes:{d},noticeNameLenOffset:{d},noticeDataLenOffset:{d}," ++
         "windowState:{{fullscreen:{d},maximized:{d},active:{d}}}}}",
     .{
-        core_origin ++ events.path,
+        coreUrl(events_name),
         events.hold_ms,
         @intFromEnum(wire.Kind.notice),
         @sizeOf(wire.Notice),
@@ -132,7 +141,7 @@ const invoke_object = std.fmt.comptimePrint(
         "replyBytes:{d},replySequenceOffset:{d},replyStatusOffset:{d},replyResultLenOffset:{d},replyResultOffOffset:{d}," ++
         "commands:{s},statuses:{s}}}",
     .{
-        core_origin ++ invoke.path,
+        coreUrl(invoke_name),
         invoke.max_request,
         @intFromEnum(wire.Kind.request),
         @intFromEnum(wire.Kind.reply),
@@ -157,15 +166,31 @@ const invoke_object = std.fmt.comptimePrint(
 /// Frozen object, fixed buffer: the SDK builds one `DataView` over `bytes` when its
 /// module loads, so the array is allocated once and refreshed in place with `set`. A
 /// replaced array would leave the SDK reading the first snapshot forever.
-pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry) error{NoSpaceLeft}![:0]const u8 {
+/// The dev server's origin as the script may quote it: `scheme://host[:port]` characters
+/// only, or "" (a packaged page, or anything else, which then gets no exception).
+fn quotableOrigin(page_origin: []const u8) []const u8 {
+    for (page_origin) |char| {
+        const fine = std.ascii.isAlphanumeric(char) or std.mem.indexOfScalar(u8, ":/.-[]", char) != null;
+        if (!fine) return "";
+    }
+    return page_origin;
+}
+
+/// The transport, for the application's own page only: `page_origin` is the dev server's
+/// origin ("" for a packaged page served from `core_origin`). In any other document — a
+/// page the window navigated to, `about:srcdoc`, an embedded frame — it defines nothing,
+/// so that document has neither `__lepton` nor the run's key (`secret.zig`).
+pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, page_origin: []const u8) error{NoSpaceLeft}![:0]const u8 {
     // The application's commands are known when the application is built, not when the
     // core is, so their table is written here at run time beside the comptime layout.
     var app_table: [2048]u8 = undefined;
     const app = try registry.writeAppTable(commands, &app_table);
-    return std.fmt.bufPrintZ(out,
+    const written = try std.fmt.bufPrintZ(out,
         \\(() => {{
         \\  "use strict";
         \\  if (globalThis.__lepton !== undefined) return;
+        \\  const own = location.href.startsWith("{s}/") || ("{s}" !== "" && location.origin === "{s}");
+        \\  if (!own) return;
         \\  const layout = Object.freeze({s});
         \\  const bytes = new Uint8Array({d});
         \\  const view = new DataView(bytes.buffer);
@@ -237,7 +262,9 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry) 
         \\  refresh();
         \\}})();
         \\
-    , .{ layout_object, region_len, core_origin ++ region_path, retry_ms, app, core_origin ++ close_path });
+    , .{ core_origin, quotableOrigin(page_origin), quotableOrigin(page_origin), layout_object, region_len, coreUrl(region_name), retry_ms, app, coreUrl(close_name) });
+    secret.fill(out[0..written.len]);
+    return written;
 }
 
 // --- Injection ------------------------------------------------------------------
@@ -280,7 +307,12 @@ pub fn inject(web_view: ?*anyopaque, source: [:0]const u8) bool {
 const no_commands: registry.Registry = .{};
 
 fn scriptFor(out: []u8, region_len: usize) error{NoSpaceLeft}![:0]const u8 {
-    return script(out, region_len, &no_commands);
+    return script(out, region_len, &no_commands, "");
+}
+
+/// `text` with this run's key where the URLs carry it.
+fn keyed(comptime before: []const u8, comptime after: []const u8, out: []u8) error{NoSpaceLeft}![]const u8 {
+    return std.fmt.bufPrint(out, "{s}{s}{s}", .{ before, secret.get(), after });
 }
 
 test "the application's commands reach the page by name" {
@@ -288,7 +320,7 @@ test "the application's commands reach the page by name" {
     var notes: Notes = .{};
     const commands = (comptime registry.checked(Notes, &app, registry.permissionList("notes.save"))).bind(&notes);
     var buffer: [16384]u8 = undefined;
-    const text = try script(&buffer, 1, &commands);
+    const text = try script(&buffer, 1, &commands, "");
     try std.testing.expect(std.mem.indexOf(u8, text, "appCommands: Object.freeze({\"notes.save\":1000})") != null);
 }
 
@@ -301,7 +333,8 @@ fn saveNothing(_: *Notes, _: []const u8, _: []u8) registry.HandlerError!usize {
 test "the page gets the event frame layout and the window-state bits" {
     var buffer: [16384]u8 = undefined;
     const text = try scriptFor(&buffer, 1);
-    try std.testing.expect(std.mem.indexOf(u8, text, "url:\"lepton://localhost/__lepton/events\"") != null);
+    var url: [128]u8 = undefined;
+    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("url:\"lepton://localhost/__lepton/", "/events\"", &url)) != null);
     var needle: [96]u8 = undefined;
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "kindNotice:{d}", .{@intFromEnum(wire.Kind.notice)})) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "maximized:{d}", .{invoke.WindowState.maximized})) != null);
@@ -338,7 +371,8 @@ test "the page gets invoke's offsets and command ids from the structs" {
     var buffer: [8192]u8 = undefined;
     const text = try scriptFor(&buffer, 1);
     var needle: [96]u8 = undefined;
-    try std.testing.expect(std.mem.indexOf(u8, text, "url:\"lepton://localhost/__lepton/invoke\"") != null);
+    var url: [128]u8 = undefined;
+    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("url:\"lepton://localhost/__lepton/", "/invoke\"", &url)) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "\"window.close\":{d}", .{@intFromEnum(invoke.Command.window_close)})) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "replyStatusOffset:{d}", .{@offsetOf(wire.Reply, "status")})) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "requestBytes:{d}", .{@sizeOf(wire.Request)})) != null);
@@ -358,6 +392,24 @@ test "the page fetches the core's origin by absolute address, never a wildcard" 
     // rather than asking Vite for `/__lepton/region` and getting a 404.
     var buffer: [8192]u8 = undefined;
     const text = try scriptFor(&buffer, 1);
-    try std.testing.expect(std.mem.indexOf(u8, text, "fetch(`lepton://localhost/__lepton/region?after=") != null);
+    var url: [128]u8 = undefined;
+    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("fetch(`lepton://localhost/__lepton/", "/region?after=", &url)) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "*") == null);
+}
+
+test "the transport defines itself only in the application's own page" {
+    var buffer: [8192]u8 = undefined;
+    const packaged = try script(&buffer, 1, &no_commands, "");
+    try std.testing.expect(std.mem.indexOf(u8, packaged, "location.href.startsWith(\"lepton://localhost/\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, packaged, "if (!own) return;") != null);
+    // Every core URL carries the key; none is left as the marker.
+    try std.testing.expect(std.mem.indexOf(u8, packaged, secret.marker) == null);
+
+    var dev_buffer: [8192]u8 = undefined;
+    const dev = try script(&dev_buffer, 1, &no_commands, "http://127.0.0.1:5173");
+    try std.testing.expect(std.mem.indexOf(u8, dev, "location.origin === \"http://127.0.0.1:5173\"") != null);
+    // An origin with a quote is not quoted into the script.
+    var odd_buffer: [8192]u8 = undefined;
+    const odd = try script(&odd_buffer, 1, &no_commands, "http://x\"+alert(1)+\"");
+    try std.testing.expect(std.mem.indexOf(u8, odd, "alert") == null);
 }

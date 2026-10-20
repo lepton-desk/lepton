@@ -25,6 +25,8 @@ pub const uri = engine.uri;
 pub const path = engine.path;
 /// `GET`, `POST`, …, or "".
 pub const method = engine.method;
+/// One request header by name (`Origin`, `Referer`), or null.
+pub const header = engine.header;
 /// The request body into a caller's buffer.
 pub const body = engine.body;
 pub const ref = engine.ref;

@@ -377,7 +377,7 @@ pub const View = struct {
     pub fn addTransportTo(self: *View, core: *c.ICoreWebView2) bool {
         if (self.transport_len == 0) return false;
         var source: [16384]u8 = undefined;
-        const text = transport.script(&source, self.transport_len, &self.bridge.registry) catch return false;
+        const text = transport.script(&source, self.transport_len, &self.bridge.registry, self.bridge.pageOrigin()) catch return false;
         var wide: [16384:0]u16 = undefined;
         const units = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], text) catch return false;
         wide[units] = 0;
@@ -520,6 +520,8 @@ fn onCloseRequest(this: [*c]c.ICoreWebView2WindowCloseRequestedEventHandler, _: 
 /// Links that leave the application open in the user's browser, as on Linux
 /// (`features.isExternal`); anything else stays in this window.
 fn openExternally(uri: []const u8) void {
+    // `ShellExecuteW` runs whatever handler a scheme has: only the web and mail.
+    if (!features.mayOpenOutside(uri)) return;
     var wide: [4096:0]u16 = undefined;
     const units = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], uri[0..@min(uri.len, 4000)]) catch return;
     wide[units] = 0;
@@ -534,7 +536,7 @@ fn onNewWindow(this: [*c]c.ICoreWebView2NewWindowRequestedEventHandler, _: [*c]c
     // application's pages open in a window of its own (`popup.zig`), the web in the
     // user's browser.
     _ = args.*.lpVtbl.*.put_Handled.?(args, c.TRUE);
-    if (features.isExternal(uri)) {
+    if (!features.isOwnPage(uri)) {
         openExternally(uri);
     } else {
         _ = popup.open(viewOf("new_windows", this), args);
@@ -546,7 +548,9 @@ fn onNavigation(_: [*c]c.ICoreWebView2NavigationStartingEventHandler, _: [*c]c.I
     var wide: c.LPWSTR = null;
     var buffer: [4096 * 3]u8 = undefined;
     const uri = if (wv.ok(args.*.lpVtbl.*.get_Uri.?(args, &wide))) wv.takeString(wide, &buffer) else "";
-    if (features.isExternal(uri)) {
+    // Any way the window's document leaves the application — a link, a script setting
+    // `location`, a form — ends here: `NavigationStarting` is the top document's.
+    if (!features.isOwnPage(uri)) {
         _ = args.*.lpVtbl.*.put_Cancel.?(args, c.TRUE);
         openExternally(uri);
     }

@@ -16,8 +16,9 @@ use servo::protocol_handler::ProtocolRegistry;
 use servo::{
     ConsoleLogLevel, DevicePoint, EventLoopWaker, InputEvent, KeyboardEvent, LoadStatus,
     MouseButton, MouseButtonAction, MouseButtonEvent, MouseLeftViewportEvent, MouseMoveEvent,
-    RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript, WebView, WebViewBuilder,
-    WebViewDelegate, WheelDelta, WheelEvent, WheelMode, WindowRenderingContext,
+    NavigationRequest, RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript,
+    WebView, WebViewBuilder, WebViewDelegate, WheelDelta, WheelEvent, WheelMode,
+    WindowRenderingContext,
 };
 use url::Url;
 
@@ -30,6 +31,8 @@ pub trait Host {
     fn title(&self, title: Option<&str>);
     fn console(&self, level: u32, message: &str);
     fn loaded(&self);
+    /// Whether the view's document may become `url`.
+    fn navigation(&self, url: &str) -> bool;
 }
 
 /// Servo's wake-up, from any thread, forwarded to the core through the queue's waker.
@@ -59,6 +62,18 @@ impl WebViewDelegate for Page {
 
     fn notify_page_title_changed(&self, _webview: WebView, title: Option<String>) {
         self.host.title(title.as_deref());
+    }
+
+    /// Every navigation asks the core first: a page that sent the window to the web would
+    /// otherwise show it inside the application (audit, 2026-10-20). Servo asks for inner
+    /// frames too and does not say which is which (`NavigationRequest` keeps its pipeline
+    /// private), so on Servo an embedded frame of another site is refused as well.
+    fn request_navigation(&self, _webview: WebView, navigation_request: NavigationRequest) {
+        if self.host.navigation(navigation_request.url.as_str()) {
+            navigation_request.allow();
+        } else {
+            navigation_request.deny();
+        }
     }
 
     fn notify_load_status_changed(&self, _webview: WebView, status: LoadStatus) {
@@ -219,9 +234,17 @@ impl Engine {
         }
     }
 
+    /// Resizes the view, or before the first `load` the rendering context it will get: the
+    /// template sizes the window before it loads, and that size was dropped, leaving Servo
+    /// drawing 800×600 in a 1200×800 window (measured in CI, 2026-10-20).
     pub fn resize(&self, width: u32, height: u32) {
-        if let Some(view) = self.webview.borrow().as_ref() {
-            view.resize(PhysicalSize { width, height });
+        let size = PhysicalSize {
+            width: width.max(1),
+            height: height.max(1),
+        };
+        match self.webview.borrow().as_ref() {
+            Some(view) => view.resize(size),
+            None => self.context.resize(size),
         }
     }
 

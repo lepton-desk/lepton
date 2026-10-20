@@ -50,7 +50,7 @@ typedef struct LeptonServoSurface {
     float scale;      /* offset 36, device pixels per CSS pixel */
 } LeptonServoSurface;
 
-/* What the bridge tells the core. Any member may be null. 48 bytes. */
+/* What the bridge tells the core. Any member may be null. 56 bytes. */
 typedef struct LeptonServoCallbacks {
     void *context; /* offset 0, passed back to each callback */
     /* offset 8. Any thread: Servo has work; call `lepton_servo_spin` soon. */
@@ -63,6 +63,9 @@ typedef struct LeptonServoCallbacks {
     void (*console)(void *context, uint32_t level, const uint8_t *utf8, size_t len);
     /* offset 40. The page finished loading (`LoadStatus::Complete`). */
     void (*loaded)(void *context);
+    /* offset 48. The view's document is about to become `url`: nonzero lets it, zero
+     * stops it. Null lets every navigation through. */
+    int32_t (*navigation)(void *context, const uint8_t *url, size_t len);
 } LeptonServoCallbacks;
 
 /* Starts Servo drawing into `surface` and registers `scheme` (for example "lepton")

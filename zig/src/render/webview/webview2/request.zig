@@ -32,6 +32,8 @@ pub const Pending = struct {
     uri_len: usize = 0,
     method_buffer: [16]u8 = undefined,
     method_len: usize = 0,
+    /// The last header read (`header`), valid until the next read.
+    header_buffer: [1024]u8 = undefined,
 
     fn url(self: *const Pending) []const u8 {
         return self.uri_buffer[0..self.uri_len];
@@ -96,6 +98,23 @@ pub fn pathOf(text: []const u8) ?[]const u8 {
 pub fn method(request: Request) []const u8 {
     const pending = of(request);
     return pending.method_buffer[0..pending.method_len];
+}
+
+/// One request header by name, or null when the request carries none. The text lives in
+/// the request until the next `header` call.
+pub fn header(request: Request, name: [*:0]const u8) ?[]const u8 {
+    const pending = of(request);
+    var headers: [*c]c.ICoreWebView2HttpRequestHeaders = null;
+    if (!wv.ok(pending.request.lpVtbl.*.get_Headers.?(pending.request, &headers)) or headers == null) return null;
+    defer _ = headers.*.lpVtbl.*.Release.?(headers);
+    var wide_name: [64:0]u16 = undefined;
+    const units = std.unicode.utf8ToUtf16Le(wide_name[0 .. wide_name.len - 1], std.mem.span(name)) catch return null;
+    wide_name[units] = 0;
+    var contains: c.BOOL = c.FALSE;
+    if (!wv.ok(headers.*.lpVtbl.*.Contains.?(headers, &wide_name, &contains)) or contains == c.FALSE) return null;
+    var value: c.LPWSTR = null;
+    if (!wv.ok(headers.*.lpVtbl.*.GetHeader.?(headers, &wide_name, &value))) return null;
+    return wv.takeString(value, &pending.header_buffer);
 }
 
 pub fn body(request: Request, into: []u8) BodyError!usize {

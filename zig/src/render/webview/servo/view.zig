@@ -200,6 +200,17 @@ fn onConsole(_: ?*anyopaque, level: u32, utf8: [*c]const u8, len: usize) callcon
 
 fn onLoaded(_: ?*anyopaque) callconv(.c) void {}
 
+/// The view's document may only be the application's own page (`features.isOwnPage`).
+/// Another address is refused, and not opened elsewhere yet: handing it to the desktop
+/// goes through the OpenURI portal, which a Servo build does not link.
+fn onNavigation(_: ?*anyopaque, utf8: [*c]const u8, len: usize) callconv(.c) i32 {
+    if (utf8 == null) return 0;
+    const url = utf8[0..len];
+    if (@import("../features.zig").isOwnPage(url)) return 1;
+    std.debug.print("link         not opened (Servo): {s}\n", .{url});
+    return 0;
+}
+
 // --- the view -------------------------------------------------------------------------------
 
 /// Window buttons as the bridge numbers them (0 primary, 1 middle, 2 secondary).
@@ -260,6 +271,7 @@ pub const View = struct {
             .title = onTitle,
             .console = onConsole,
             .loaded = onLoaded,
+            .navigation = onNavigation,
         };
         var reason: [512]u8 = @splat(0);
         const scheme = "lepton";
@@ -343,7 +355,7 @@ pub const View = struct {
     /// `globalThis.__lepton` before every document's own scripts, sized for the ring.
     pub fn injectTransport(self: *View, region_len: usize) bool {
         var source: [16384]u8 = undefined;
-        const text = transport.script(&source, region_len, &self.bridge.registry) catch return false;
+        const text = transport.script(&source, region_len, &self.bridge.registry, self.bridge.pageOrigin()) catch return false;
         return c.lepton_servo_add_user_script(self.servo, text.ptr, text.len) == 0;
     }
 

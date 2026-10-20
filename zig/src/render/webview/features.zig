@@ -52,8 +52,14 @@ const e_view_toplevel = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque
 const e_toplevel_set_title = @extern(*const fn (?*anyopaque, [*:0]const u8) callconv(.c) void, .{ .name = "wpe_toplevel_set_title" });
 const e_web_view_title = @extern(*const fn (?*anyopaque) callconv(.c) ?[*:0]const u8, .{ .name = "webkit_web_view_get_title" });
 
+// The response decision (`WebKitResponsePolicyDecision.h`, 2.54): the main frame's
+// document can be refused before it is committed, so none of its script runs.
+const e_response_request = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "webkit_response_policy_decision_get_request" });
+const e_response_is_main = @extern(*const fn (?*anyopaque) callconv(.c) c_int, .{ .name = "webkit_response_policy_decision_is_main_frame_main_resource" });
+
 const decision_navigation: c_int = 0;
 const decision_new_window: c_int = 1;
+const decision_response: c_int = 2;
 const navigation_link_clicked: c_int = 0;
 
 // `WPEEvent.h` / `WPEKeysyms.h`, 2.54.
@@ -97,6 +103,7 @@ pub fn apply(web_view: *anyopaque) void {
 /// measured: example.org opened inside a second Lepton window. `onCreate` decides it.) A script that sets `location` to a web address is
 /// left alone: an embedded frame's navigation arrives the same way, and it must load.
 fn onDecide(_: ?*anyopaque, decision: ?*anyopaque, kind: c_int, _: ?*anyopaque) callconv(.c) c_int {
+    if (kind == decision_response) return onResponse(decision);
     if (kind != decision_navigation and kind != decision_new_window) return 0;
     const action = e_decision_action(decision) orelse return 0;
     const uri = e_request_uri(e_action_request(action)) orelse return 0;
@@ -107,7 +114,24 @@ fn onDecide(_: ?*anyopaque, decision: ?*anyopaque, kind: c_int, _: ?*anyopaque) 
     return 1;
 }
 
+/// The window's own document leaving the application — a script setting `location`, a
+/// form, a meta refresh, a redirect — is refused before it is committed, and the address
+/// goes to the desktop. Before, only a clicked link left: a script's `location` loaded the
+/// web inside the window and its script ran (measured: the page fetched `/ran`). Not
+/// `load-changed`: at `LOAD_STARTED` the view still names the old address (measured), and
+/// at `COMMITTED` the document is already in. Embedded frames' documents are not the main
+/// frame's main resource and load.
+fn onResponse(decision: ?*anyopaque) c_int {
+    if (e_response_is_main(decision) == 0) return 0;
+    const uri = e_request_uri(e_response_request(decision)) orelse return 0;
+    if (isOwnPage(std.mem.span(uri))) return 0;
+    e_decision_ignore(decision);
+    openOutside(uri);
+    return 1;
+}
+
 fn openOutside(uri: [*:0]const u8) void {
+    if (!mayOpenOutside(std.mem.span(uri))) return;
     if (!@import("../../platform/linux/portal.zig").openUri(uri)) {
         std.debug.print("link         no desktop portal to open {s}\n", .{uri});
     }
@@ -118,7 +142,7 @@ fn openOutside(uri: [*:0]const u8) void {
 fn onCreate(parent: ?*anyopaque, action: ?*anyopaque, _: ?*anyopaque) callconv(.c) ?*anyopaque {
     // A web address leaves the application here, before any window exists.
     if (e_request_uri(e_action_request(action))) |uri| {
-        if (isExternal(std.mem.span(uri))) {
+        if (!isOwnPage(std.mem.span(uri))) {
             openOutside(uri);
             return null;
         }
@@ -229,6 +253,74 @@ pub fn isExternal(uri: []const u8) bool {
     // host on Windows, among them.
     if (host.len > ".localhost".len and std.ascii.endsWithIgnoreCase(host, ".localhost")) return false;
     return true;
+}
+
+/// The dev server's origin while the page is served from it (`Bridge.allowOriginOf`), or
+/// empty: the one origin besides the core's that is the application's own page.
+var page_origin_buffer: [256]u8 = undefined;
+var page_origin_len: usize = 0;
+
+pub fn setPageOrigin(origin: []const u8) void {
+    page_origin_len = @min(origin.len, page_origin_buffer.len);
+    @memcpy(page_origin_buffer[0..page_origin_len], origin[0..page_origin_len]);
+}
+
+/// Whether `uri` begins with `origin` and nothing but a path, query or fragment follows:
+/// `http://127.0.0.1:5173` is not `http://127.0.0.1:51730`.
+fn underOrigin(uri: []const u8, origin: []const u8) bool {
+    if (origin.len == 0 or !std.ascii.startsWithIgnoreCase(uri, origin)) return false;
+    return uri.len == origin.len or std.mem.indexOfScalar(u8, "/?#", uri[origin.len]) != null;
+}
+
+/// Whether a window may show `uri` as its document: the core's own origin, the dev
+/// server's while it serves the page, or `about:blank`/`about:srcdoc`. Any other address —
+/// another port on this machine included — is not the application's.
+pub fn isOwnPage(uri: []const u8) bool {
+    if (underOrigin(uri, @import("transport.zig").core_origin)) return true;
+    if (underOrigin(uri, page_origin_buffer[0..page_origin_len])) return true;
+    return std.mem.eql(u8, uri, "about:blank") or std.mem.eql(u8, uri, "about:srcdoc");
+}
+
+test "a window keeps only the application's own pages" {
+    setPageOrigin("");
+    try std.testing.expect(isOwnPage("lepton://localhost/"));
+    try std.testing.expect(isOwnPage("lepton://localhost/settings.html?x=1"));
+    try std.testing.expect(!isOwnPage("lepton://localhost.evil/"));
+    try std.testing.expect(!isOwnPage("http://127.0.0.1:5173/"));
+    try std.testing.expect(!isOwnPage("https://example.org/"));
+    try std.testing.expect(!isOwnPage("file:///etc/passwd"));
+    try std.testing.expect(isOwnPage("about:blank"));
+    setPageOrigin("http://127.0.0.1:5173");
+    defer setPageOrigin("");
+    try std.testing.expect(isOwnPage("http://127.0.0.1:5173/"));
+    try std.testing.expect(isOwnPage("http://127.0.0.1:5173"));
+    try std.testing.expect(!isOwnPage("http://127.0.0.1:51730/"));
+    try std.testing.expect(!isOwnPage("http://127.0.0.1:8765/"));
+}
+
+/// What may be handed to the desktop: web addresses and mail, nothing else. Every other
+/// scheme reaches a handler the user never chose for this page (Windows: `search-ms:`,
+/// `ms-msdt:` and the like, the `openExternal` pattern behind Electron RCEs; the OpenURI
+/// portal hands unknown schemes to their handlers too), so it stays unopened (audit,
+/// 2026-10-20).
+pub fn mayOpenOutside(uri: []const u8) bool {
+    const colon = std.mem.indexOfScalar(u8, uri, ':') orelse return false;
+    const scheme = uri[0..colon];
+    for ([_][]const u8{ "http", "https", "mailto" }) |allowed| {
+        if (std.ascii.eqlIgnoreCase(scheme, allowed)) return true;
+    }
+    return false;
+}
+
+test "only web addresses and mail go to the desktop" {
+    try std.testing.expect(mayOpenOutside("https://github.com/lepton-desk/lepton"));
+    try std.testing.expect(mayOpenOutside("HTTP://example.org"));
+    try std.testing.expect(mayOpenOutside("mailto:someone@example.org"));
+    try std.testing.expect(!mayOpenOutside("search-ms:query=x&crumb=location:\\\\evil\\share"));
+    try std.testing.expect(!mayOpenOutside("ms-msdt:/id PCWDiagnostic"));
+    try std.testing.expect(!mayOpenOutside("file:///etc/passwd"));
+    try std.testing.expect(!mayOpenOutside("tel:+905550000000"));
+    try std.testing.expect(!mayOpenOutside("no scheme"));
 }
 
 test "web addresses leave the application, its own pages stay" {

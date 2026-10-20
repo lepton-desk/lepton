@@ -47,6 +47,15 @@ const e_stream_read_all = @extern(
     *const fn (?*anyopaque, [*]u8, usize, *usize, ?*anyopaque, ?*?*anyopaque) callconv(.c) c_int,
     .{ .name = "g_input_stream_read_all" },
 );
+// The request's headers (WPE 2.36+; transfer none) and one of them by name (libsoup 3).
+const e_request_headers = @extern(
+    *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
+    .{ .name = "webkit_uri_scheme_request_get_http_headers" },
+);
+const e_header_one = @extern(
+    *const fn (?*anyopaque, [*:0]const u8) callconv(.c) ?[*:0]const u8,
+    .{ .name = "soup_message_headers_get_one" },
+);
 const e_unref = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_object_unref" });
 const e_ref = @extern(*const fn (?*anyopaque) callconv(.c) ?*anyopaque, .{ .name = "g_object_ref" });
 const e_free_error = @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "g_error_free" });
@@ -72,6 +81,12 @@ pub fn path(request: Request) ?[]const u8 {
 
 pub fn method(request: Request) []const u8 {
     return if (e_request_method(request)) |raw| std.mem.span(raw) else "";
+}
+
+/// One request header by name, or null when the request carries none.
+pub fn header(request: Request, name: [*:0]const u8) ?[]const u8 {
+    const headers = e_request_headers(request) orelse return null;
+    return if (e_header_one(headers, name)) |raw| std.mem.span(raw) else null;
 }
 
 /// Reads the request body into `into`; the count may exceed nothing — `read_all` stops at

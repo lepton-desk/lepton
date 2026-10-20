@@ -15,8 +15,7 @@ const wire = @import("../../ipc/wire.zig");
 const registry_mod = @import("registry.zig");
 pub const Registry = registry_mod.Registry;
 
-/// Where the page sends requests, on the core's origin.
-pub const path = "/__lepton/invoke";
+// The page's address for this is `transport.zig`'s, under the run's key (`secret.zig`).
 
 /// The largest request frame the core reads. A request is a command and its argument,
 /// not a file transfer; larger data goes through the shared ring.

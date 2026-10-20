@@ -33,6 +33,7 @@ const std = @import("std");
 const assets = @import("assets.zig");
 const transport = @import("transport.zig");
 const respond = @import("respond.zig");
+const secret = @import("secret.zig");
 const invoke = @import("invoke.zig");
 const events = @import("events.zig");
 const region = @import("region.zig");
@@ -156,6 +157,9 @@ pub const Bridge = struct {
     /// is not an absolute URL: a malformed origin would allow nothing and hide why.
     pub fn allowOriginOf(self: *Bridge, url: []const u8) bool {
         const origin_text = respond.originOf(url, &self.allowed_origin) orelse return false;
+        // The window's own page from now on (`features.isOwnPage`): nothing else of this
+        // machine's is.
+        @import("features.zig").setPageOrigin(origin_text);
         self.allowed_origin_len = origin_text.len;
         return true;
     }
@@ -216,6 +220,11 @@ pub const Bridge = struct {
         }
     }
 
+    /// The dev server's origin the page is served from, or "" for a packaged page.
+    pub fn pageOrigin(self: *Bridge) []const u8 {
+        return self.allowed_origin[0..self.allowed_origin_len];
+    }
+
     fn origin(self: *Bridge) [:0]const u8 {
         return self.allowed_origin[0..self.allowed_origin_len :0];
     }
@@ -242,6 +251,14 @@ pub const Bridge = struct {
     /// Answers one request the engine delivered.
     pub fn deliver(self: *Bridge, request: ?*anyopaque) void {
         registered = self;
+        if (tracing()) {
+            std.debug.print("lepton request {s} {s} origin={s} referer={s}\n", .{
+                engine.method(request),
+                engine.uri(request),
+                engine.header(request, "Origin") orelse "-",
+                engine.header(request, "Referer") orelse "-",
+            });
+        }
         self.answer(request);
     }
 
@@ -574,25 +591,30 @@ pub const Bridge = struct {
     fn answer(self: *Bridge, request: ?*anyopaque) void {
         self.counters.requests += 1;
 
-        // The transport's two paths come first, on any host: they are the core's, and a
-        // frontend file of the same name must not shadow them.
+        // The core's own paths come first, on any host, and only under this run's key
+        // (`secret.zig`): a document without the transport cannot name them. Before, any
+        // page the engine showed could POST `invoke` (measured on WPE: a sandboxed
+        // `srcdoc` frame's request reached the core). Anything else under `/__lepton/` is
+        // refused rather than served as a frontend file.
         if (engine.path(request)) |path| {
-            if (std.mem.eql(u8, path, transport.region_path) and self.region.len != 0) {
-                self.answerRegion(request);
+            if (secret.corePath(path)) |name| {
+                if (std.mem.eql(u8, name, transport.region_name) and self.region.len != 0) {
+                    self.answerRegion(request);
+                } else if (std.mem.eql(u8, name, transport.events_name)) {
+                    self.answerEvents(request);
+                } else if (std.mem.eql(u8, name, transport.invoke_name)) {
+                    self.answerInvoke(request);
+                } else if (std.mem.eql(u8, name, transport.close_name)) {
+                    self.close_requested = true;
+                    const ok = "closing";
+                    _ = respond.bytes(request, ok.ptr, ok.len, null, "text/plain", self.origin());
+                } else {
+                    respond.refuse(request, "no such path in the core");
+                }
                 return;
             }
-            if (std.mem.eql(u8, path, events.path)) {
-                self.answerEvents(request);
-                return;
-            }
-            if (std.mem.eql(u8, path, invoke.path)) {
-                self.answerInvoke(request);
-                return;
-            }
-            if (std.mem.eql(u8, path, transport.close_path)) {
-                self.close_requested = true;
-                const ok = "closing";
-                _ = respond.bytes(request, ok.ptr, ok.len, null, "text/plain", self.origin());
+            if (std.mem.startsWith(u8, path, "/__lepton/")) {
+                respond.refuse(request, "the core answers its own page only");
                 return;
             }
         }
@@ -632,6 +654,13 @@ pub const Bridge = struct {
 };
 
 /// The host of a `scheme://host/path` URI, or "" when there is none.
+/// `LEPTON_TRACE_REQUESTS=1`: every request the engine delivers, with the headers that say
+/// who sent it — how each engine's origins were measured.
+fn tracing() bool {
+    const value = std.c.getenv("LEPTON_TRACE_REQUESTS") orelse return false;
+    return std.mem.eql(u8, std.mem.span(value), "1");
+}
+
 pub fn hostOf(uri: []const u8) []const u8 {
     const start = (std.mem.indexOf(u8, uri, "://") orelse return "") + 3;
     const rest = uri[start..];

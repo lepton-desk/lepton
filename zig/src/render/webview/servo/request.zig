@@ -49,6 +49,14 @@ pub fn method(request: Request) []const u8 {
     return part(request, c.lepton_servo_request_method);
 }
 
+/// One request header by name. Servo's protocol handler hands the bridge no headers yet;
+/// what stands for the sender on Servo is `origin` (the request's own origin).
+pub fn header(request: Request, name: [*:0]const u8) ?[]const u8 {
+    _ = request;
+    _ = name;
+    return null;
+}
+
 /// The request body into `into`, as `read_all` gives WebKit's: at most `into.len` bytes,
 /// so the caller sizes `into` one past its limit to tell "more" apart.
 pub fn body(request: Request, into: []u8) BodyError!usize {

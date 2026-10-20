@@ -99,6 +99,12 @@ fn onCreated(
     _ = core.*.lpVtbl.*.add_WebResourceRequested.?(core, &slot.resources, &token);
     _ = core.*.lpVtbl.*.add_DocumentTitleChanged.?(core, &slot.titles, &token);
     _ = core.*.lpVtbl.*.add_WindowCloseRequested.?(core, &slot.closes, &token);
+    // The same rule as the main window: a popup that navigates off the application's own
+    // pages is stopped and the address goes to the browser. Without it `window.open` of
+    // `about:blank` could then be sent anywhere (audit, 2026-10-20). The handler reads only
+    // its arguments, so the main view's serves.
+    _ = core.*.lpVtbl.*.add_NavigationStarting.?(core, &host.navigations, &token);
+    _ = core.*.lpVtbl.*.add_NewWindowRequested.?(core, &host.new_windows, &token);
     if (slot.args) |args| _ = args.lpVtbl.*.put_NewWindow.?(args, core);
     finishRequest(slot);
     window.show(slot.hwnd);

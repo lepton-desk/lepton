@@ -61,8 +61,7 @@ pub fn Declared(comptime names: []const []const u8) type {
     };
 }
 
-/// Where the page asks for events, on the core's origin.
-pub const path = "/__lepton/events";
+// The page's address for this is `transport.zig`'s, under the run's key (`secret.zig`).
 
 /// How long the page keeps one request open before asking again, in milliseconds. The
 /// page enforces it (an aborted fetch); the core never runs a timer for it, and releases

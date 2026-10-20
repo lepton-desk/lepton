@@ -44,6 +44,7 @@ pub struct LeptonServoCallbacks {
     pub title: Option<extern "C" fn(*mut c_void, *const u8, usize)>,
     pub console: Option<extern "C" fn(*mut c_void, u32, *const u8, usize)>,
     pub loaded: Option<extern "C" fn(*mut c_void)>,
+    pub navigation: Option<extern "C" fn(*mut c_void, *const u8, usize) -> i32>,
 }
 
 /// The core's callbacks, called on the core's thread.
@@ -77,6 +78,13 @@ impl Host for CallbackHost {
     fn loaded(&self) {
         if let Some(call) = self.0.loaded {
             call(self.0.context);
+        }
+    }
+
+    fn navigation(&self, url: &str) -> bool {
+        match self.0.navigation {
+            Some(call) => call(self.0.context, url.as_ptr(), url.len()) != 0,
+            None => true,
         }
     }
 }
@@ -448,12 +456,13 @@ mod tests {
         assert_eq!(offset_of!(LeptonServoSurface, height), 32);
         assert_eq!(offset_of!(LeptonServoSurface, scale), 36);
 
-        assert_eq!(size_of::<LeptonServoCallbacks>(), 48);
+        assert_eq!(size_of::<LeptonServoCallbacks>(), 56);
         assert_eq!(offset_of!(LeptonServoCallbacks, context), 0);
         assert_eq!(offset_of!(LeptonServoCallbacks, wake), 8);
         assert_eq!(offset_of!(LeptonServoCallbacks, request), 16);
         assert_eq!(offset_of!(LeptonServoCallbacks, title), 24);
         assert_eq!(offset_of!(LeptonServoCallbacks, console), 32);
         assert_eq!(offset_of!(LeptonServoCallbacks, loaded), 40);
+        assert_eq!(offset_of!(LeptonServoCallbacks, navigation), 48);
     }
 }

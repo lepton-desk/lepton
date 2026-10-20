@@ -182,13 +182,19 @@ pub fn main() !void {{
     // Before the transport is written: the page learns the application's command names
     // from it, and the bridge answers only what `permissions` grants.
     view.bridge.registry = commands.bind(&app_state);
+    // The dev server's origin before the transport: the transport defines itself only in
+    // the application's own page, which under `lepton dev` is the dev server's.
+    const from_dev_server = !std.mem.startsWith(u8, address, "file://");
+    if (from_dev_server and !view.bridge.allowOriginOf(address)) {{
+        core.report.fact("transport", .bad, "{{s}} is not an origin; the page will not reach the core", .{{address}});
+    }}
     const outbound = window_channel.outboundRegion();
     if (!view.injectTransport(outbound.len)) {{
         core.report.fact("transport", .warn, "not injected: the page will run without a channel", .{{}});
     }}
     view.bridge.exposeRegion(outbound);
 
-    if (std.mem.startsWith(u8, address, "file://")) {{
+    if (!from_dev_server) {{
         view.bridge.serveFrom(address["file://".len..]);
         // The core's own origin: `lepton://localhost/`, or the `lepton.localhost` host the
         // WebView2 view answers on Windows (`transport.core_origin`).
@@ -196,9 +202,6 @@ pub fn main() !void {{
     }} else {{
         // The dev server's page reads the ring cross-origin from `lepton://localhost`;
         // the bridge names exactly this origin in its answers, never a wildcard.
-        if (!view.bridge.allowOriginOf(address)) {{
-            core.report.fact("transport", .bad, "{{s}} is not an origin; the page will not reach the core", .{{address}});
-        }}
         view.load(address);
     }}
 
