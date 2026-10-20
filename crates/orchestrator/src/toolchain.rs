@@ -79,7 +79,7 @@ impl fmt::Display for ToolProblem {
             Self::Failed { status } => write!(f, "failed to run ({status})"),
             Self::WrongVersion { found, needed } => write!(
                 f,
-                "is {found}; Lepton builds with {needed}: put a Zig {needed} on PATH as zig or zig-{needed} (Arch: zig{needed}-bin), or set LEPTON_ZIG to it"
+                "{found}; Lepton builds with {needed}: put a Zig {needed} on PATH as zig or zig-{needed} (Arch: zig{needed}-bin), or set LEPTON_ZIG to it"
             ),
         }
     }
