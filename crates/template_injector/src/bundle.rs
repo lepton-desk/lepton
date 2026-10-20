@@ -123,10 +123,19 @@ pub fn parse_bundle(text: &str) -> Result<Bundle, ManifestError> {
     };
     let icon = match section.get("icon") {
         None => None,
-        Some(Value::String(text)) if text.trim().to_ascii_lowercase().ends_with(".ico") => {
+        // Inside the project: the icon is copied into the installer, and a cloned project's
+        // configuration should not reach a file elsewhere on the machine.
+        Some(Value::String(text))
+            if text.trim().to_ascii_lowercase().ends_with(".ico")
+                && inside_project(text.trim()) =>
+        {
             Some(text.trim().to_owned())
         }
-        Some(_) => return Err(invalid("\"bundle.icon\" must be the path of an .ico file")),
+        Some(_) => {
+            return Err(invalid(
+                "\"bundle.icon\" must be the path of an .ico file inside the project",
+            ));
+        }
     };
     Ok(Bundle {
         targets,
@@ -134,6 +143,14 @@ pub fn parse_bundle(text: &str) -> Result<Bundle, ManifestError> {
         deb_depends,
         icon,
     })
+}
+
+/// A relative path that stays below the project: no root, drive or `..`, with either
+/// separator.
+fn inside_project(path: &str) -> bool {
+    !path.starts_with(['/', '\\'])
+        && !path.contains(':')
+        && path.split(['/', '\\']).all(|part| part != "..")
 }
 
 fn targets(list: &Value) -> Result<Vec<BundleTarget>, ManifestError> {
@@ -184,6 +201,28 @@ mod tests {
     use super::{Bundle, BundleTarget, parse_bundle};
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok};
+
+    #[test]
+    fn the_icon_stays_inside_the_project() -> Result<(), Failure> {
+        for good in ["icon.ico", "assets/app.ico", "assets\\app.ico"] {
+            let text = format!(
+                r#"{{"bundle":{{"icon":"{}"}}}}"#,
+                good.replace('\\', "\\\\")
+            );
+            assert_ok!(parse_bundle(&text), "an icon inside the project");
+        }
+        for bad in [
+            "/etc/x.ico",
+            "../x.ico",
+            "a/../../x.ico",
+            "C:x.ico",
+            "\\\\server\\x.ico",
+        ] {
+            let text = format!(r#"{{"bundle":{{"icon":"{}"}}}}"#, bad.replace('\\', "\\\\"));
+            assert_err!(parse_bundle(&text), "an icon outside the project");
+        }
+        Ok(())
+    }
 
     #[test]
     fn no_section_means_the_hosts_plain_archive() -> Result<(), Failure> {

@@ -187,7 +187,11 @@ fn validateName(allocator: Allocator, name: []const u8) Error![:0]u8 {
     if (name.len == 0 or name[0] != '/') return error.InvalidName;
     if (std.mem.indexOfScalar(u8, name[1..], '/') != null) return error.InvalidName;
     if (std.mem.indexOfScalar(u8, name, '\x00') != null) return error.InvalidName;
-    return try allocator.dupeZ(u8, name);
+    // The user's id is part of the name the kernel sees. `/dev/shm` is shared by every
+    // user, and a name another user made first cannot be removed or opened by this one
+    // (sticky directory, mode 0600): without it, anyone could keep an app from starting
+    // by creating its channel's name.
+    return try std.fmt.allocPrintSentinel(allocator, "{s}.u{d}", .{ name, c.getuid() }, 0);
 }
 
 /// Maps the calling process's `errno` onto Lepton's error set.

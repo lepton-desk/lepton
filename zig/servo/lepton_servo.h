@@ -12,6 +12,14 @@
  * answers `wake` by calling `lepton_servo_spin` on its own thread; every other
  * callback runs inside `lepton_servo_spin`.
  *
+ * Re-entry: a callback calls none of the functions that take the `LeptonServo`
+ * (`lepton_servo_load`, `_resize`, `_spin`, `_screenshot`, the input calls, and above all
+ * `_destroy`); answering a request from a callback is allowed. The bridge keeps the
+ * webview in a `RefCell`, which `lepton_servo_load` holds mutably while it runs, so a
+ * call that reaches the webview from inside it panics. Whether Servo runs a delegate
+ * synchronously inside `load` is not measured; the callbacks in the core's
+ * `servo/view.zig` make no such call themselves.
+ *
  * Layout: both sides check these structs' sizes and offsets against the numbers
  * written beside them (Rust in `servo/bridge/src/abi.rs`, Zig where it imports this
  * header). A struct changed on one side only fails a test, not a frame.
