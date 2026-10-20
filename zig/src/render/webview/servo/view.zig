@@ -246,12 +246,13 @@ pub const View = struct {
         const xdisplay = c.XOpenDisplay(null) orelse return error.NoXlib;
         errdefer _ = c.XCloseDisplay(xdisplay);
 
-        const created = linux.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
-        if (linux.errno(created) != .SUCCESS) return error.Wake;
-        host.wake_fd = @intCast(created);
-        errdefer {
-            _ = linux.close(host.wake_fd);
-            host.wake_fd = -1;
+        // Made once and never closed: Servo's threads may still call `wake` while or after
+        // the view closes, and a closed number can be reused by the next file opened, which
+        // `wake` would then write eight bytes into.
+        if (host.wake_fd < 0) {
+            const created = linux.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
+            if (linux.errno(created) != .SUCCESS) return error.Wake;
+            host.wake_fd = @intCast(created);
         }
 
         const size = window.currentSize();
@@ -369,10 +370,7 @@ pub const View = struct {
         c.lepton_servo_destroy(self.servo);
         _ = c.XCloseDisplay(self.xdisplay);
         self.window.close();
-        if (host.wake_fd >= 0) {
-            _ = linux.close(host.wake_fd);
-            host.wake_fd = -1;
-        }
+        // `host.wake_fd` stays open (`open`).
         self.* = undefined;
     }
 };

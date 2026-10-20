@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use http::HeaderValue;
 use ipc_channel::ipc::IpcSender;
@@ -164,8 +165,17 @@ fn send(stream: &Stream, message: BodyChunkRequest) -> Result<(), String> {
         .map_err(|error| format!("body stream: {error:?}"))
 }
 
-/// Reads a request body's stream to its end: connect, then one chunk at a time, the
-/// way Servo's own HTTP loader does (`obtain_response_setup_router_callback`).
+/// The most of a body read: the core's request limit (`max_request` in
+/// `zig/src/render/webview/invoke.zig`) and one byte more, so the core tells "exactly the
+/// limit" from "more" and refuses the latter, as it does on WPE and WebView2.
+const MAX_BODY: usize = 64 * 1024 + 1;
+
+/// How long one chunk may take. A page that opens a body and never finishes it would
+/// otherwise keep this reader's thread for the whole run.
+const CHUNK_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Reads a request body's stream to its end, or to `MAX_BODY`: connect, then one chunk at
+/// a time, the way Servo's own HTTP loader does (`obtain_response_setup_router_callback`).
 fn read_body(stream: &Stream) -> Result<Vec<u8>, String> {
     let (sender, receiver) = ipc_channel::ipc::channel::<BodyChunkResponse>()
         .map_err(|error| format!("ipc channel: {error}"))?;
@@ -173,9 +183,13 @@ fn read_body(stream: &Stream) -> Result<Vec<u8>, String> {
     send(stream, BodyChunkRequest::Chunk)?;
     let mut bytes = Vec::new();
     loop {
-        match receiver.recv() {
+        match receiver.try_recv_timeout(CHUNK_TIMEOUT) {
             Ok(BodyChunkResponse::Chunk(chunk)) => {
-                bytes.extend_from_slice(&chunk);
+                let room = MAX_BODY - bytes.len();
+                bytes.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                if bytes.len() == MAX_BODY {
+                    return Ok(bytes);
+                }
                 send(stream, BodyChunkRequest::Chunk)?;
             }
             Ok(BodyChunkResponse::Done) => return Ok(bytes),
