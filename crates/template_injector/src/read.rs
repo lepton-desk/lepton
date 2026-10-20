@@ -355,18 +355,24 @@ mod tests {
     }
 
     #[test]
-    fn a_title_with_a_quote_and_a_tab_survives_the_round_trip() -> Result<(), Failure> {
-        // The escaping the renderer does has to be the escaping the reader undoes, or
-        // a project with a tab in its title would come back with a different one.
+    fn a_title_with_quotes_survives_and_one_with_a_newline_is_refused() -> Result<(), Failure> {
+        // The escaping the renderer does has to be the escaping the reader undoes, or a
+        // project with a quote in its title would come back with a different one.
         let mut original = Manifest::new("Ledger");
-        original.window_title = String::from("Ledger\t\"live\"\nnow");
-
+        original.window_title = String::from("Ledger \"live\" \\ now");
         let parsed = assert_ok!(
             parse_config(&render_manifest(&original)),
-            "an awkward title must survive"
+            "a title with quotes and a backslash must survive"
         );
-
         assert_eq!(parsed.window_title, original.window_title);
+
+        // A control character is refused: a newline once reached `main.zig` as a line of
+        // its own (audit, 2026-10-20).
+        original.window_title = String::from("Ledger\nnow");
+        assert_err!(
+            parse_config(&render_manifest(&original)),
+            "a newline in the title is refused"
+        );
         Ok(())
     }
 

@@ -152,12 +152,13 @@ pub fn write(package: &Package<'_>) -> Result<(PathBuf, String), CliError> {
 pub fn control(package: &Package<'_>, installed: u64) -> Result<String, CliError> {
     let mut text = String::new();
     let _ = writeln!(text, "Package: {}", package_name(package.name));
-    let _ = writeln!(text, "Version: {}", version(package.version));
+    let _ = writeln!(text, "Version: {}", one_line(&version(package.version)));
     let _ = writeln!(text, "Architecture: {}", architecture()?);
     let _ = writeln!(text, "Maintainer: {}", one_line(package.maintainer));
     let _ = writeln!(text, "Installed-Size: {}", installed.div_ceil(1024));
     if !package.depends.is_empty() {
-        let _ = writeln!(text, "Depends: {}", package.depends.join(", "));
+        // One line: a newline in `bundle.deb.depends` added control fields of its own.
+        let _ = writeln!(text, "Depends: {}", one_line(&package.depends.join(", ")));
     }
     let _ = writeln!(text, "Section: misc");
     let _ = writeln!(text, "Priority: optional");

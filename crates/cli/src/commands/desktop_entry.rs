@@ -21,6 +21,8 @@ pub fn entry_text(app_id: &str, name: &str, exec: &Path) -> String {
         "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nExec={exec}\nTerminal=false\nStartupWMClass={app_id}\nCategories=Development;\nX-Lepton-Generated=true\n",
         name = escape_value(name),
         exec = quote_exec(&exec.to_string_lossy()),
+        // Escaped too: a newline in it once added keys of its own (`Exec=…`) to the entry.
+        app_id = escape_value(app_id),
     )
 }
 
@@ -44,7 +46,7 @@ pub fn applications_dir(xdg_data_home: Option<&str>, home: Option<&str>) -> Opti
 /// Refuses to overwrite an entry Lepton did not write: an `app_id` that collides with an
 /// installed application must not replace that application's launcher.
 pub fn install(dir: &Path, app_id: &str, text: &str) -> Result<PathBuf, CliError> {
-    if app_id.is_empty() || app_id.contains('/') {
+    if app_id.is_empty() || app_id.contains('/') || app_id.chars().any(char::is_control) {
         return Err(CliError::Invalid(format!(
             "identifier {app_id:?} cannot name a desktop entry"
         )));

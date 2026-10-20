@@ -122,13 +122,19 @@ impl Values {
     fn released_entry(&self, template: &str) -> String {
         let width = self.width.to_string();
         let height = self.height.to_string();
+        let (product, channel, title, identifier) = (
+            crate::assets::zig_text(&self.product),
+            crate::assets::zig_text(&self.channel),
+            crate::assets::zig_text(&self.title),
+            crate::assets::zig_text(&self.identifier),
+        );
         fill(
             template,
             &[
-                ("{product}", &self.product),
-                ("{channel}", &self.channel),
-                ("{title}", &self.title),
-                ("{identifier}", &self.identifier),
+                ("{product}", &product),
+                ("{channel}", &channel),
+                ("{title}", &title),
+                ("{identifier}", &identifier),
                 ("{width}", &width),
                 ("{height}", &height),
             ],

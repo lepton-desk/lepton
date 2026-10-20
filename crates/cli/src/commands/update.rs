@@ -104,9 +104,19 @@ fn values(root: &Path) -> Result<Values, CliError> {
         .ok_or_else(|| CliError::Invalid(format!("{} has no productName", path.display())))?;
     let identifier = text_at("/identifier")
         .unwrap_or_else(|| lepton_template_injector::manifest::identifier_for(&product));
+    let title = text_at("/window/title").unwrap_or_else(|| product.clone());
+    // `lepton update` writes these into `main.zig`; a config that only a pull request
+    // changed must not put code there (audit, 2026-10-20).
+    use lepton_template_injector::manifest::{check_identifier, check_name, check_title};
+    let refused = |error: lepton_template_injector::manifest::ManifestError| {
+        CliError::Invalid(format!("{}: {}", path.display(), error.reason))
+    };
+    check_name("productName", &product).map_err(refused)?;
+    check_title(&title).map_err(refused)?;
+    check_identifier(&identifier).map_err(refused)?;
     Ok(Values {
         channel: text_at("/channel/name").unwrap_or_else(|| format!("/lepton-{identifier}")),
-        title: text_at("/window/title").unwrap_or_else(|| product.clone()),
+        title,
         width: number_at("/window/width", 1024),
         height: number_at("/window/height", 640),
         product,

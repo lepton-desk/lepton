@@ -394,6 +394,77 @@ impl std::fmt::Display for ManifestError {
 
 impl std::error::Error for ManifestError {}
 
+/// A display name (`productName`, `window.title`): it reaches generated Zig source, a
+/// desktop entry, package metadata and an install folder's name, so no control character
+/// (a newline once ended a line of `main.zig` and started another; audit, 2026-10-20) and
+/// no path separator.
+pub fn check_name(field: &str, value: &str) -> Result<(), ManifestError> {
+    if let Some(bad) = value
+        .chars()
+        .find(|c| c.is_control() || *c == '/' || *c == '\\')
+    {
+        return Err(ManifestError {
+            reason: format!("{field} may not contain {bad:?}, got {value:?}"),
+        });
+    }
+    // It names the Windows install folder (`%LOCALAPPDATA%\\Programs\\<product>`).
+    if matches!(value.trim(), "." | "..") {
+        return Err(ManifestError {
+            reason: format!("{field} cannot be {value:?}"),
+        });
+    }
+    Ok(())
+}
+
+/// The window's title: shown, and written into `main.zig` as an escaped literal, never a
+/// path, so only control characters are refused.
+pub fn check_title(value: &str) -> Result<(), ManifestError> {
+    if let Some(bad) = value.chars().find(|c| c.is_control()) {
+        return Err(ManifestError {
+            reason: format!("window.title may not contain {bad:?}, got {value:?}"),
+        });
+    }
+    Ok(())
+}
+
+/// The application identifier: one directory name in every platform's data folders, a
+/// window class, a desktop entry's name. ASCII letters, digits, `.`, `_`, `-`; not `.`
+/// or `..`, which would name the folder above.
+pub fn check_identifier(value: &str) -> Result<(), ManifestError> {
+    let fine = !value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if fine {
+        Ok(())
+    } else {
+        Err(ManifestError {
+            reason: format!(
+                "identifier must be ASCII letters, digits, `.`, `_` or `-` (not `.` or `..`), got {value:?}"
+            ),
+        })
+    }
+}
+
+/// The version: part of package file names and package metadata, so a version string
+/// and nothing else (digits, letters, `.`, `+`, `~`, `-`).
+pub fn check_version(value: &str) -> Result<(), ManifestError> {
+    let fine = !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '~' | '-'))
+        && !value.starts_with('.');
+    if fine {
+        Ok(())
+    } else {
+        Err(ManifestError {
+            reason: format!("version must be letters, digits, `.`, `+`, `~` or `-`, got {value:?}"),
+        })
+    }
+}
+
 /// Checks a manifest before it is written, so a bad project is refused at the
 /// point the developer can still fix it.
 ///
@@ -407,6 +478,10 @@ pub fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
             reason: "a project needs a name".to_owned(),
         });
     }
+    check_name("productName", &manifest.product_name)?;
+    check_title(&manifest.window_title)?;
+    check_identifier(&manifest.identifier)?;
+    check_version(&manifest.version)?;
     if manifest.window_width == 0 || manifest.window_height == 0 {
         return Err(ManifestError {
             reason: format!(
@@ -435,6 +510,31 @@ mod tests {
     use lepton_orchestrator::{
         assert_contains, assert_eq, assert_err, assert_ne, assert_ok, ensure,
     };
+
+    #[test]
+    fn names_identifiers_and_versions_cannot_carry_code_or_paths() -> Result<(), Failure> {
+        // Each reached generated files unescaped (audit, 2026-10-20).
+        let mut manifest = Manifest::new("Ledger");
+        assert_ok!(validate(&manifest), "a plain project");
+        manifest.product_name = "X\nconst _ = @import(\"evil.zig\");".to_owned();
+        assert_err!(validate(&manifest), "a newline in productName");
+        manifest = Manifest::new("Ledger");
+        manifest.identifier = "a\nExec=sh".to_owned();
+        assert_err!(validate(&manifest), "a newline in identifier");
+        manifest.identifier = "..".to_owned();
+        assert_err!(validate(&manifest), "an identifier of ..");
+        manifest = Manifest::new("Ledger");
+        manifest.version = "1/../../x".to_owned();
+        assert_err!(validate(&manifest), "a path in version");
+        manifest = Manifest::new("Ledger");
+        manifest.window_title = "a\u{0}b".to_owned();
+        assert_err!(validate(&manifest), "a NUL in the title");
+        manifest = Manifest::new("Ledger");
+        manifest.version = "0.1.9-beta.2+build.1".to_owned();
+        manifest.identifier = "com.example.ledger-app".to_owned();
+        assert_ok!(validate(&manifest), "an ordinary version and identifier");
+        Ok(())
+    }
 
     #[test]
     fn the_configuration_fits_the_projects_biome_line_width() -> Result<(), Failure> {

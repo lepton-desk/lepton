@@ -237,13 +237,36 @@ pub fn zig_entry(
 ) -> String {
     // The window size is not among them: it reaches the core as a build option
     // (`-Dwindow-width`), so `lepton.config.json` stays the source after `lepton new`.
+    let (product, channel, title, id) = (
+        zig_text(product_name),
+        zig_text(channel_name),
+        zig_text(window_title),
+        zig_text(identifier),
+    );
     let values: [(&str, &str); 4] = [
-        ("{product}", product_name),
-        ("{channel}", channel_name),
-        ("{title}", window_title),
-        ("{identifier}", identifier),
+        ("{product}", &product),
+        ("{channel}", &channel),
+        ("{title}", &title),
+        ("{identifier}", &id),
     ];
     fill(ZIG_ENTRY_TEMPLATE, &values)
+}
+
+/// A value as the inside of a Zig string literal: `\`, `"` and control characters escaped.
+/// The manifest refuses control characters already (`manifest::check_name`); this is what
+/// keeps a quote in a product name a quote, not the end of the literal (audit, 2026-10-20).
+pub fn zig_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// [`zig_entry`]'s walk over any entry template: the current one, or a released one that
@@ -735,6 +758,19 @@ mod tests {
             SDK_ENTRY.contains("measures: sample"),
             "a missing reading should be null, not a zero-filled struct"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_quote_in_a_name_stays_inside_the_zig_literal() -> Result<(), Failure> {
+        // A quote ended `.product = "…"` early and let the rest of the name be code.
+        let entry = super::zig_entry("Bob's \"App\"", "/lepton-bob", "A \\ B", "bob.app");
+        ensure!(
+            entry.contains(".product = \"Bob's \\\"App\\\"\""),
+            "the quote is escaped in the product literal"
+        );
+        ensure!(entry.contains("\"A \\\\ B\""), "the backslash is escaped in the title");
+        assert_eq!(super::zig_text("a\nb"), "a\\nb");
         Ok(())
     }
 }
