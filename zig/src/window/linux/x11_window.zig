@@ -318,101 +318,112 @@ pub const X11Window = struct {
 /// `xcb_image_t` may reuse its buffer once the request has been written, so holding
 /// it past the flush would free memory the server might still be reading.
 /// Drains the connection's events into this window's input state.
-    ///
-    /// Called once per frame rather than from a loop of its own: the native path already
-    /// wakes on the connection and redraws, and a second loop would race the first for the
-    /// same events.
-    pub fn pumpEvents(self: *X11Window) void {
-        var event = xcb.xcb_poll_for_event(self.conn) orelse return;
-        while (true) {
-            applyEvent(self, event);
-            const next = xcb.xcb_poll_for_event(self.conn) orelse break;
-            event = next;
-        }
+///
+/// Called once per frame rather than from a loop of its own: the native path already
+/// wakes on the connection and redraws, and a second loop would race the first for the
+/// same events.
+pub fn pumpEvents(self: *X11Window) void {
+    var event = xcb.xcb_poll_for_event(self.conn) orelse return;
+    while (true) {
+        applyEvent(self, event);
+        const next = xcb.xcb_poll_for_event(self.conn) orelse break;
+        event = next;
     }
+}
 
-    /// Translates one X event into input state.
-    ///
-    /// Every field is read from the event rather than from the window: a button press
-    /// carries its own coordinates, and reading the pointer position instead would report
-    /// where the pointer had got to by the time the frame ran rather than where it was
-    /// when it was pressed.
-    fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
-        switch (event.response_type & 0x7f) {
-            xcb.XCB_ENTER_NOTIFY => self.input.enter(),
-            xcb.XCB_LEAVE_NOTIFY => {
-                self.input.leave();
-                self.menu.dismiss();
-            },
-            xcb.XCB_MOTION_NOTIFY => {
-                const motion: *const xcb.xcb_motion_notify_event_t = @ptrCast(event);
-                self.input.move(motion.event_x, motion.event_y);
-                if (self.menu.open) self.menu.hover(self.input.x, self.input.y);
-            },
-            xcb.XCB_BUTTON_PRESS, xcb.XCB_BUTTON_RELEASE => {
-                const press: *const xcb.xcb_button_press_event_t = @ptrCast(event);
-                const down = event.response_type & 0x7f == xcb.XCB_BUTTON_PRESS;
-                self.input.move(press.event_x, press.event_y);
-                handleButton(self, press.detail, down);
-            },
-            xcb.XCB_KEY_PRESS, xcb.XCB_KEY_RELEASE => {
-                const key: *const xcb.xcb_key_press_event_t = @ptrCast(event);
-                self.input.modifier(key.state);
-                self.input.key(.{
-                    // X keycodes start at 8 while `Input` counts from 1, and leaving the
-                    // offset in place would make every keycode one bit group off from the
-                    // one the Wayland path reports for the same physical key.
-                    .keycode = key.detail - self.min_keycode + 1,
-                    .keysym = 0,
-                    .state = if (event.response_type & 0x7f == xcb.XCB_KEY_PRESS) .pressed else .released,
-                    .repeat = false,
-                });
-            },
-            else => {},
-        }
+/// Applies one queued event, if there is one; false when the queue is empty.
+///
+/// For a caller that forwards input as it happens (the Servo engine): a click's press
+/// and release arrive together, and after `pumpEvents` the held buttons read the same as
+/// before, so a click compared before and after a whole drain was never seen.
+pub fn pumpOne(self: *X11Window) bool {
+    const event = xcb.xcb_poll_for_event(self.conn) orelse return false;
+    applyEvent(self, event);
+    return true;
+}
+
+/// Translates one X event into input state.
+///
+/// Every field is read from the event rather than from the window: a button press
+/// carries its own coordinates, and reading the pointer position instead would report
+/// where the pointer had got to by the time the frame ran rather than where it was
+/// when it was pressed.
+fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
+    switch (event.response_type & 0x7f) {
+        xcb.XCB_ENTER_NOTIFY => self.input.enter(),
+        xcb.XCB_LEAVE_NOTIFY => {
+            self.input.leave();
+            self.menu.dismiss();
+        },
+        xcb.XCB_MOTION_NOTIFY => {
+            const motion: *const xcb.xcb_motion_notify_event_t = @ptrCast(event);
+            self.input.move(motion.event_x, motion.event_y);
+            if (self.menu.open) self.menu.hover(self.input.x, self.input.y);
+        },
+        xcb.XCB_BUTTON_PRESS, xcb.XCB_BUTTON_RELEASE => {
+            const press: *const xcb.xcb_button_press_event_t = @ptrCast(event);
+            const down = event.response_type & 0x7f == xcb.XCB_BUTTON_PRESS;
+            self.input.move(press.event_x, press.event_y);
+            handleButton(self, press.detail, down);
+        },
+        xcb.XCB_KEY_PRESS, xcb.XCB_KEY_RELEASE => {
+            const key: *const xcb.xcb_key_press_event_t = @ptrCast(event);
+            self.input.modifier(key.state);
+            self.input.key(.{
+                // X keycodes start at 8 while `Input` counts from 1, and leaving the
+                // offset in place would make every keycode one bit group off from the
+                // one the Wayland path reports for the same physical key.
+                .keycode = key.detail - self.min_keycode + 1,
+                .keysym = 0,
+                .state = if (event.response_type & 0x7f == xcb.XCB_KEY_PRESS) .pressed else .released,
+                .repeat = false,
+            });
+        },
+        else => {},
     }
+}
 
-    /// One button press or release, translated into the shared input rules.
-    ///
-    /// The right button opens the menu and never reaches the zone logic, exactly as on
-    /// Wayland: a right press on the titlebar must not begin a drag the left button was
-    /// never asked for.
-    fn handleButton(self: *X11Window, detail: u8, down: bool) void {
-        if (down and detail == 3) {
-            self.menu.openAt(self.input.x, self.input.y, self.input.width, self.input.height);
-            return;
-        }
-        if (!down and self.menu.open and detail == 1) {
-            if (self.menu.entryAt(self.input.x, self.input.y)) |entry| {
-                const chosen = self.menu.items[entry];
-                self.menu.dismiss();
-                self.chosen = chrome.menuAction(chosen);
-                self.chosen_pending = true;
-            } else {
-                self.menu.dismiss();
-            }
-            return;
-        }
-        if (!down and detail == 1) {
-            if (self.menu.open) {
-                self.menu.dismiss();
-                return;
-            }
-            self.chosen = chrome.actionFor(self.input, 0, self.last_click_ms, 1);
+/// One button press or release, translated into the shared input rules.
+///
+/// The right button opens the menu and never reaches the zone logic, exactly as on
+/// Wayland: a right press on the titlebar must not begin a drag the left button was
+/// never asked for.
+fn handleButton(self: *X11Window, detail: u8, down: bool) void {
+    if (down and detail == 3) {
+        self.menu.openAt(self.input.x, self.input.y, self.input.width, self.input.height);
+        return;
+    }
+    if (!down and self.menu.open and detail == 1) {
+        if (self.menu.entryAt(self.input.x, self.input.y)) |entry| {
+            const chosen = self.menu.items[entry];
+            self.menu.dismiss();
+            self.chosen = chrome.menuAction(chosen);
             self.chosen_pending = true;
+        } else {
+            self.menu.dismiss();
         }
-        // X button numbering starts at 1 and is an index; the shared rules want the
-        // protocol's bit, so the two are translated here rather than in the rules.
-        const bit: u32 = switch (detail) {
-            1 => 1 << 0,
-            2 => 1 << 2,
-            3 => 1 << 1,
-            4 => 1 << 3,
-            5 => 1 << 6,
-            else => return,
-        };
-        self.input.button(bit, down, 0, 0);
+        return;
     }
+    if (!down and detail == 1) {
+        if (self.menu.open) {
+            self.menu.dismiss();
+            return;
+        }
+        self.chosen = chrome.actionFor(self.input, 0, self.last_click_ms, 1);
+        self.chosen_pending = true;
+    }
+    // X button numbering starts at 1 and is an index; the shared rules want the
+    // protocol's bit, so the two are translated here rather than in the rules.
+    const bit: u32 = switch (detail) {
+        1 => 1 << 0,
+        2 => 1 << 2,
+        3 => 1 << 1,
+        4 => 1 << 3,
+        5 => 1 << 6,
+        else => return,
+    };
+    self.input.button(bit, down, 0, 0);
+}
 /// Takes the action the last button release decided, if any.
 ///
 /// Consumed rather than read: an action nobody took would be re-applied on the next frame,

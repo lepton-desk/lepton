@@ -160,6 +160,27 @@ const buttons = [_]struct { which: core.waylandInput.Button, number: u32 }{
     .{ .which = .right, .number = 2 },
 };
 
+/// Forwards what changed in the window's input state since the last call.
+fn forward(servo: *c.LeptonServo, input: *const core.waylandInput.Input, last_x: *f64, last_y: *f64, last_mask: *u32, out: *std.Io.Writer) !void {
+    if (input.x != last_x.* or input.y != last_y.*) {
+        last_x.* = input.x;
+        last_y.* = input.y;
+        c.lepton_servo_pointer_move(servo, input.x, input.y);
+    }
+    if (input.held_mask != last_mask.*) {
+        for (buttons) |b| {
+            const bit: u32 = @intFromEnum(b.which);
+            if ((input.held_mask ^ last_mask.*) & bit != 0) {
+                const pressed: i32 = if (input.held_mask & bit != 0) 1 else 0;
+                c.lepton_servo_pointer_button(servo, b.number, pressed, input.x, input.y);
+                try out.print("button          {d} {s} at {d:.0},{d:.0}\n", .{ b.number, if (pressed == 1) "down" else "up", input.x, input.y });
+                try out.flush();
+            }
+        }
+        last_mask.* = input.held_mask;
+    }
+}
+
 pub fn main() !u8 {
     var stdout_buffer: [4096]u8 = undefined;
     var stdout = std.Io.File.stdout().writer(io(), &stdout_buffer);
@@ -269,25 +290,10 @@ pub fn main() !u8 {
         var fds = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
         const wait_ms: i32 = if (state.woken.swap(false, .acq_rel)) 0 else 4;
         _ = std.posix.poll(&fds, wait_ms) catch {};
-        core.x11Window.pumpEvents(&w);
-
-        // The window's own input state, forwarded: what a click on the page went through.
-        const input = &w.input;
-        if (input.x != last_x or input.y != last_y) {
-            last_x = input.x;
-            last_y = input.y;
-            c.lepton_servo_pointer_move(servo, input.x, input.y);
-        }
-        if (input.held_mask != last_mask) {
-            for (buttons) |b| {
-                const bit: u32 = @intFromEnum(b.which);
-                if ((input.held_mask ^ last_mask) & bit != 0) {
-                    const pressed: i32 = if (input.held_mask & bit != 0) 1 else 0;
-                    c.lepton_servo_pointer_button(servo, b.number, pressed, input.x, input.y);
-                    try out.print("button          {d} {s} at {d:.0},{d:.0}\n", .{ b.number, if (pressed == 1) "down" else "up", input.x, input.y });
-                }
-            }
-            last_mask = input.held_mask;
+        // One event at a time, the input state compared after each: a click's press and
+        // release arrive together, and compared only after the whole queue they cancel out.
+        while (core.x11Window.pumpOne(&w)) {
+            forward(servo, &w.input, &last_x, &last_y, &last_mask, out) catch {};
         }
 
         c.lepton_servo_spin(servo);
