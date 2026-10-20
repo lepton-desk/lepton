@@ -38,8 +38,8 @@ jobs:
             libunwind-dev libvulkan1 libx11-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-x11-0 libxkbcommon0 libxmu-dev libxmu6 llvm-dev m4 xorg-dev \
             libgstreamer-plugins-good1.0-dev \
-            pkg-config libcairo2-dev libxcb1-dev libxcb-randr0-dev libwayland-dev libwayland-bin \
-            libegl-dev libgles-dev libfontconfig-dev \
+            pkg-config libcairo2-dev libxcb1-dev libxcb-randr0-dev libxcb-image0-dev libwayland-dev libwayland-bin \
+            libegl-dev libgles-dev libfontconfig-dev libvulkan-dev \
             xvfb xdotool imagemagick
 
       - name: Zig 0.16
@@ -54,6 +54,18 @@ jobs:
           rustup default stable
           { echo "## tools"; rustc --version; "$RUNNER_TEMP/zig/zig" version; } | tee -a "$RUNNER_TEMP/report.txt"
 
+      # Servo's ~750 crates take about 11 minutes cold; a run that changes only the bridge
+      # or the Zig side reuses them. Whether this run started warm is in the report.
+      - name: Cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            servo/bridge/target
+          key: servo-bridge-${{ runner.os }}-${{ hashFiles('servo/bridge/Cargo.lock') }}
+
       - name: Build the bridge (timed)
         working-directory: servo/bridge
         run: |
@@ -61,13 +73,25 @@ jobs:
           /usr/bin/time -v -o "$RUNNER_TEMP/build-time.txt" cargo build --release 2>&1 | tee "$RUNNER_TEMP/build.log" | tail -60
           status=${PIPESTATUS[0]}
           {
-            echo "## bridge build (exit $status)"
+            echo "## bridge build (exit $status, cache hit: ${{ steps.cargo-cache.outputs.cache-hit }})"
             grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/build-time.txt"
             echo "mozjs: $(grep -hiE 'mozjs archive|Building from source' target/release/build/mozjs_sys-*/stderr 2>/dev/null | head -1)"
             ls -l target/release/liblepton_servo.so 2>/dev/null
             df -h /
           } | tee -a "$RUNNER_TEMP/report.txt"
           exit "$status"
+
+      # Saved right after the build rather than at the end, so a later step failing (the
+      # window check) does not throw the 11 minutes away.
+      - name: Save the cargo cache
+        if: steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            servo/bridge/target
+          key: servo-bridge-${{ runner.os }}-${{ hashFiles('servo/bridge/Cargo.lock') }}
 
       - name: Bridge tests
         working-directory: servo/bridge
