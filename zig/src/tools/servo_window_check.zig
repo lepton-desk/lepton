@@ -141,7 +141,7 @@ fn onRequest(context: ?*anyopaque, request: ?*c.LeptonServoRequest) callconv(.c)
 }
 
 fn respond(request: *c.LeptonServoRequest, status: u16, content_type: []const u8, bytes: []const u8) void {
-    c.lepton_servo_request_respond(request, status, content_type.ptr, content_type.len, bytes.ptr, bytes.len);
+    c.lepton_servo_request_respond(request, status, content_type.ptr, content_type.len, "", 0, bytes.ptr, bytes.len);
 }
 
 fn io() std.Io {

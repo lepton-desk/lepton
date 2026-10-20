@@ -394,19 +394,22 @@ pub extern "C" fn lepton_servo_request_respond(
     status: u16,
     content_type: *const u8,
     content_type_len: usize,
+    allow_origin: *const u8,
+    allow_origin_len: usize,
     bytes_: *const u8,
     len: usize,
 ) {
-    // SAFETY: a request the core holds, and two pointer-and-length pairs.
-    let (held, kind, body) = unsafe {
+    // SAFETY: a request the core holds, and three pointer-and-length pairs.
+    let (held, kind, origin, body) = unsafe {
         (
             request(request_),
             text(content_type, content_type_len).unwrap_or("application/octet-stream"),
+            text(allow_origin, allow_origin_len).unwrap_or(""),
             bytes(bytes_, len),
         )
     };
     if let Some(held) = held {
-        held.respond(status, kind, body);
+        held.respond(status, kind, origin, body);
     }
 }
 

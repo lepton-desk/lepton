@@ -106,9 +106,12 @@ int32_t lepton_servo_screenshot(LeptonServo *servo, const uint8_t *path, size_t 
 size_t lepton_servo_request_url(const LeptonServoRequest *request, const uint8_t **url);
 size_t lepton_servo_request_method(const LeptonServoRequest *request, const uint8_t **method);
 size_t lepton_servo_request_body(const LeptonServoRequest *request, const uint8_t **body);
-/* Answers the request; the bytes are copied. A second answer is ignored. */
+/* Answers the request; everything is copied. A second answer is ignored.
+ * `allow_origin` (length 0 for none) names the one origin that may read the answer
+ * cross-origin: the dev server's page reading the core's scheme. Never a wildcard. */
 void lepton_servo_request_respond(LeptonServoRequest *request, uint16_t status,
                                   const uint8_t *content_type, size_t content_type_len,
+                                  const uint8_t *allow_origin, size_t allow_origin_len,
                                   const uint8_t *bytes, size_t len);
 void lepton_servo_request_ref(LeptonServoRequest *request);
 void lepton_servo_request_unref(LeptonServoRequest *request);

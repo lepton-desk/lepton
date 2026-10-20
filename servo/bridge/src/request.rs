@@ -31,11 +31,12 @@ impl Request {
     }
 
     /// Answers the request. A second answer is ignored.
-    pub fn respond(&self, status: u16, content_type: &str, bytes: &[u8]) {
+    pub fn respond(&self, status: u16, content_type: &str, allow_origin: &str, bytes: &[u8]) {
         if let Some(reply) = self.reply.borrow_mut().take() {
             let _ = reply.send(Reply {
                 status,
                 content_type: content_type.to_owned(),
+                allow_origin: allow_origin.to_owned(),
                 bytes: bytes.to_vec(),
             });
         }
@@ -50,7 +51,12 @@ impl Request {
         let left = self.references.get().saturating_sub(1);
         self.references.set(left);
         if left == 0 {
-            self.respond(500, "text/plain; charset=utf-8", b"the core never answered");
+            self.respond(
+                500,
+                "text/plain; charset=utf-8",
+                "",
+                b"the core never answered",
+            );
         }
         left == 0
     }
@@ -81,8 +87,8 @@ mod tests {
     #[test]
     fn the_first_answer_wins() {
         let (request, mut answer) = request();
-        request.respond(200, "text/plain", b"one");
-        request.respond(404, "text/plain", b"two");
+        request.respond(200, "text/plain", "", b"one");
+        request.respond(404, "text/plain", "", b"two");
         assert!(request.answered());
         assert!(
             matches!(answer.try_recv(), Ok(reply) if reply.status == 200 && reply.bytes == b"one")

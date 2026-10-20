@@ -24,6 +24,8 @@ use tokio::sync::oneshot;
 pub struct Reply {
     pub status: u16,
     pub content_type: String,
+    /// The one origin allowed to read the answer cross-origin, or empty.
+    pub allow_origin: String,
     pub bytes: Vec<u8>,
 }
 
@@ -117,6 +119,21 @@ impl ProtocolHandler for Scheme {
             *response.body.lock() = ResponseBody::Done(answer.bytes);
             if let Ok(value) = HeaderValue::from_str(&answer.content_type) {
                 response.headers.insert(http::header::CONTENT_TYPE, value);
+            }
+            // As the WPE and WebView2 halves answer: the frames change on every read.
+            response.headers.insert(
+                http::header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store"),
+            );
+            if !answer.allow_origin.is_empty() {
+                if let Ok(value) = HeaderValue::from_str(&answer.allow_origin) {
+                    response
+                        .headers
+                        .insert(http::header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
+                    response
+                        .headers
+                        .insert(http::header::VARY, HeaderValue::from_static("Origin"));
+                }
             }
             response.status = HttpStatus::new_raw(answer.status, Vec::new());
             response
