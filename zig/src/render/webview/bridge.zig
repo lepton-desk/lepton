@@ -408,8 +408,10 @@ pub const Bridge = struct {
                 .generation = self.later[index].generation,
             };
             // Held before the command runs: one that fails at once calls `finish` while
-            // it is still running, and that answer must find the request already here.
+            // it is still running, and that answer must find the request already here —
+            // with whether it is private, or that late reply would be recorded unmasked.
             self.later[index].request = engine.ref(request);
+            self.later[index].private = if (record.commandOf(self.request_frame[0..read])) |id| self.registry.isPrivate(id) else false;
         }
         const begun = if (self.recorder) |*recorder| recorder.now() else 0;
         self.handling = true;
@@ -426,11 +428,7 @@ pub const Bridge = struct {
         if (self.recorder) |*recorder| {
             const private = if (record.commandOf(self.request_frame[0..read])) |id| self.registry.isPrivate(id) else false;
             recorder.add(.request, self.request_frame[0..read], private, effects.deferred, begun);
-            if (effects.deferred) {
-                if (free_slot) |index| self.later[index].private = private;
-            } else {
-                recorder.add(.reply, frame, private, false, recorder.now());
-            }
+            if (!effects.deferred) recorder.add(.reply, frame, private, false, recorder.now());
         }
         if (effects.close_requested) self.close_requested = true;
         if (effects.deferred) {
@@ -555,6 +553,7 @@ pub const Bridge = struct {
         const held = &self.later[index];
         if (held.request) |request| engine.unref(request);
         held.request = null;
+        held.private = false;
         held.generation +%= 1;
     }
 
