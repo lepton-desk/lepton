@@ -10,7 +10,7 @@
 //! window closes — are two things to supervise, and supervising them properly is a
 //! separate concern from describing them. What this command owns is the description.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lepton_orchestrator::{Step, ToolRequirement, Toolchain, display};
 use lepton_template_injector::Frontend;
@@ -61,6 +61,16 @@ pub struct Flags {
     /// come in a script.
     #[arg(long)]
     pub keep_open: bool,
+
+    /// Renders the pages in Servo instead of WPE WebKit, **experimental** (Linux): links
+    /// the library `@lepton-desk/servo-linux-x64` installs, or the one `LEPTON_SERVO_LIB`
+    /// names (`servo.rs`).
+    #[arg(long, conflicts_with = "native")]
+    pub servo: bool,
+
+    /// The directory holding Servo's library, once `--servo` has found it.
+    #[arg(skip)]
+    pub servo_lib: Option<PathBuf>,
 }
 
 impl Flags {
@@ -77,6 +87,13 @@ impl Flags {
 
     /// Describes and prints the loop for the project rooted at `root`.
     pub fn dev_in(&self, root: &Path) -> Outcome {
+        // Servo's library first, as `lepton build --servo` finds it.
+        if self.servo && self.servo_lib.is_none() {
+            super::servo::require_linux()?;
+            let mut resolved = self.clone();
+            resolved.servo_lib = Some(super::servo::library(root)?);
+            return resolved.dev_in(root);
+        }
         lepton_orchestrator::require_project(root)?;
 
         let manifest = super::build::read_manifest(root)?;
@@ -121,8 +138,9 @@ impl Flags {
             }
             return Ok(());
         }
-        // A webview build needs WPE WebKit; without it, say how to get it and offer to.
-        if !native {
+        // A webview build needs WPE WebKit (Servo links its own engine); without it, say
+        // how to get it and offer to.
+        if !native && !self.servo {
             super::engine::ensure()?;
         }
 
@@ -324,6 +342,9 @@ impl Flags {
                 .arg(format!("-Ddev-server=http://{DEV_HOST}:{}", self.port))
                 .arg(format!("-Ddev-port={}", self.port));
         }
+        if let Some(dir) = &self.servo_lib {
+            step = step.arg(format!("-Dservo-lib={}", dir.display()));
+        }
 
         step
     }
@@ -418,7 +439,27 @@ mod tests {
             no_server: false,
             print_plan: false,
             keep_open: false,
+            servo: false,
+            servo_lib: None,
         }
+    }
+
+    #[test]
+    fn servo_reaches_the_core_build() -> Result<(), Failure> {
+        let root = webview_root("dev-servo")?;
+        let flags = Flags {
+            servo: true,
+            servo_lib: Some(std::path::PathBuf::from("/opt/lepton-servo/lib")),
+            ..default_flags()
+        };
+        let steps = flags.plan(root.path(), &complete(), false, &Frontend::default());
+        let core = steps
+            .last()
+            .map(|step| step.args.join(" "))
+            .unwrap_or_default();
+        assert_contains!(&core, "-Dservo-lib=/opt/lepton-servo/lib");
+        assert_contains!(&core, "-Ddev-server=");
+        Ok(())
     }
 
     #[test]

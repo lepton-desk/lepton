@@ -21,6 +21,17 @@ pub const ENV: &str = "LEPTON_SERVO_LIB";
 /// Where the npm platform package will put it, inside a project.
 pub const PACKAGE_DIR: &str = "node_modules/@lepton-desk/servo-linux-x64/lib";
 
+/// `--servo` is Linux's: Servo is built for linux-x64 only.
+pub fn require_linux() -> Result<(), CliError> {
+    if cfg!(target_os = "linux") {
+        Ok(())
+    } else {
+        Err(CliError::Invalid(
+            "--servo: Servo is built for Linux only for now".to_owned(),
+        ))
+    }
+}
+
 /// The directory holding the library for the project at `root`, from the environment.
 pub fn library(root: &Path) -> Result<PathBuf, CliError> {
     find(root, std::env::var_os(ENV).as_deref())

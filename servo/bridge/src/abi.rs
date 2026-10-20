@@ -208,6 +208,18 @@ fn create(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn lepton_servo_set_data_directory(path: *const u8, len: usize) -> i32 {
+    // SAFETY: a pointer-and-length pair from the core.
+    match unsafe { text(path, len) } {
+        Some(path) if !path.is_empty() => {
+            crate::engine::set_data_directory(std::path::PathBuf::from(path));
+            0
+        }
+        _ => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn lepton_servo_create(
     surface: *const LeptonServoSurface,
     scheme: *const u8,

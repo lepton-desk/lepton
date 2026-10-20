@@ -28,6 +28,10 @@ pub const Rect = surface.Rect;
 /// resolved before anything is compiled and the webview's sources are never even
 /// referenced in a native build.
 pub const is_native: bool = build_options.native_render;
+/// Servo renders the pages: the application ends with `_exit` once its own cleanup has run,
+/// because Servo is never torn down (`servo/view.zig`, `close`) and its library's
+/// destructors, run by `exit`, faulted under its still-running threads (measured).
+pub const exit_without_teardown: bool = !build_options.native_render and build_options.have_servo;
 
 /// Type rasterisation, available only when this build found Cairo and Pango.
 ///
@@ -68,7 +72,6 @@ pub const engine_caps = webview.caps;
 /// Exported whole rather than member by member because the two halves only make sense
 /// together: the module has to be resident before the engine is asked for a display.
 pub const webview_platform = webview.platform;
-
 
 /// Runs one turn of the web engine's event loop.
 pub const pump_webview = webview.pump;

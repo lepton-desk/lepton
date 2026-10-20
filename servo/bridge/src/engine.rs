@@ -4,9 +4,10 @@
 //! core's handles into `raw-window-handle` values and its callbacks into a [`Host`].
 
 use std::cell::{Cell, RefCell};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use dpi::PhysicalSize;
 use euclid::Scale;
@@ -16,7 +17,7 @@ use servo::protocol_handler::ProtocolRegistry;
 use servo::{
     ConsoleLogLevel, DevicePoint, EventLoopWaker, InputEvent, KeyboardEvent, LoadStatus,
     MouseButton, MouseButtonAction, MouseButtonEvent, MouseLeftViewportEvent, MouseMoveEvent,
-    NavigationRequest, RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript,
+    NavigationRequest, Opts, RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript,
     WebView, WebViewBuilder, WebViewDelegate, WheelDelta, WheelEvent, WheelMode,
     WindowRenderingContext,
 };
@@ -33,6 +34,16 @@ pub trait Host {
     fn loaded(&self);
     /// Whether the view's document may become `url`.
     fn navigation(&self, url: &str) -> bool;
+}
+
+/// Where Servo keeps the application's web data, set before the engine starts.
+static DATA_DIRECTORY: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Names the directory for cookies, storage and caches (`lepton_servo_set_data_directory`).
+pub fn set_data_directory(directory: PathBuf) {
+    if let Ok(mut guard) = DATA_DIRECTORY.lock() {
+        *guard = Some(directory);
+    }
 }
 
 /// Servo's wake-up, from any thread, forwarded to the core through the queue's waker.
@@ -166,7 +177,20 @@ impl Engine {
                 },
             )
             .map_err(|error| format!("register the {scheme} scheme: {error:?}"))?;
+        // Cookies, `localStorage`, IndexedDB and the HTTP cache in the application's own
+        // directory (`set_data_directory`); without one Servo keeps them in memory only, so
+        // nothing lasts past the run and nothing is shared with another application.
+        let data_directory = DATA_DIRECTORY
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or(None);
+        let opts = Opts {
+            temporary_storage: data_directory.is_none(),
+            config_dir: data_directory,
+            ..Opts::default()
+        };
         let servo = ServoBuilder::default()
+            .opts(opts)
             .protocol_registry(protocols)
             .event_loop_waker(Box::new(Waker(Arc::clone(&queue))))
             .build();

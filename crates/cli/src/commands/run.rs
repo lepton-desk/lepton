@@ -10,7 +10,7 @@
 //! symbols is worth more here than the size `build` optimises for. `--release`
 //! swaps in the optimisation the shipped binary uses.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lepton_orchestrator::{Step, ToolRequirement, Toolchain, display};
 
@@ -46,6 +46,16 @@ pub struct Flags {
     /// Prints the steps instead of running them.
     #[arg(long)]
     pub print_plan: bool,
+
+    /// Renders the pages in Servo instead of WPE WebKit, **experimental** (Linux): links
+    /// the library `@lepton-desk/servo-linux-x64` installs, or the one `LEPTON_SERVO_LIB`
+    /// names (`servo.rs`).
+    #[arg(long, conflicts_with = "native")]
+    pub servo: bool,
+
+    /// The directory holding Servo's library, once `--servo` has found it.
+    #[arg(skip)]
+    pub servo_lib: Option<PathBuf>,
 }
 
 impl Flags {
@@ -73,6 +83,14 @@ impl Flags {
     /// Builds the project as `run` does and says where the binary is — only prints the
     /// steps with `--print-plan`. `record` and `replay` start the same binary their own way.
     pub fn build_in(&self, root: &Path) -> Result<Built, CliError> {
+        // Servo's library first, as `lepton build --servo` finds it: without it the core
+        // cannot link, and a run that quietly fell back to WPE WebKit would not be Servo.
+        if self.servo && self.servo_lib.is_none() {
+            super::servo::require_linux()?;
+            let mut resolved = self.clone();
+            resolved.servo_lib = Some(super::servo::library(root)?);
+            return resolved.build_in(root);
+        }
         lepton_orchestrator::require_project(root)?;
         // A SIGTERM to `lepton` ends the build or the application it started.
         lepton_orchestrator::supervise::install();
@@ -121,8 +139,9 @@ impl Flags {
                 binary,
             });
         }
-        // A webview build needs WPE WebKit; without it, say how to get it and offer to.
-        if !native {
+        // A webview build needs WPE WebKit (Servo links its own engine); without it, say
+        // how to get it and offer to.
+        if !native && !self.servo {
             super::engine::ensure()?;
         }
 
@@ -179,6 +198,9 @@ impl Flags {
             .in_dir(root.join(CORE_DIR));
         if native {
             core = core.arg("-Drender=native");
+        }
+        if let Some(dir) = &self.servo_lib {
+            core = core.arg(format!("-Dservo-lib={}", dir.display()));
         }
         steps.push(core);
 
@@ -272,6 +294,28 @@ mod tests {
 
         assert_eq!(steps.len(), 1);
         assert_contains!(&steps[0].args.join(" "), "-Drender=native");
+        Ok(())
+    }
+
+    #[test]
+    fn servo_reaches_the_core_build() -> Result<(), Failure> {
+        use clap::Parser;
+        let root = frontend("run-servo")?;
+        let flags = Flags {
+            servo: true,
+            servo_lib: Some(std::path::PathBuf::from("/opt/lepton-servo/lib")),
+            ..Flags::default()
+        };
+        let steps = flags.plan(root.path(), &complete(), false);
+        let core = steps
+            .last()
+            .map(|step| step.args.join(" "))
+            .unwrap_or_default();
+        assert_contains!(&core, "-Dservo-lib=/opt/lepton-servo/lib");
+        ensure!(
+            crate::Cli::try_parse_from(["lepton", "run", "--servo", "--native"]).is_err(),
+            "--servo with --native is refused"
+        );
         Ok(())
     }
 

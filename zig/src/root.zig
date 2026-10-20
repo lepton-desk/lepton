@@ -132,6 +132,7 @@ test {
     _ = @import("metrics/latency.zig");
     _ = @import("platform/linux/termination.zig");
     _ = @import("platform/single_instance.zig");
+    _ = @import("render/webview/servo/keymap.zig");
     _ = @import("render/gpu/vulkan_threshold.zig");
     _ = @import("render/scene.zig");
     _ = @import("render/atlas.zig");

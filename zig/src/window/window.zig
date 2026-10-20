@@ -228,6 +228,10 @@ pub const Request = struct {
     app_id: []const u8 = "dev.lepton.app",
     size: Size = .{ .width = 1200, .height = 800 },
     format: PixelFormat = .argb8888,
+    /// Whether `open` shows the window. False leaves it to the window's `map`, after its
+    /// size and place are set: an X window manager places a window when it is mapped and
+    /// keeps it there (measured on COSMIC's XWayland).
+    mapped: bool = true,
 };
 
 test {

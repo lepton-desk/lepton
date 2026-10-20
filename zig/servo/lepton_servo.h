@@ -76,6 +76,11 @@ typedef struct LeptonServoCallbacks {
     int32_t (*navigation)(void *context, const uint8_t *url, size_t len);
 } LeptonServoCallbacks;
 
+/* The application's directory for cookies, `localStorage`, IndexedDB and caches, before
+ * `lepton_servo_create`. Without it Servo keeps them in memory for the run only.
+ * 0 on success, -1 for an empty or non-UTF-8 path. */
+int32_t lepton_servo_set_data_directory(const uint8_t *path, size_t len);
+
 /* Starts Servo drawing into `surface` and registers `scheme` (for example "lepton")
  * for the core. Null on failure, with the reason in `error` (terminated, truncated
  * to `error_capacity`). The callbacks are copied. */

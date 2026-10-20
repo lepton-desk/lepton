@@ -10,4 +10,8 @@
 #if __has_include(<X11/Xlib.h>)
 #include <X11/Xlib.h>
 #endif
+/* XLookupString: the keysym a key event produces (servo/view.zig). */
+#if __has_include(<X11/Xutil.h>)
+#include <X11/Xutil.h>
+#endif
 #endif

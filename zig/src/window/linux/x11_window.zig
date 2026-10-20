@@ -20,6 +20,7 @@ const window = @import("../window.zig");
 const platform_display = @import("../../platform/linux/display.zig");
 const input_state = @import("input.zig");
 const chrome = @import("chrome.zig");
+const placement = @import("placement.zig");
 
 pub const Size = window.Size;
 pub const Configure = window.Configure;
@@ -69,6 +70,29 @@ pub const X11Window = struct {
     /// not have to outlive the call.
     title: [256]u8 = @splat(0),
     title_len: usize = 0,
+    /// Key events since `takeKeys`, as the server sent them: a caller that maps keys
+    /// itself (Servo's view, which needs DOM names) reads the keycode and modifier state.
+    /// Oldest first; when full, the newest are dropped rather than the order broken.
+    keys: [32]RawKey = undefined,
+    key_count: usize = 0,
+    /// The root window and the screen's size, for placing the window in the middle.
+    root: xcb.xcb_window_t = 0,
+    screen_width: u16 = 0,
+    screen_height: u16 = 0,
+    /// Set when the window manager changed `_NET_WM_STATE`; `takeStateChange` reads it.
+    state_changed: bool = false,
+
+    /// One key event, raw: X's keycode (from `min_keycode`) and the modifier and group
+    /// state of the event.
+    pub const RawKey = struct { keycode: u8, state: u16, pressed: bool };
+
+    /// The key events since the last call, oldest first.
+    pub fn takeKeys(self: *X11Window, out: []RawKey) []RawKey {
+        const n = @min(self.key_count, out.len);
+        @memcpy(out[0..n], self.keys[0..n]);
+        self.key_count = 0;
+        return out[0..n];
+    }
 
     /// Connects to the display named by `DISPLAY` and opens a window.
     pub fn open(request: Request) Error!X11Window {
@@ -89,13 +113,16 @@ pub const X11Window = struct {
         // The value list is empty: the window is created on the parent screen's
         // visual with no attribute overrides, which is what a first window should
         // be. Every attribute the window needs is set explicitly afterwards.
+        // Centred on the screen, as a Wayland compositor places a new window; the hints
+        // below ask the window manager to keep the position rather than choose its own.
+        const at = centred(request.size, screen.width_in_pixels, screen.height_in_pixels);
         _ = xcb.xcb_create_window(
             conn,
             xcb.XCB_COPY_FROM_PARENT,
             window_id,
             screen.root,
-            0,
-            0,
+            at.x,
+            at.y,
             @intCast(request.size.width),
             @intCast(request.size.height),
             0,
@@ -120,7 +147,9 @@ pub const X11Window = struct {
             xcb.XCB_EVENT_MASK_KEY_PRESS |
             xcb.XCB_EVENT_MASK_KEY_RELEASE |
             xcb.XCB_EVENT_MASK_ENTER_WINDOW |
-            xcb.XCB_EVENT_MASK_LEAVE_WINDOW;
+            xcb.XCB_EVENT_MASK_LEAVE_WINDOW |
+            // `_NET_WM_STATE` changes: maximized, fullscreen, focused (`state`).
+            xcb.XCB_EVENT_MASK_PROPERTY_CHANGE;
 
         var root_mask: u32 = xcb.XCB_EVENT_MASK_KEY_PRESS | xcb.XCB_EVENT_MASK_KEY_RELEASE;
         _ = xcb.xcb_change_window_attributes(conn, screen.root, xcb.XCB_CW_EVENT_MASK, @ptrCast(&root_mask));
@@ -139,17 +168,96 @@ pub const X11Window = struct {
             // depth-16 root visual exists, and sending an image whose depth does not
             // match it is refused by `BadMatch` with a message that names neither.
             .root_depth = @intCast(screen.root_depth),
+            .root = screen.root,
+            .screen_width = screen.width_in_pixels,
+            .screen_height = screen.height_in_pixels,
         };
         self.setTitle(request.title);
         self.setAppId(request.app_id);
+        setPositionHints(conn, window_id, at, request.size);
 
-        _ = xcb.xcb_map_window(conn, window_id);
+        if (request.mapped) _ = xcb.xcb_map_window(conn, window_id);
         // The request is flushed explicitly rather than left to the library's
         // convenience layer, because the size the caller asked for should be the
         // size the server has been told about before anything reads it back.
         if (xcb.xcb_flush(conn) <= 0) return error.ConnectionFailed;
 
         return self;
+    }
+
+    /// The window's state in `invoke.WindowState`'s bits (fullscreen 1, maximized 2,
+    /// active 4), from `_NET_WM_STATE` (EWMH); null when the window manager keeps none.
+    pub fn state(self: *X11Window) ?u32 {
+        const property = self.atom("_NET_WM_STATE");
+        if (property == 0) return null;
+        // ATOM (4); 32 atoms is more than any window carries.
+        const reply = xcb.xcb_get_property_reply(self.conn, xcb.xcb_get_property(self.conn, 0, self.window_id, property, 4, 0, 32), null) orelse return null;
+        defer std.c.free(reply);
+        const count: usize = @intCast(@divTrunc(xcb.xcb_get_property_value_length(reply), 4));
+        const atoms: [*]const u32 = @ptrCast(@alignCast(xcb.xcb_get_property_value(reply)));
+        const fullscreen = self.atom("_NET_WM_STATE_FULLSCREEN");
+        const vertical = self.atom("_NET_WM_STATE_MAXIMIZED_VERT");
+        const horizontal = self.atom("_NET_WM_STATE_MAXIMIZED_HORZ");
+        const focused = self.atom("_NET_WM_STATE_FOCUSED");
+        var bits: u32 = 0;
+        var maximized: u2 = 0;
+        for (atoms[0..count]) |each| {
+            if (each == fullscreen) bits |= 1;
+            if (each == vertical) maximized += 1;
+            if (each == horizontal) maximized += 1;
+            if (each == focused) bits |= 4;
+        }
+        if (maximized == 2) bits |= 2;
+        return bits;
+    }
+
+    /// Whether `_NET_WM_STATE` changed since the last call.
+    pub fn takeStateChange(self: *X11Window) bool {
+        defer self.state_changed = false;
+        return self.state_changed;
+    }
+
+    /// Asks the window manager to minimize the window (ICCCM `WM_CHANGE_STATE` to
+    /// `IconicState`). False when there is no such atom to ask with.
+    pub fn minimize(self: *X11Window) bool {
+        const change = self.atom("WM_CHANGE_STATE");
+        if (change == 0) return false;
+        return self.toRoot(change, .{ 3, 0, 0, 0, 0 });
+    }
+
+    /// Asks the window manager to maximize or restore the window (`_NET_WM_STATE`).
+    pub fn setMaximized(self: *X11Window, maximized: bool) bool {
+        const property = self.atom("_NET_WM_STATE");
+        if (property == 0) return false;
+        // 1 add, 0 remove; both axes; source 1, an application.
+        return self.toRoot(property, .{ @intFromBool(maximized), self.atom("_NET_WM_STATE_MAXIMIZED_VERT"), self.atom("_NET_WM_STATE_MAXIMIZED_HORZ"), 1, 0 });
+    }
+
+    /// A client message about this window to the root window, as EWMH and ICCCM ask
+    /// requests to the window manager to be sent.
+    fn toRoot(self: *X11Window, message_type: u32, data: [5]u32) bool {
+        var event = std.mem.zeroes(xcb.xcb_client_message_event_t);
+        event.response_type = xcb.XCB_CLIENT_MESSAGE;
+        event.format = 32;
+        event.window = self.window_id;
+        event.type = message_type;
+        event.data.data32 = data;
+        const mask: u32 = xcb.XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | xcb.XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
+        _ = xcb.xcb_send_event(self.conn, 0, self.root, mask, @ptrCast(&event));
+        return xcb.xcb_flush(self.conn) > 0;
+    }
+
+    /// An atom by name, 0 when the server cannot make it.
+    fn atom(self: *X11Window, name: []const u8) u32 {
+        const reply = xcb.xcb_intern_atom_reply(self.conn, xcb.xcb_intern_atom(self.conn, 0, @intCast(name.len), name.ptr), null) orelse return 0;
+        defer std.c.free(reply);
+        return reply.*.atom;
+    }
+
+    /// Shows a window opened with `mapped = false`.
+    pub fn map(self: *X11Window) void {
+        _ = xcb.xcb_map_window(self.conn, self.window_id);
+        _ = xcb.xcb_flush(self.conn);
     }
 
     /// Destroys the window and closes the connection.
@@ -184,6 +292,48 @@ pub const X11Window = struct {
             @ptrCast(&values),
         );
         if (xcb.xcb_flush(self.conn) <= 0) return error.DisplayLost;
+    }
+
+    /// Resizes the window to `size`, made to fit the work area, and centres it there, as
+    /// a Wayland compositor does for the core's other windows; returns the size used.
+    /// The work area is `_NET_WORKAREA` when the window manager publishes it; COSMIC's
+    /// XWayland does not (measured), so then nine tenths of the screen, which leaves a
+    /// desktop's panels uncovered (a 1200x800 window on a 1366x768 screen grew past the
+    /// bottom edge from where an 800x600 one had been centred).
+    pub fn resizeCentred(self: *X11Window, size: Size) Error!Size {
+        if (size.isEmpty()) return error.SizeRefused;
+        const area = self.workArea();
+        const fitted = placement.fit(size, .{ .width = area.width, .height = area.height });
+        const x: i32 = area.x + @divTrunc(@as(i32, @intCast(area.width)) - @as(i32, @intCast(fitted.width)), 2);
+        const y: i32 = area.y + @divTrunc(@as(i32, @intCast(area.height)) - @as(i32, @intCast(fitted.height)), 2);
+        var values = [_]u32{ @bitCast(x), @bitCast(y), fitted.width, fitted.height };
+        const mask: u32 = xcb.XCB_CONFIG_WINDOW_X | xcb.XCB_CONFIG_WINDOW_Y |
+            xcb.XCB_CONFIG_WINDOW_WIDTH | xcb.XCB_CONFIG_WINDOW_HEIGHT;
+        _ = xcb.xcb_configure_window(self.conn, self.window_id, mask, @ptrCast(&values));
+        setPositionHints(self.conn, self.window_id, .{ .x = @as(i16, @intCast(x)), .y = @as(i16, @intCast(y)) }, fitted);
+        if (xcb.xcb_flush(self.conn) <= 0) return error.DisplayLost;
+        return fitted;
+    }
+
+    const Area = struct { x: i32, y: i32, width: u32, height: u32 };
+
+    fn workArea(self: *X11Window) Area {
+        const fallback: Area = blk: {
+            const w: u32 = self.screen_width;
+            const h: u32 = self.screen_height;
+            break :blk .{ .x = @intCast((w - w * 9 / 10) / 2), .y = @intCast((h - h * 9 / 10) / 2), .width = w * 9 / 10, .height = h * 9 / 10 };
+        };
+        const name = "_NET_WORKAREA";
+        const atom_reply = xcb.xcb_intern_atom_reply(self.conn, xcb.xcb_intern_atom(self.conn, 1, name.len, name), null) orelse return fallback;
+        defer std.c.free(atom_reply);
+        if (atom_reply.*.atom == 0) return fallback;
+        // CARDINAL (6), four per desktop: x, y, width, height; the first desktop's.
+        const reply = xcb.xcb_get_property_reply(self.conn, xcb.xcb_get_property(self.conn, 0, self.root, atom_reply.*.atom, 6, 0, 4), null) orelse return fallback;
+        defer std.c.free(reply);
+        if (xcb.xcb_get_property_value_length(reply) < 16) return fallback;
+        const words: [*]const u32 = @ptrCast(@alignCast(xcb.xcb_get_property_value(reply)));
+        if (words[2] == 0 or words[3] == 0) return fallback;
+        return .{ .x = @bitCast(words[0]), .y = @bitCast(words[1]), .width = words[2], .height = words[3] };
     }
 
     /// Sets the title the window manager shows.
@@ -372,9 +522,21 @@ fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
             self.input.move(press.event_x, press.event_y);
             handleButton(self, press.detail, down);
         },
+        xcb.XCB_PROPERTY_NOTIFY => {
+            const notify: *const xcb.xcb_property_notify_event_t = @ptrCast(event);
+            if (notify.atom == self.atom("_NET_WM_STATE")) self.state_changed = true;
+        },
         xcb.XCB_KEY_PRESS, xcb.XCB_KEY_RELEASE => {
             const key: *const xcb.xcb_key_press_event_t = @ptrCast(event);
             self.input.modifier(key.state);
+            if (self.key_count < self.keys.len) {
+                self.keys[self.key_count] = .{
+                    .keycode = key.detail,
+                    .state = key.state,
+                    .pressed = event.response_type & 0x7f == xcb.XCB_KEY_PRESS,
+                };
+                self.key_count += 1;
+            }
             self.input.key(.{
                 // X keycodes start at 8 while `Input` counts from 1, and leaving the
                 // offset in place would make every keycode one bit group off from the
@@ -387,6 +549,36 @@ fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
         },
         else => {},
     }
+}
+
+/// Pixels one wheel step scrolls: three lines, as browsers scroll.
+const wheel_step: f64 = 48;
+
+/// Where a window of `size` sits centred on a screen of `width` by `height`.
+fn centred(size: Size, width: u16, height: u16) struct { x: i16, y: i16 } {
+    const w: i32 = @intCast(size.width);
+    const h: i32 = @intCast(size.height);
+    return .{
+        .x = @intCast(@max(@divTrunc(@as(i32, width) - w, 2), 0)),
+        .y = @intCast(@max(@divTrunc(@as(i32, height) - h, 2), 0)),
+    };
+}
+
+/// `WM_NORMAL_HINTS` (ICCCM 4.1.2.3) with the position the window was created at and its
+/// size, flagged as the program's own (`USPosition | PPosition | PSize`), so the window
+/// manager keeps them.
+fn setPositionHints(conn: *xcb.xcb_connection_t, target: xcb.xcb_window_t, at: anytype, size: Size) void {
+    const us_position: u32 = 1;
+    const p_position: u32 = 4;
+    const p_size: u32 = 8;
+    var hints: [18]u32 = @splat(0);
+    hints[0] = us_position | p_position | p_size;
+    hints[1] = @bitCast(@as(i32, at.x));
+    hints[2] = @bitCast(@as(i32, at.y));
+    hints[3] = size.width;
+    hints[4] = size.height;
+    // `WM_NORMAL_HINTS` and `WM_SIZE_HINTS` are predefined atoms 40 and 41.
+    _ = xcb.xcb_change_property(conn, xcb.XCB_PROP_MODE_REPLACE, target, 40, 41, 32, hints.len, &hints);
 }
 
 /// One button press or release, translated into the shared input rules.
@@ -418,14 +610,30 @@ fn handleButton(self: *X11Window, detail: u8, down: bool) void {
         self.chosen = chrome.actionFor(self.input, 0, self.last_click_ms, 1);
         self.chosen_pending = true;
     }
+    // Buttons 4 to 7 are the wheel, one press per step (up, down, left, right), in the
+    // pixels a step scrolls. They were read as the side and back buttons, so a wheel step
+    // reached a page as "back".
+    switch (detail) {
+        4, 5, 6, 7 => {
+            if (down) switch (detail) {
+                4 => self.input.scroll(0, -wheel_step),
+                5 => self.input.scroll(0, wheel_step),
+                6 => self.input.scroll(-wheel_step, 0),
+                else => self.input.scroll(wheel_step, 0),
+            };
+            return;
+        },
+        else => {},
+    }
     // X button numbering starts at 1 and is an index; the shared rules want the
-    // protocol's bit, so the two are translated here rather than in the rules.
+    // protocol's bit, so the two are translated here rather than in the rules. 8 and 9
+    // are the back and forward buttons.
     const bit: u32 = switch (detail) {
         1 => 1 << 0,
         2 => 1 << 2,
         3 => 1 << 1,
-        4 => 1 << 3,
-        5 => 1 << 6,
+        8 => 1 << 6,
+        9 => 1 << 5,
         else => return,
     };
     self.input.button(bit, down, 0, 0);

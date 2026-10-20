@@ -79,6 +79,19 @@ fn appName(state: *AppState, _: []const u8, out: []u8) core.webviewRegistry.Hand
 }}
 
 pub fn main(init: std.process.Init.Minimal) !void {{
+    // Every `defer` below has run when `run` returns. With Servo the process then leaves
+    // with `_exit`: `exit` would run the Servo library's destructors under its threads.
+    run(init) catch |err| {{
+        if (comptime core.render.exit_without_teardown) {{
+            std.debug.print("error: {{s}}\n", .{{@errorName(err)}});
+            std.c._exit(1);
+        }}
+        return err;
+    }};
+    if (comptime core.render.exit_without_teardown) std.c._exit(0);
+}}
+
+fn run(init: std.process.Init.Minimal) !void {{
     var gpa: std.heap.DebugAllocator(.{{}}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();

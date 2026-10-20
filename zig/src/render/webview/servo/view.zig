@@ -16,10 +16,7 @@
 //! WebKit. The loop is the core's own: `pumpBlocking` waits on the X connection, an
 //! eventfd Servo's `wake` writes from any thread, and the next timer.
 //!
-//! Not yet: keyboard input (the core's X11 window records keycodes; Servo takes DOM `key`
-//! and `code` names, which need the keymap), the wheel, window commands from the page
-//! (`window.minimize`…), a per-application data directory, and the plugins' engine calls
-//! (the clipboard answers `failed`, as in a native build).
+//! Keys reach Servo by their DOM names (`keymap.zig`), the wheel as pixel deltas.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -29,6 +26,13 @@ const input_state = @import("../../../window/linux/input.zig");
 const bridge_mod = @import("../bridge.zig");
 const transport = @import("../transport.zig");
 const request = @import("request.zig");
+const keymap = @import("keymap.zig");
+const invoke = @import("../invoke.zig");
+const events = @import("../events.zig");
+
+/// `int xkb_keysym_to_utf8(xkb_keysym_t, char *, size_t)`: the bytes written with the
+/// terminating NUL, 0 for a keysym with no character (xkbcommon.h).
+const e_keysym_to_utf8 = @extern(*const fn (u32, [*]u8, usize) callconv(.c) c_int, .{ .name = "xkb_keysym_to_utf8" });
 
 pub const Error = error{ NoWindow, NoXlib, Engine, Wake };
 
@@ -56,13 +60,27 @@ pub fn loadedBackend() ?[]const u8 {
 
 /// Servo keeps no profile here yet: storage lives for the run. Accepted and unused, so a
 /// template that asks for a data directory still builds.
-pub fn setDataDirectory(path: [*:0]const u8) void {
-    _ = path;
+/// Servo's web data (cookies, `localStorage`, IndexedDB, caches) for this application only:
+/// `$APPDATA/servo`, made 0700, given to the bridge before Servo starts. Every Lepton page
+/// has the origin `lepton://localhost`, so a shared directory would hand one application's
+/// storage to the next, as it did on WPE before (`wpe_view.zig`). Call before `open`.
+pub fn useApplicationDirectories(identifier: []const u8) bool {
+    const paths = @import("../../../platform/linux/paths.zig");
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    var scratch: [4096]u8 = undefined;
+    const data = paths.resolve(.app_data, identifier, buffer[0 .. buffer.len - 8], &scratch) catch return false;
+    const suffix = "/servo";
+    @memcpy(buffer[data.len..][0..suffix.len], suffix);
+    buffer[data.len + suffix.len] = 0;
+    const directory = buffer[0 .. data.len + suffix.len :0];
+    if (!paths.makePrivate(directory)) return false;
+    return c.lepton_servo_set_data_directory(directory.ptr, directory.len) == 0;
 }
 
-pub fn useApplicationDirectories(identifier: []const u8) bool {
-    _ = identifier;
-    return false;
+/// A directory named by the caller (no `HOME`: beside the executable).
+pub fn setDataDirectory(path: [*:0]const u8) void {
+    const directory = std.mem.span(path);
+    _ = c.lepton_servo_set_data_directory(directory.ptr, directory.len);
 }
 
 // --- timers: one-shot, the counterpart of `g_timeout_add` returning 0 ------------------------
@@ -239,7 +257,7 @@ pub const View = struct {
 
     /// Opens the core's X11 window and starts Servo drawing into it.
     pub fn open() Error!View {
-        var window = x11.X11Window.open(.{ .title = "Lepton", .size = .{ .width = 800, .height = 600 } }) catch
+        var window = x11.X11Window.open(.{ .title = "Lepton", .size = .{ .width = 800, .height = 600 }, .mapped = false }) catch
             return error.NoWindow;
         errdefer window.close();
 
@@ -301,6 +319,17 @@ pub const View = struct {
                 self.closed = true;
             } else {
                 c.lepton_servo_resize(self.servo, configure.size.width, configure.size.height);
+                var size_bytes: [8]u8 = undefined;
+                std.mem.writeInt(u32, size_bytes[0..4], configure.size.width, .little);
+                std.mem.writeInt(u32, size_bytes[4..8], configure.size.height, .little);
+                _ = self.bridge.emit(events.window_resized, &size_bytes) catch {};
+            }
+        }
+        if (self.window.takeStateChange()) {
+            if (self.window.state()) |bits| {
+                var state_bytes: [4]u8 = undefined;
+                std.mem.writeInt(u32, &state_bytes, bits, .little);
+                _ = self.bridge.emit(events.window_state, &state_bytes) catch {};
             }
         }
     }
@@ -311,6 +340,14 @@ pub const View = struct {
             self.last_x = input.x;
             self.last_y = input.y;
             c.lepton_servo_pointer_move(self.servo, input.x, input.y);
+        }
+        var raw: [32]x11.X11Window.RawKey = undefined;
+        for (self.window.takeKeys(&raw)) |key| self.forwardKey(key);
+        // The window counts a step down as positive, Wayland's way; Servo takes the DOM's
+        // sign, where a step down is a negative delta (`lepton_servo.h`).
+        const scrolled = input.takeScroll();
+        if (scrolled.x != 0 or scrolled.y != 0) {
+            c.lepton_servo_wheel(self.servo, -scrolled.x, -scrolled.y, input.x, input.y);
         }
         if (input.held_mask == self.last_mask) return;
         for (buttons) |b| {
@@ -323,13 +360,41 @@ pub const View = struct {
         self.last_mask = input.held_mask;
     }
 
+    /// One key to Servo by its DOM names (`keymap.zig`). The keysym is Xlib's reading of
+    /// the event through this view's own connection, so Shift, Caps Lock and the layout's
+    /// group apply; the character is xkbcommon's.
+    fn forwardKey(self: *View, key: x11.X11Window.RawKey) void {
+        var event = std.mem.zeroes(c.XKeyEvent);
+        event.type = if (key.pressed) c.KeyPress else c.KeyRelease;
+        event.display = self.xdisplay;
+        event.keycode = key.keycode;
+        event.state = key.state;
+        var keysym: c.KeySym = 0;
+        var latin: [8]u8 = undefined;
+        _ = c.XLookupString(&event, &latin, latin.len, &keysym, null);
+        const sym: u32 = @truncate(@as(u64, @intCast(keysym)));
+        var text: [8]u8 = undefined;
+        const name: []const u8 = keymap.named(sym) orelse blk: {
+            const written = e_keysym_to_utf8(sym, &text, text.len);
+            // Counts the terminating NUL; 0 or a control character is no character.
+            if (written <= 1 or text[0] < 0x20) break :blk "Unidentified";
+            break :blk text[0..@intCast(written - 1)];
+        };
+        const code = keymap.code(@as(u32, key.keycode) -| 8);
+        if (key.pressed) @import("../activation.zig").press();
+        _ = c.lepton_servo_key(self.servo, @intFromBool(key.pressed), name.ptr, name.len, code.ptr, code.len, keymap.modifiers(key.state), 0);
+    }
+
     pub fn resized(self: *View, width: i32, height: i32) void {
-        const size: x11.Size = .{ .width = @intCast(@max(width, 1)), .height = @intCast(@max(height, 1)) };
-        self.window.resize(size) catch {};
+        const asked: x11.Size = .{ .width = @intCast(@max(width, 1)), .height = @intCast(@max(height, 1)) };
+        // Fitted to the work area and centred, as the other engines' windows open.
+        const size = self.window.resizeCentred(asked) catch asked;
         c.lepton_servo_resize(self.servo, size.width, size.height);
     }
 
     pub fn map(self: *View) void {
+        // Shown only now, sized and centred (`resized`): see `Request.mapped`.
+        self.window.map();
         self.own();
     }
 
@@ -347,6 +412,24 @@ pub const View = struct {
         self.bridge.recorder = @import("../record.zig").Recorder.fromEnvironment();
         self.bridge.page_replay = @import("../page_replay.zig").fromEnvironment();
         if (self.bridge.page_replay) |*script| script.closeWhenDone(&self.bridge.close_requested);
+        // The page's `window.*` commands act on the core's X11 window (EWMH), and its
+        // state and size reach the page as `window.state` and `window.resized` events
+        // (`applyEvents`). Engine permission prompts are WebKit's; Servo asks none.
+        self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState };
+    }
+
+    fn windowAct(data: ?*anyopaque, action: invoke.WindowAction) bool {
+        const self: *View = @ptrCast(@alignCast(data orelse return false));
+        return switch (action) {
+            .minimize => self.window.minimize(),
+            .maximize => self.window.setMaximized(true),
+            .unmaximize => self.window.setMaximized(false),
+        };
+    }
+
+    fn windowState(data: ?*anyopaque) ?u32 {
+        const self: *View = @ptrCast(@alignCast(data orelse return null));
+        return self.window.state();
     }
 
     /// The window manager's close request ends the run (`applyEvents`).
@@ -368,9 +451,13 @@ pub const View = struct {
     pub fn close(self: *View) void {
         if (self.bridge.recorder) |*recorder| recorder.close();
         if (host.view == self) host.view = null;
-        c.lepton_servo_destroy(self.servo);
-        _ = c.XCloseDisplay(self.xdisplay);
-        self.window.close();
+        // Servo, its Xlib display and the window it draws into are left to the process's
+        // end, which the view closing always is. Servo's own shutdown (`Drop for
+        // ServoInner`, 0.6) spins until every worker has stopped, with no limit: under
+        // `lepton dev` the Vite client's worker never did, the process hung there, and the
+        // channel's `defer` never ran (measured: alive a minute after Ctrl+C, two files left
+        // in /dev/shm). Closing the display or the window under Servo's threads would race
+        // them; the kernel closes both, and the threads, when the process exits.
         // `host.wake_fd` stays open (`open`).
         self.* = undefined;
     }

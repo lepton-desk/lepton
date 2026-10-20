@@ -380,8 +380,6 @@ pub const View = struct {
         _ = self.bridge.emit(events.window_state, &bytes) catch {};
     }
 
-    /// `WPEView::resized`: the page gets `window.resized` with width and height, each a
-    /// little-endian `u32`, in logical pixels as WPE reports them.
     /// `WPEView::event`: notes a press, then lets the event go on to the page (FALSE).
     fn onInput(_: ?*anyopaque, event: ?*anyopaque, _: ?*anyopaque) callconv(.c) c_int {
         // `WPEEventType` (WPEEvent.h): POINTER_DOWN = 1, KEYBOARD_KEY_DOWN = 7, TOUCH_DOWN = 9.
@@ -392,6 +390,8 @@ pub const View = struct {
         return 0;
     }
 
+    /// `WPEView::resized`: the page gets `window.resized` with width and height, each a
+    /// little-endian `u32`, in logical pixels as WPE reports them.
     fn onResized(view: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
         const self: *View = @ptrCast(@alignCast(data orelse return));
         var bytes: [8]u8 = undefined;

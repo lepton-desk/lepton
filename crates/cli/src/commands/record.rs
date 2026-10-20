@@ -76,6 +76,8 @@ fn build(root: &Path, release: bool, print_plan: bool) -> Result<Built, CliError
         webview: true,
         release,
         print_plan,
+        servo: false,
+        servo_lib: None,
     }
     .build_in(root)
 }

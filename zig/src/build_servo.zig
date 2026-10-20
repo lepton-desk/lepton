@@ -19,6 +19,8 @@ pub fn linkEngine(b: *std.Build, core: *std.Build.Module, root: []const u8, lib_
     core.addRPathSpecial("$ORIGIN/../lib");
     core.linkSystemLibrary("lepton_servo", .{ .use_pkg_config = .no });
     core.linkSystemLibrary("X11", .{});
+    // `xkb_keysym_to_utf8`, the character a keysym stands for (`servo/view.zig`).
+    core.linkSystemLibrary("xkbcommon", .{});
 }
 
 /// `zig build servo-window-check -Drender=native -Dservo-lib=<dir>`: installs
