@@ -275,15 +275,17 @@ fn exists(argument: []const u8, out: []u8) Registry.HandlerError!usize {
     return 1;
 }
 
-/// `fs.watch`: the usual path request; answers the watch's `u32` number (LE). Changes
+/// `fs.watch`: the usual path request, `Flag.recursive` for every directory below it
+/// too; answers the watch's `u32` number (LE). Changes
 /// arrive as `fs.changed` events, read on every turn of the loop (`tick`). Linux only for
 /// now: Windows answers `failed`.
 fn watchPath(argument: []const u8, out: []u8) Registry.HandlerError!usize {
     if (out.len < 4) return error.TooLarge;
+    const request = try parse(argument);
     var target: Target = undefined;
-    try open(try parse(argument), &target);
+    try open(request, &target);
     defer target.close();
-    const number = fs.watch(target.root_fd, target.relative) catch |err| return mapFs(err);
+    const number = fs.watch(target.root_fd, target.relative, request.flags & Flag.recursive != 0) catch |err| return mapFs(err);
     std.mem.writeInt(u32, out[0..4], number, .little);
     return 4;
 }

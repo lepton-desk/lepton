@@ -293,6 +293,11 @@ const changeNames: Record<number, WatchChange> = {
   6: "gone",
 };
 
+/** `watch`'s options: the path's base, and whether directories below it are watched too. */
+export interface WatchOptions extends PathOptions {
+  readonly recursive?: boolean;
+}
+
 /** One change a watch saw. */
 export interface WatchEvent {
   readonly change: WatchChange;
@@ -302,15 +307,16 @@ export interface WatchEvent {
 
 /**
  * Calls `handler` for every change to `path`: for a directory, its entries being created,
- * written, removed or renamed (not those of its subdirectories); for a file, the file
- * itself. `modified` is reported once a writer closes the file. The core pushes each
+ * written, removed or renamed; for a file, the file itself. With `{ recursive: true }`,
+ * every directory below it too, including ones made later, and `name` is then the path
+ * below `path` ("2026/a.md"); links are not followed into. `modified` is reported once a writer closes the file. The core pushes each
  * change as it reads it (within a quarter of a second); nothing is polled. Resolves with
  * a function that stops watching. Linux only for now: on Windows it rejects with `failed`.
  */
 export async function watch(
   path: string,
   handler: (event: WatchEvent) => void,
-  options: PathOptions = {},
+  options: WatchOptions = {},
 ): Promise<UnlistenFn> {
   const decoder = new TextDecoder();
   let number: number | undefined;
@@ -327,7 +333,11 @@ export async function watch(
     else deliver(event.payload);
   });
   try {
-    const reply = await call("fs.watch", request(path, options), options);
+    const reply = await call(
+      "fs.watch",
+      request(path, options, options.recursive ? flag.recursive : 0),
+      options,
+    );
     number = new DataView(reply.buffer, reply.byteOffset, reply.byteLength).getUint32(0, true);
   } catch (error) {
     stop();

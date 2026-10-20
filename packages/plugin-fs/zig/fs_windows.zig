@@ -631,9 +631,10 @@ test "large files are read in ranges, saved by renaming, and trees removed witho
 
 pub const Change = enum(u8) { created = 1, modified = 2, removed = 3, renamed_from = 4, renamed_to = 5, gone = 6 };
 
-pub fn watch(root: Handle, relative: [:0]const u8) Error!u32 {
+pub fn watch(root: Handle, relative: [:0]const u8, recursive: bool) Error!u32 {
     _ = root;
     _ = relative;
+    _ = recursive;
     return error.Failed;
 }
 

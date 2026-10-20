@@ -61,30 +61,168 @@ pub const Change = enum(u8) { created = 1, modified = 2, removed = 3, renamed_fr
 /// The process's one inotify descriptor, made on the first watch.
 var inotify_fd: i32 = -1;
 
+/// One inotify watch: the user's watch it belongs to (`number`, the root's own watch
+/// descriptor) and its directory below that watch's path, `/`-ended ("" for the path
+/// itself). A recursive watch is one of these per directory.
+const Sub = struct {
+    wd: i32,
+    number: u32,
+    recursive: bool,
+    prefix_len: u16,
+    prefix: [max_prefix]u8,
+};
+const max_prefix = 512;
+/// Directories watched in all, across every watch: inotify's own default limit per user
+/// is 8192 (`max_user_watches` is often far higher); a note vault has a few hundred.
+const max_subs = 2048;
+var subs: [max_subs]Sub = undefined;
+var sub_count: usize = 0;
+
+/// A recursive watch's path, kept open (`O_PATH`) so a directory created inside it later
+/// is opened beneath it like everything else.
+const Rooted = struct { number: u32, fd: i32 };
+var roots: [64]Rooted = undefined;
+var root_count: usize = 0;
+
+const watch_mask: u32 = linux.IN.CREATE | linux.IN.CLOSE_WRITE | linux.IN.DELETE | linux.IN.MOVED_FROM |
+    linux.IN.MOVED_TO | linux.IN.DELETE_SELF | linux.IN.MOVE_SELF;
+
+/// Watches `fd`'s file or directory through `/proc/self/fd/N`: inotify takes a path, and
+/// this one names exactly what was opened beneath the root.
+fn addWatch(fd: i32) Error!i32 {
+    var through: [32]u8 = undefined;
+    const path = std.fmt.bufPrintSentinel(&through, "/proc/self/fd/{d}", .{fd}, 0) catch return error.Failed;
+    return @intCast(try check(linux.inotify_add_watch(inotify_fd, path.ptr, watch_mask)));
+}
+
+fn register(wd: i32, number: u32, recursive: bool, prefix: []const u8) Error!void {
+    if (prefix.len > max_prefix) return error.TooLarge;
+    for (subs[0..sub_count]) |*sub| {
+        // The same directory reached twice (a hard-linked tree cannot happen for
+        // directories, but two watches on one path can): the first registration stays.
+        if (sub.wd == wd) return;
+    }
+    if (sub_count == max_subs) return error.TooLarge;
+    var sub: Sub = .{ .wd = wd, .number = number, .recursive = recursive, .prefix_len = @intCast(prefix.len), .prefix = undefined };
+    @memcpy(sub.prefix[0..prefix.len], prefix);
+    subs[sub_count] = sub;
+    sub_count += 1;
+}
+
+fn subOf(wd: i32) ?*Sub {
+    for (subs[0..sub_count]) |*sub| if (sub.wd == wd) return sub;
+    return null;
+}
+
+fn dropSub(wd: i32) void {
+    for (subs[0..sub_count], 0..) |sub, index| {
+        if (sub.wd != wd) continue;
+        subs[index] = subs[sub_count - 1];
+        sub_count -= 1;
+        return;
+    }
+}
+
 /// Watches `relative` (a directory: its entries; a file: itself) and returns the watch's
-/// number. Opened beneath the root first, then watched through `/proc/self/fd/N`, so a link
-/// planted in the path cannot point the watch outside the scope.
-pub fn watch(root_fd: i32, relative: [:0]const u8) Error!u32 {
+/// number. With `recursive`, every directory below it too, and any made there later;
+/// names then come relative to `relative` ("notes/a.md"). Everything is opened beneath the
+/// root before it is watched, so a link planted in the tree cannot lead a watch out of the
+/// scope: links are not followed into.
+pub fn watch(root_fd: i32, relative: [:0]const u8, recursive: bool) Error!u32 {
     if (inotify_fd < 0) {
         const made = linux.inotify_init1(linux.IN.NONBLOCK | linux.IN.CLOEXEC);
         inotify_fd = @intCast(try check(made));
     }
     const fd = try beneath(root_fd, relative, .{ .PATH = true, .CLOEXEC = true }, 0);
-    defer _ = linux.close(fd);
-    var through: [32]u8 = undefined;
-    const path = std.fmt.bufPrintSentinel(&through, "/proc/self/fd/{d}", .{fd}, 0) catch return error.Failed;
-    const mask: u32 = linux.IN.CREATE | linux.IN.CLOSE_WRITE | linux.IN.DELETE | linux.IN.MOVED_FROM |
-        linux.IN.MOVED_TO | linux.IN.DELETE_SELF | linux.IN.MOVE_SELF;
-    const wd = linux.inotify_add_watch(inotify_fd, path.ptr, mask);
-    return @intCast(try check(wd));
+    var keep_fd = false;
+    defer if (!keep_fd) {
+        _ = linux.close(fd);
+    };
+    const wd = try addWatch(fd);
+    const number: u32 = @intCast(wd);
+    errdefer unwatch(number);
+    try register(wd, number, recursive, "");
+    if (recursive) {
+        if (root_count == roots.len) return error.TooLarge;
+        roots[root_count] = .{ .number = number, .fd = fd };
+        root_count += 1;
+        keep_fd = true;
+        try watchBelow(fd, number, "", 0);
+    }
+    return number;
 }
 
+/// Watches every directory under `dir_path` (beneath `root_fd`, the watch's own path),
+/// depth first, to `max_depth`.
+fn watchBelow(root_fd: i32, number: u32, prefix: []const u8, depth: usize) Error!void {
+    if (depth == max_depth) return error.TooLarge;
+    var path_buffer: [max_prefix + 1]u8 = undefined;
+    if (prefix.len > max_prefix) return error.TooLarge;
+    @memcpy(path_buffer[0..prefix.len], prefix);
+    path_buffer[prefix.len] = 0;
+    const dir_fd = beneath(root_fd, path_buffer[0..prefix.len :0], .{ .DIRECTORY = true, .NOFOLLOW = true, .CLOEXEC = true }, 0) catch |err| switch (err) {
+        // Not a directory (a file watched recursively): nothing below it.
+        error.Failed => return,
+        else => return err,
+    };
+    defer _ = linux.close(dir_fd);
+    var records: [8192]u8 align(@alignOf(linux.dirent64)) = undefined;
+    while (true) {
+        const got = try check(linux.getdents64(dir_fd, &records, records.len));
+        if (got == 0) return;
+        var at: usize = 0;
+        while (at < got) {
+            const entry: *align(1) const linux.dirent64 = @ptrCast(&records[at]);
+            at += entry.reclen;
+            if (entry.type != linux.DT.DIR) continue;
+            const child = std.mem.span(@as([*:0]const u8, @ptrCast(&entry.name)));
+            if (std.mem.eql(u8, child, ".") or std.mem.eql(u8, child, "..")) continue;
+            try watchChild(root_fd, number, prefix, child, depth);
+        }
+    }
+}
+
+/// Watches the directory `prefix ++ name` below a recursive watch's path, and what is in it.
+fn watchChild(root_fd: i32, number: u32, prefix: []const u8, name: []const u8, depth: usize) Error!void {
+    var child_prefix: [max_prefix + 1]u8 = undefined;
+    const joined = std.fmt.bufPrint(&child_prefix, "{s}{s}/", .{ prefix, name }) catch return error.TooLarge;
+    child_prefix[joined.len - 1] = 0;
+    const child_fd = beneath(root_fd, child_prefix[0 .. joined.len - 1 :0], .{ .PATH = true, .DIRECTORY = true, .NOFOLLOW = true, .CLOEXEC = true }, 0) catch return;
+    defer _ = linux.close(child_fd);
+    child_prefix[joined.len - 1] = '/';
+    const wd = try addWatch(child_fd);
+    try register(wd, number, true, joined);
+    try watchBelow(root_fd, number, joined, depth + 1);
+}
+
+fn rootFd(number: u32) ?i32 {
+    for (roots[0..root_count]) |entry| if (entry.number == number) return entry.fd;
+    return null;
+}
+
+/// Stops the watch `number` and, for a recursive one, every directory below it.
 pub fn unwatch(number: u32) void {
     if (inotify_fd < 0) return;
-    _ = linux.inotify_rm_watch(inotify_fd, @intCast(number));
+    var index: usize = 0;
+    while (index < sub_count) {
+        if (subs[index].number == number) {
+            _ = linux.inotify_rm_watch(inotify_fd, subs[index].wd);
+            subs[index] = subs[sub_count - 1];
+            sub_count -= 1;
+        } else index += 1;
+    }
+    for (roots[0..root_count], 0..) |entry, at| {
+        if (entry.number != number) continue;
+        _ = linux.close(entry.fd);
+        roots[at] = roots[root_count - 1];
+        root_count -= 1;
+        break;
+    }
 }
 
 /// Calls `report(context, number, change, name)` for every change waiting; never blocks.
+/// A directory made inside a recursive watch is watched before its own events can be
+/// missed for long; one already filled when it arrived (moved in) is walked whole.
 pub fn drainWatch(context: anytype, report: fn (@TypeOf(context), u32, Change, []const u8) void) void {
     if (inotify_fd < 0) return;
     var buffer: [4096]u8 align(@alignOf(linux.inotify_event)) = undefined;
@@ -94,12 +232,24 @@ pub fn drainWatch(context: anytype, report: fn (@TypeOf(context), u32, Change, [
         var at: usize = 0;
         while (at + @sizeOf(linux.inotify_event) <= got) {
             const event: *const linux.inotify_event = @ptrCast(@alignCast(&buffer[at]));
-            const name_bytes = buffer[at + @sizeOf(linux.inotify_event) ..][0..event.len];
+            at += @sizeOf(linux.inotify_event) + event.len;
+            const name_bytes = buffer[at - event.len ..][0..event.len];
             const name = std.mem.sliceTo(name_bytes, 0);
             const mask = event.mask;
-            const change: ?Change = if (mask & linux.IN.CREATE != 0) .created else if (mask & linux.IN.CLOSE_WRITE != 0) .modified else if (mask & linux.IN.DELETE != 0) .removed else if (mask & linux.IN.MOVED_FROM != 0) .renamed_from else if (mask & linux.IN.MOVED_TO != 0) .renamed_to else if (mask & (linux.IN.DELETE_SELF | linux.IN.MOVE_SELF) != 0) .gone else null;
-            if (change) |which| report(context, @intCast(event.wd), which, name);
-            at += @sizeOf(linux.inotify_event) + event.len;
+            if (mask & linux.IN.IGNORED != 0) {
+                dropSub(event.wd);
+                continue;
+            }
+            const sub = subOf(event.wd) orelse continue;
+            const is_root = sub.prefix_len == 0;
+            const change: ?Change = if (mask & linux.IN.CREATE != 0) .created else if (mask & linux.IN.CLOSE_WRITE != 0) .modified else if (mask & linux.IN.DELETE != 0) .removed else if (mask & linux.IN.MOVED_FROM != 0) .renamed_from else if (mask & linux.IN.MOVED_TO != 0) .renamed_to else if (mask & (linux.IN.DELETE_SELF | linux.IN.MOVE_SELF) != 0 and is_root) .gone else null;
+            const which = change orelse continue;
+            var full: [max_prefix + 256]u8 = undefined;
+            const path = std.fmt.bufPrint(&full, "{s}{s}", .{ sub.prefix[0..sub.prefix_len], name }) catch continue;
+            if (sub.recursive and mask & linux.IN.ISDIR != 0 and (which == .created or which == .renamed_to)) {
+                if (rootFd(sub.number)) |root| watchChild(root, sub.number, sub.prefix[0..sub.prefix_len], name, 0) catch {};
+            }
+            report(context, sub.number, which, path);
         }
     }
 }
@@ -578,7 +728,7 @@ test "a watched directory reports its entries' changes, and its number is the wa
     const root_fd = try openRoot(try tree.root(&root_buffer, "root", false));
     defer _ = linux.close(root_fd);
 
-    const number = try watch(root_fd, "");
+    const number = try watch(root_fd, "", false);
     defer unwatch(number);
     try writeFile(root_fd, "note.md", "x", false);
     try remove(root_fd, "note.md");
@@ -597,5 +747,44 @@ test "a watched directory reports its entries' changes, and its number is the wa
     drainWatch(&seen, Seen.note);
     try std.testing.expectEqualSlices(Change, &.{ .created, .modified, .removed }, seen.changes[0..seen.count]);
     // A path that leaves the root is refused before anything is watched.
-    try std.testing.expectError(error.Denied, watch(root_fd, "../outside"));
+    try std.testing.expectError(error.Denied, watch(root_fd, "../outside", false));
+}
+
+test "a recursive watch sees every directory below it, and those made later" {
+    const tree = try Tree.make();
+    defer tree.remove();
+    var root_buffer: [256]u8 = undefined;
+    const root_fd = try openRoot(try tree.root(&root_buffer, "root", false));
+    defer _ = linux.close(root_fd);
+    try makeDirectory(root_fd, "notes/2026", true);
+
+    const number = try watch(root_fd, "", true);
+    defer unwatch(number);
+    try writeFile(root_fd, "notes/2026/a.md", "x", false);
+    try makeDirectory(root_fd, "later", false);
+
+    const Seen = struct {
+        names: [16][64]u8 = undefined,
+        lens: [16]usize = undefined,
+        count: usize = 0,
+        number: u32,
+        fn note(self: *@This(), from: u32, change: Change, name: []const u8) void {
+            if (from != self.number or change != .created or self.count == self.names.len) return;
+            @memcpy(self.names[self.count][0..name.len], name);
+            self.lens[self.count] = name.len;
+            self.count += 1;
+        }
+        fn saw(self: *const @This(), name: []const u8) bool {
+            for (0..self.count) |i| if (std.mem.eql(u8, self.names[i][0..self.lens[i]], name)) return true;
+            return false;
+        }
+    };
+    var seen: Seen = .{ .number = number };
+    drainWatch(&seen, Seen.note);
+    try std.testing.expect(seen.saw("notes/2026/a.md"));
+    try std.testing.expect(seen.saw("later"));
+    // `later` is watched now: a file made in it arrives with its path.
+    try writeFile(root_fd, "later/b.md", "y", false);
+    drainWatch(&seen, Seen.note);
+    try std.testing.expect(seen.saw("later/b.md"));
 }
