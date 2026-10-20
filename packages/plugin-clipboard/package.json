@@ -1,6 +1,6 @@
 {
   "name": "@lepton-desk/plugin-clipboard",
-  "version": "0.1.9-beta.1",
+  "version": "0.1.9-beta.2",
   "description": "Lepton plugin: read and write the system clipboard as text.",
   "license": "MIT OR Apache-2.0",
   "repository": {
@@ -27,7 +27,7 @@
     "settings": "clipboard"
   },
   "peerDependencies": {
-    "@lepton-desk/api": "^0.1.9-beta.1"
+    "@lepton-desk/api": "^0.1.9-beta.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

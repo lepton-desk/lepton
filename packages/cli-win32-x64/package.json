@@ -1,6 +1,6 @@
 {
   "name": "@lepton-desk/cli-win32-x64",
-  "version": "0.1.9-beta.1",
+  "version": "0.1.9-beta.2",
   "description": "The Lepton CLI binary for win32-x64. Installed by @lepton-desk/cli; not used directly.",
   "license": "MIT OR Apache-2.0",
   "repository": {

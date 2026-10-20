@@ -1,6 +1,6 @@
 # npm yayını: `@lepton-desk/*`
 
-Şu anki sürüm: **0.1.9-beta.1** (0.1.0–0.1.9-beta.0 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı tek komut: `node tools/release-version.mjs <sürüm>`. `Cargo.toml` (CLI sürümünü
+Şu anki sürüm: **0.1.9-beta.2** (0.1.0–0.1.9-beta.1 yayımlandı; `create-lepton-app` 0.1.4 ile çıktı). Sürüm artırımı tek komut: `node tools/release-version.mjs <sürüm>`. `Cargo.toml` (CLI sürümünü
 derlemede buradan okur: `--version`, komut başlıkları, yeni projelerin `@lepton-desk/*` sürümleri),
 `Cargo.lock`, dokuz npm paketinin `version`'ı, `cli`'nin `optionalDependencies`'i (iki platform paketi), eklentilerin
 `^<sürüm>` `peerDependencies`'i, `create-lepton-app`'in `@lepton-desk/cli`'si, `lepton update`'in
@@ -9,7 +9,14 @@ Yayından sonra `node tools/release-version.mjs aur`: `-bin`'in sha512'si npm'de
 commit'i HEAD'den, `.SRCINFO`'lar yeniden. Platform paketini `stage.mjs` yazar.
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-win32-x64` (**Windows'ta**, aşağıda) → `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
-`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
+`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `@lepton-desk/servo-linux-x64` (deneysel; kimse ona bağlı değil, projeler `-D` ile kurar) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
+
+**Servo kitaplığı** (0.1.9-beta.2'den): CI derler (`servo-bridge` iş akışı, ~12 dk). O çalıştırmanın `liblepton_servo` artifact'ını indirip yerleştirin; betik ELF'i denetler, boyutu ve SHA-256'yı yazar (CI raporundaki `sha256:` satırıyla aynı olmalı):
+
+```bash
+gh run download <run-id> -n liblepton_servo -D /tmp/servo
+node tools/stage-servo.mjs /tmp/servo/liblepton_servo.so.xz
+```
 
 ## 1. Sizin kararınız gerekenler (ön kontrol bunlarsız geçmez)
 - ~~Lisans metinleri~~ — eklendi: `LICENSE-MIT` (2026 Lepton Desk Contributors) ve

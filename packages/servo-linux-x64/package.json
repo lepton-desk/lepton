@@ -1,6 +1,6 @@
 {
   "name": "@lepton-desk/servo-linux-x64",
-  "version": "0.1.9-beta.1",
+  "version": "0.1.9-beta.2",
   "description": "Servo for Lepton on linux-x64 (experimental): the bridge library `lepton build --servo` links. Install it as a dev dependency of a project built with --servo.",
   "license": "MPL-2.0 AND (MIT OR Apache-2.0)",
   "repository": {

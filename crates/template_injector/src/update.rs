@@ -65,6 +65,11 @@ pub const RELEASES: &[Release] = &[
         entry: include_str!("../assets/history/0.1.9-beta.1/main.zig"),
         build: include_str!("../assets/history/0.1.9-beta.1/build.zig"),
     },
+    Release {
+        version: "0.1.9-beta.2",
+        entry: include_str!("../assets/history/0.1.9-beta.2/main.zig"),
+        build: include_str!("../assets/history/0.1.9-beta.2/build.zig"),
+    },
 ];
 
 /// `tsconfig.json` as a TypeScript project gets it, and as a React one does.

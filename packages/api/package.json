@@ -1,6 +1,6 @@
 {
   "name": "@lepton-desk/api",
-  "version": "0.1.9-beta.1",
+  "version": "0.1.9-beta.2",
   "description": "Call a Lepton core from the page: binary invoke, no JSON.",
   "license": "MIT OR Apache-2.0",
   "repository": {

@@ -45,11 +45,18 @@ test("SIGTERM to the launcher ends the child too", {
   const launched = spawn(process.execPath, [launcher, "30"], {
     env: { ...process.env, LEPTON_BINARY: "/usr/bin/sleep" },
   });
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const children = readFileSync(`/proc/${launched.pid}/task/${launched.pid}/children`, "utf8")
-    .trim()
-    .split(/\s+/)
-    .filter((pid) => pid !== "");
+  // Polled, not a fixed wait: under load (the preflight builds and tests beside it) the
+  // launcher took longer than 300 ms to start its child, and a fixed wait saw none.
+  const childrenOf = () =>
+    readFileSync(`/proc/${launched.pid}/task/${launched.pid}/children`, "utf8")
+      .trim()
+      .split(/\s+/)
+      .filter((pid) => pid !== "");
+  let children = childrenOf();
+  for (let waited = 0; children.length === 0 && waited < 3000; waited += 50) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    children = childrenOf();
+  }
   assert.equal(children.length, 1, "one child: the binary");
   const ended = new Promise((resolve) => launched.on("exit", (_code, signal) => resolve(signal)));
   launched.kill("SIGTERM");

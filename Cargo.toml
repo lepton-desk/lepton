@@ -10,7 +10,7 @@ members = [
 # One place decides what "current" means for every crate in the workspace, so a
 # build never mixes two incompatible major versions of the same dependency.
 [workspace.package]
-version = "0.1.9-beta.1"
+version = "0.1.9-beta.2"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
