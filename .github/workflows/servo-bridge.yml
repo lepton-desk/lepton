@@ -161,7 +161,7 @@ jobs:
       # The same engine under a real project: the template, built by the CLI with --servo
       # (LEPTON_SERVO_LIB names the library until it is published), run on Xvfb.
       # LEPTON_SERVO_TRACE prints each request Servo hands the core: the starter's
-      # `/__lepton/region` reads are the page reaching the core through Servo.
+      # `/__lepton/<key>/region` reads are the page reaching the core through Servo (the key is per run).
       - name: A template app on Servo
         run: |
           set +e
@@ -193,13 +193,13 @@ jobs:
             echo "## template app (build exit $build, run exit $ran; 124 = still running when stopped)"
             grep -E "core|types|frontend|built|error" "$RUNNER_TEMP/app-build.log" | tail -8
             cat "$RUNNER_TEMP/app-run.log" | grep -v "memory profiler" | head -30
-            echo "requests: $(grep -c '^servo request' "$RUNNER_TEMP/app-run.log"), region reads: $(grep -c '__lepton/region' "$RUNNER_TEMP/app-run.log")"
+            echo "requests: $(grep -c '^servo request' "$RUNNER_TEMP/app-run.log"), region reads: $(grep -cE '__lepton/[0-9a-f]{32}/region' "$RUNNER_TEMP/app-run.log")"
             echo "app window: ${app_window:-none found}"
             grep -E "Map State|Width|Height|Absolute upper-left" "$RUNNER_TEMP/app-windows.txt"
             grep -E '"' "$RUNNER_TEMP/app-windows.txt" | head -10
             ldd "src-lepton/zig-out/bin/$app" | grep -E "lepton_servo|X11|wpe" 
           } | tee -a "$RUNNER_TEMP/report.txt"
-          [ "$build" = 0 ] && grep -q '__lepton/region' "$RUNNER_TEMP/app-run.log"
+          [ "$build" = 0 ] && grep -qE '__lepton/[0-9a-f]{32}/region' "$RUNNER_TEMP/app-run.log"
 
       - name: Report
         if: always()
