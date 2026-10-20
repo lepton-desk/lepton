@@ -158,6 +158,40 @@ jobs:
           } | tee -a "$RUNNER_TEMP/report.txt"
           exit "$status"
 
+      # The same engine under a real project: the template, built by the CLI with --servo
+      # (LEPTON_SERVO_LIB names the library until it is published), run on Xvfb.
+      # LEPTON_SERVO_TRACE prints each request Servo hands the core: the starter's
+      # `/__lepton/region` reads are the page reaching the core through Servo.
+      - name: A template app on Servo
+        run: |
+          set +e
+          cargo build --release --bin lepton 2>&1 | tail -3
+          lepton="$GITHUB_WORKSPACE/target/release/lepton"
+          cd "$RUNNER_TEMP"
+          "$lepton" new servo-app --template vanilla-ts --target webview --package-manager npm --install --non-interactive 2>&1 | tail -15
+          cd servo-app
+          export LEPTON_SERVO_LIB="$GITHUB_WORKSPACE/servo/bridge/target/release"
+          NO_COLOR=1 "$lepton" build --linux --servo 2>&1 | tee "$RUNNER_TEMP/app-build.log" | tail -25
+          build=${PIPESTATUS[0]}
+          app=$(ls src-lepton/zig-out/bin/ | head -1)
+          export DISPLAY=:99
+          pgrep Xvfb > /dev/null || (Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &)
+          sleep 1
+          LEPTON_SERVO_TRACE=1 RUST_LOG=warn timeout 12 "src-lepton/zig-out/bin/$app" > "$RUNNER_TEMP/app-run.log" 2>&1 &
+          pid=$!
+          sleep 9
+          import -window root "$RUNNER_TEMP/app.png"
+          wait $pid
+          ran=$?
+          {
+            echo "## template app (build exit $build, run exit $ran; 124 = still running when stopped)"
+            grep -E "core|types|frontend|built|error" "$RUNNER_TEMP/app-build.log" | tail -8
+            cat "$RUNNER_TEMP/app-run.log" | grep -v "memory profiler" | head -30
+            echo "requests: $(grep -c '^servo request' "$RUNNER_TEMP/app-run.log"), region reads: $(grep -c '__lepton/region' "$RUNNER_TEMP/app-run.log")"
+            ldd "src-lepton/zig-out/bin/$app" | grep -E "lepton_servo|X11|wpe" 
+          } | tee -a "$RUNNER_TEMP/report.txt"
+          [ "$build" = 0 ] && grep -q '__lepton/region' "$RUNNER_TEMP/app-run.log"
+
       - name: Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -171,4 +205,7 @@ jobs:
             ${{ runner.temp }}/screen-ready.png
             ${{ runner.temp }}/screen-clicked.png
             ${{ runner.temp }}/servo-window.png
+            ${{ runner.temp }}/app.png
+            ${{ runner.temp }}/app-build.log
+            ${{ runner.temp }}/app-run.log
           if-no-files-found: warn
