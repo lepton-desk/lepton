@@ -78,8 +78,11 @@ pub fn openRoot(root: Root) Error!i32 {
     return @intCast(try check(opened));
 }
 
+/// A parent directory opened beneath the root, and the last name in it.
+const Parent = struct { fd: i32, name: [:0]const u8 };
+
 /// The directory holding `relative` and its last word, both beneath `root_fd`.
-fn parentOf(root_fd: i32, relative: [:0]const u8, buffer: []u8) Error!struct { fd: i32, name: [:0]const u8 } {
+fn parentOf(root_fd: i32, relative: [:0]const u8, buffer: []u8) Error!Parent {
     if (relative.len == 0) return error.Denied; // the root itself is not removed or made
     const slash = std.mem.lastIndexOfScalar(u8, relative, '/');
     const dir_len = slash orelse 0;
@@ -112,6 +115,8 @@ pub fn readFile(root_fd: i32, relative: [:0]const u8, out: []u8) Error!usize {
 /// Up to `out.len` bytes of the file from `offset`; fewer only at its end. A file larger
 /// than one `invoke` reply is read in such pieces.
 pub fn readRange(root_fd: i32, relative: [:0]const u8, offset: u64, out: []u8) Error!usize {
+    // A page passes the offset; past what `pread` takes is past every file's end.
+    if (offset > std.math.maxInt(i64) - out.len) return 0;
     const fd = try beneath(root_fd, relative, .{ .CLOEXEC = true }, 0);
     defer _ = linux.close(fd);
     var len: usize = 0;
@@ -133,8 +138,28 @@ pub fn rename(root_fd: i32, from: [:0]const u8, to: [:0]const u8) Error!void {
     defer _ = linux.close(source.fd);
     const target = try parentOf(root_fd, to, &to_buffer);
     defer _ = linux.close(target.fd);
+    if (std.mem.endsWith(u8, from, saving_suffix)) keepMode(source, target);
     _ = try check(linux.renameat(source.fd, source.name.ptr, target.fd, target.name.ptr));
 }
+
+/// The name `@lepton-desk/plugin-fs` writes a large file under before renaming it over
+/// the old one (`savingSuffix` in `src/index.ts`).
+const saving_suffix = ".lepton-save";
+
+/// A file saved in pieces keeps the old file's permissions: it is created owner-only
+/// (`writeFile`), and a file that was 0600 must not come back 0644. A new file gets the
+/// mode `writeFile` gives any other.
+fn keepMode(source: Parent, target: Parent) void {
+    var info: linux.Statx = undefined;
+    const mode: u32 = if (linux.statx(target.fd, target.name.ptr, linux.AT.SYMLINK_NOFOLLOW, .{ .MODE = true }, &info) == 0)
+        info.mode & 0o7777
+    else
+        new_file_mode;
+    _ = linux.fchmodat(source.fd, source.name.ptr, mode);
+}
+
+/// What a new file is created with, before the umask.
+const new_file_mode = 0o644;
 
 /// How deep `removeTree` goes before refusing: a note vault is not that deep, and a
 /// bound keeps a malicious tree from exhausting the stack.
@@ -192,7 +217,8 @@ pub fn writeFile(root_fd: i32, relative: [:0]const u8, data: []const u8, append:
     if (relative.len == 0) return error.Failed;
     var flags: linux.O = .{ .ACCMODE = .WRONLY, .CREAT = true, .CLOEXEC = true };
     if (append) flags.APPEND = true else flags.TRUNC = true;
-    const fd = try beneath(root_fd, relative, flags, 0o644);
+    const mode: u32 = if (std.mem.endsWith(u8, relative, saving_suffix)) 0o600 else new_file_mode;
+    const fd = try beneath(root_fd, relative, flags, mode);
     defer _ = linux.close(fd);
     var done: usize = 0;
     while (done < data.len) {
@@ -444,6 +470,7 @@ test "large files are read in ranges, saved by renaming, and trees removed witho
     var piece: [65_536]u8 = undefined;
     for (&piece, 0..) |*byte, index| byte.* = @intCast('a' + index % 26);
     try writeFile(root_fd, "big.md", "old", false);
+    _ = linux.fchmodat(root_fd, "big.md", 0o600);
     var written: usize = 0;
     while (written < 200_000) {
         const size = @min(piece.len, 200_000 - written);
@@ -452,6 +479,13 @@ test "large files are read in ranges, saved by renaming, and trees removed witho
     }
     try rename(root_fd, "big.md.lepton-save", "big.md");
     try std.testing.expect(!try exists(root_fd, "big.md.lepton-save"));
+    // The saved file keeps the old one's owner-only mode.
+    var info: linux.Statx = undefined;
+    try std.testing.expectEqual(@as(usize, 0), linux.statx(root_fd, "big.md", 0, .{ .MODE = true }, &info));
+    try std.testing.expectEqual(@as(u32, 0o600), info.mode & 0o7777);
+    // An offset past what `pread` takes reads nothing rather than stopping the core.
+    var tail: [16]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 0), try readRange(root_fd, "big.md", std.math.maxInt(u64), &tail));
     var out: [65_536]u8 = undefined;
     var total: usize = 0;
     while (true) {

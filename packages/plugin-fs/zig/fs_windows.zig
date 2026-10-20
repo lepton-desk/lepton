@@ -181,6 +181,8 @@ pub fn readFile(root: Handle, relative: [:0]const u8, out: []u8) Error!usize {
 /// Up to `out.len` bytes of the file from `offset`; fewer only at its end.
 pub fn readRange(root: Handle, relative: [:0]const u8, offset: u64, out: []u8) Error!usize {
     if (relative.len == 0) return error.Failed;
+    // A page passes the offset; past what the read takes is past every file's end.
+    if (offset > std.math.maxInt(i64) - out.len) return 0;
     const handle = try beneath(root, relative, .{ .access = read_access, .options = .{ .IO = .SYNCHRONOUS_NONALERT, .NON_DIRECTORY_FILE = true } });
     defer close(handle);
     var len: usize = 0;
