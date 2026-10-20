@@ -58,21 +58,20 @@ pub struct Flags {
     #[arg(long)]
     pub webview: bool,
 
-    /// Servo, the experimental second engine (Linux). Not in this release yet,
-    /// so it is refused with the reason ([`SERVO_NOT_YET`]).
-    ///
-    /// Kept as a flag rather than removed: a script that asks for Servo gets the
-    /// reason, not clap's "unexpected argument".
+    /// Servo, the experimental second engine (Linux): the pages render through
+    /// `liblepton_servo.so`, found by `servo.rs` (`LEPTON_SERVO_LIB` until it is
+    /// published), instead of WPE WebKit.
     #[arg(long, requires = "linux")]
     pub servo: bool,
+
+    /// The directory holding Servo's library, once `--servo` has found it.
+    #[arg(skip)]
+    pub servo_lib: Option<PathBuf>,
 
     /// Prints what would run without running it.
     #[arg(long, short = 'n')]
     pub dry_run: bool,
 }
-
-/// Why `--servo` is refused: the build would be WPE WebKit under Servo's name.
-pub const SERVO_NOT_YET: &str = "--servo: Servo is not in this release yet. It is coming as an experimental second engine; until it links, a --servo build would be WPE WebKit under Servo's name, so it is refused. Leave out --servo to build with WPE WebKit.";
 
 impl Flags {
     /// Builds the project in the current directory.
@@ -88,11 +87,13 @@ impl Flags {
 
     /// Builds the project rooted at `root`.
     pub fn build_in(&self, root: &Path) -> Outcome {
-        // Measured 2026-10-18: `--servo` exited 0 with a WPE WebKit binary, since the
-        // template's `build.zig` only checked `-Dservo` and linked nothing. Refused before
-        // anything runs, a dry run included, until a Servo build exists.
-        if self.servo {
-            return Err(CliError::Invalid(SERVO_NOT_YET.to_owned()));
+        // Servo's library is found first, a dry run included: without it the core cannot
+        // link, and a `--servo` build that quietly became WPE WebKit is what this flag
+        // once did (measured 2026-10-18).
+        if self.servo && self.servo_lib.is_none() {
+            let mut resolved = self.clone();
+            resolved.servo_lib = Some(super::servo::library(root)?);
+            return resolved.build_in(root);
         }
         lepton_orchestrator::require_project(root)?;
         // A SIGTERM to `lepton` ends the build or the application it started.
@@ -258,8 +259,8 @@ impl Flags {
         if native {
             step = step.arg("-Drender=native");
         }
-        if self.servo {
-            step = step.arg("-Dservo=true");
+        if let Some(dir) = &self.servo_lib {
+            step = step.arg(format!("-Dservo-lib={}", dir.display()));
         }
 
         step
@@ -538,12 +539,16 @@ mod tests {
         let flags = Flags {
             linux: true,
             servo: true,
+            servo_lib: Some(PathBuf::from("/opt/lepton-servo/lib")),
             ..Flags::default()
         };
 
         let steps = flags.plan(scratch.path(), &complete(), true, Platform::Linux);
 
-        assert_contains!(&steps[0].args.join(" "), "-Dservo=true");
+        assert_contains!(
+            &steps[0].args.join(" "),
+            "-Dservo-lib=/opt/lepton-servo/lib"
+        );
         // And the platform stays Linux's: a Servo build anywhere else would be a link
         // error, and clap already refuses `--servo` without `--linux`. Asserted as the
         // platform rather than as a triple, because a build for the machine doing the
@@ -560,9 +565,14 @@ mod tests {
     }
 
     #[test]
-    fn servo_is_refused_with_its_reason_a_dry_run_included() -> Result<(), Failure> {
-        // `--servo` once exited 0 with a WPE WebKit binary. Until Servo links, every
-        // build that asks for it stops before running anything and says why.
+    fn servo_without_its_library_stops_with_the_reason_a_dry_run_included() -> Result<(), Failure> {
+        // `--servo` once exited 0 with a WPE WebKit binary. Without Servo's library a
+        // build that asks for it stops before running anything and says where to get it.
+        // (With `LEPTON_SERVO_LIB` set in the environment there is a library to find:
+        // `servo.rs` tests the search itself without the environment.)
+        if std::env::var_os(super::super::servo::ENV).is_some() {
+            return Ok(());
+        }
         let (scratch, _) = project("build-servo-refused", RenderPath::Webview)?;
         for dry_run in [false, true] {
             let flags = Flags {
@@ -573,12 +583,12 @@ mod tests {
             };
             match flags.build_in(scratch.path()) {
                 Err(super::CliError::Invalid(reason)) => {
-                    assert_contains!(&reason, "Servo is not in this release yet");
-                    assert_contains!(&reason, "Leave out --servo");
+                    assert_contains!(&reason, "no liblepton_servo.so found");
+                    assert_contains!(&reason, "LEPTON_SERVO_LIB");
                 }
                 other => {
                     return Err(Failure {
-                        claim: format!("--servo (dry run {dry_run}) is refused"),
+                        claim: format!("--servo without a library (dry run {dry_run}) stops"),
                         actual: format!("{other:?}"),
                     });
                 }

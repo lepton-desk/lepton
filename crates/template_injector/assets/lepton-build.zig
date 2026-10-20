@@ -45,12 +45,14 @@ pub fn build(b: *std.Build) !void {
     ) orelse .ReleaseSmall;
 
     const render = b.option([]const u8, "render", "Render path: webview or native (default: webview)") orelse "webview";
-    const servo = b.option(bool, "servo", "Link the embedded Servo engine (Linux, webview path)") orelse false;
+    // Servo, experimental: the directory holding `liblepton_servo.so`, which the CLI finds
+    // for `--servo`. Without it the pages render in WPE WebKit.
+    const servo_lib = b.option([]const u8, "servo-lib", "Render pages in Servo, from this directory's liblepton_servo.so (experimental, Linux)");
 
     // A contradictory pair of flags is a mistake in the command line, not a defect in
     // the build script, so it is reported rather than panicked: the message is the
     // only thing a developer sees.
-    try check_render_options(render, servo);
+    try check_render_options(render, servo_lib != null);
 
     const name = b.option([]const u8, "name", "The binary's name") orelse "app";
 
@@ -83,6 +85,7 @@ pub fn build(b: *std.Build) !void {
         // refuses to declare the same option twice, so a core that read `-Drender`
         // itself would make every scaffolded project fail to configure.
         .render = render,
+        .servo_lib = servo_lib,
     });
 
     // The program's own build options. `lepton dev` passes the server address through
@@ -244,15 +247,8 @@ fn check_render_options(render: []const u8, servo: bool) !void {
         return error.UnknownRenderPath;
     }
 
-    // `-Dservo` once linked nothing and the binary was WPE WebKit under Servo's name.
-    // Until Servo links, it stops the build with the reason.
-    if (servo) {
-        std.log.err("lepton: -Dservo: Servo is not in this release yet; a build with it would be WPE WebKit under Servo's name. Leave it out to build with WPE WebKit", .{});
-        return error.ServoNotInThisRelease;
-    }
-
     if (servo and !webview) {
-        std.log.err("lepton: -Dservo needs the webview render path: Servo is the engine the webview renders with, so there is nothing for it to serve in the native path", .{});
+        std.log.err("lepton: -Dservo-lib needs the webview render path: Servo is the engine the webview renders with, so there is nothing for it to serve in the native path", .{});
         return error.ServoNeedsWebview;
     }
 }

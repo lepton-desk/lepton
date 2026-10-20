@@ -34,6 +34,7 @@ pub mod plugins;
 pub mod record;
 pub mod report;
 pub mod run;
+pub mod servo;
 pub mod session;
 pub mod update;
 pub mod update_packages;
