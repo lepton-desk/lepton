@@ -182,7 +182,10 @@ jobs:
           cd "$RUNNER_TEMP"
           "$lepton" new servo-app --template vanilla-ts --target webview --package-manager npm --non-interactive 2>&1 | tail -15
           cd servo-app
-          # The SDK from this checkout: the CLI's own version may not be on npm yet.
+          # The SDK from this checkout: the CLI's own version may not be on npm yet. Built
+          # first with its own manager (pnpm, its lockfile), so its dist/ is current.
+          npm install -g pnpm@10 2>&1 | tail -1
+          (cd "$GITHUB_WORKSPACE/packages/api" && pnpm install --frozen-lockfile 2>&1 | tail -2 && pnpm run build 2>&1 | tail -2)
           sed -i "s|\"@lepton-desk/api\": \"[^\"]*\"|\"@lepton-desk/api\": \"file:$GITHUB_WORKSPACE/packages/api\"|; s|\"@lepton-desk/cli\": \"[^\"]*\"|\"@lepton-desk/cli\": \"file:$GITHUB_WORKSPACE/packages/cli\"|" package.json
           npm install --no-audit --no-fund 2>&1 | tail -3
           export LEPTON_SERVO_LIB="$GITHUB_WORKSPACE/servo/bridge/target/release"
