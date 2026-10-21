@@ -42,7 +42,21 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 - Şablon uygulama (`LEPTON_ZIG=…\0.17.0\zig.exe lepton build`) derlendi ve açıldı; `tools/ci/windows/measure.ps1` 0.16 derlemesiyle aynı sonucu verdi: koyu/açık başlık sayfayı izliyor, ikinci başlatma 0 ile bitti ve tek pencere kaldı, `WM_CLOSE` ile 0 çıkış. Kalan dört "FAIL" başlık/yazı rengi (`DWMWA_CAPTION_COLOR`/`TEXT_COLOR`): Windows 10'da `E_INVALIDARG` (0x80070057), yalnız Windows 11'de var.
 - Bu makinede ayrıca: HEAD'den (`edc2ac7`) `cli-win32-x64` yeniden yerleştirildi (6 802 944 bayt), `api`/`plugin-clipboard`/`plugin-dialog` `prepublishOnly` 0; `beta.2` npm'de hâlâ boş.
 
-## Windows Server 2025 CI (madde 4, yazıldı, CI'da henüz çalışmadı)
+## Windows Server 2025 CI (madde 4, ölçüldü, 2026-10-21)
+
+Çalıştırma 39621873041 (`windows-2025`, Windows Server 2025 Datacenter 10.0.26100) geçti, 8 dk 41 sn:
+- **Başlık rengi (Windows 11 tabanı):** sayfa `#ffd700` verince başlık çubuğunun pikseli `rgb(255, 215, 0)`, yazı siyah, koyu bayrak 0; `rgb(27 29 28)` verince piksel `rgb(27, 29, 28)`, koyu bayrak 1; açılışta (şablonun `color-scheme: dark`'ı) `rgb(32, 32, 32)`, koyu. Ekran görüntüsünde altın başlık, siyah yazı, Lepton logosu. Windows 11'de renk böylece ölçüldü.
+- **Küçük ekran:** runner'ın ekranı 1024×768, çalışma alanı 1024×720: 1200×800 isteyen pencere 0,0'da 1024×720 (çalışma alanına sığdırıldı).
+- **Simge:** sınıfın büyük ve küçük simgesi dolu, exe'de 1 simge.
+- **Tek kopya + derin bağlantı:** iki ikinci başlatma (`leptonci://theme/…`) 0 ile bitti, tek pencere kaldı, bağlantı sayfaya `app.opened` ile ulaştı (sayfa başlığını değiştirdi). `WM_CLOSE` ile çıkış 0.
+- **Paket:** `ci-app-0.1.0-windows-x86_64.msi` 245 760 bayt, `.zip` 190 356 bayt; `msiexec /i /qn` 0, kurulu exe'yle aynı denetimler geçti, `msiexec /x /qn` 0, `%LOCALAPPDATA%\Programs\ci-app` kalmadı.
+- **İlk iki çalıştırmanın bulduğu:**
+  - `lepton new --package-manager npm` npm'i bulamıyordu: Rust'ın `Command` yalnız `.exe` arıyor, Node'un npm'i `npm.cmd`. Bu makinede npm vite-plus'ın `.exe` kabuğu olduğu için hiç görünmemişti. Düzeltildi: `orchestrator/src/program.rs`, `PATHEXT` sırası.
+  - `lepton new` Windows'ta "WPE WebKit" yazıyordu; düzeltildi, artık "WebView2".
+  - Ölçümün kendi hatası: sayfanın DevTools portu runner'da açılmadı. Sayfa artık rengini derin bağlantıyla kendisi değiştiriyor (`tools/ci/windows/ci-theme.ts`).
+  - Ölçümün kendi hatası: `DWMWA_CAPTION_COLOR`/`TEXT_COLOR` geri okunamıyor (`E_INVALIDARG`, Windows 10'da ve Server 2025'te; yalnız yazmak için belgelenmiş). Renk artık pikselden okunuyor.
+
+### Eski not (yazılırken)
 
 - `.github/workflows/windows.yml` (`windows-2025`): CLI, bu depodan `@lepton-desk/api` ile şablon uygulama (`deepLinks: ["leptonci"]`, `bundle.targets: ["zip", "msi"]`), pencere ölçümü, paketleme, MSI kur → aç ve ölç → kaldır (klasör kalmamalı). Rapor ve ekran görüntüleri `windows-2025` artifact'ında.
 - `tools/ci/windows/`: `cdp.mjs` (DevTools ile sayfada ifade; `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port`), `window-facts.ps1` (yerleşim, simgeler, DWM 20/35/36, başlık pikseli, ekran görüntüsü), `measure.ps1` (`theme-color` `#ffd700` → başlık `0x0000D7FF`, yazı siyah, açık; `rgb(27 29 28)` → `0x001C1D1B`, yazı beyaz, koyu; tek kopya; kapanış). Renk denetimi başarılı okuma (`hr 0`) da istiyor: Windows 10'da başarısız okuma 0 döndürüp "siyah yazı"yı yanlışlıkla geçiriyordu.
@@ -74,7 +88,7 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
    - Başlık çubuğunun sayfayı izlemesi Linux'ta da (bileşimci izin veriyorsa; yoksa nedenini yaz).
 2. **Açık kalanların hepsi** (aşağıdaki liste ve bu dosyadaki "ölçülmedi" notları).
 3. **Windows'ta Zig 0.17:** zvm ile 0.17 kurulup `zig build test`, şablon uygulama, araçlar 0.17 ile de geçmeli (Linux'ta ikisi geçiyor; Windows'ta yalnız 0.16 denendi). Durumu aşağıda, "Windows'ta Zig 0.17".
-4. **Windows 11 ve Windows Server 2025 uyumu, CI'da ölçülür** (bu makine Windows 11 gereksinimlerini karşılamıyor; kurulmayacak, atlatılmayacak): GitHub Actions `windows-2025` (Server 2025, derleme 26100) üzerinde bir iş akışı şablon uygulamayı derleyip açar ve ölçer — başlık rengi (`theme-color` verilince `DwmGetWindowAttribute(DWMWA_CAPTION_COLOR)` beklenen renk mi, ekran görüntüsü artifact olarak), koyu/açık, simge, küçük ekranda yerleşim, çerçevesiz pencere ve sürükleme, yerel menü, tek kopya, MSI kurulum/kaldırma. Önce Server 2025'te `DWMWA_CAPTION_COLOR`'ın gerçekten çalıştığı ölçülecek; çalışmıyorsa nedeni yazılır. Server 2025'e ya da Windows 11'e özgü fark çıkarsa düzeltilir (Windows 10'da ölçülenler bozulmadan).
+4. ~~**Windows 11 ve Windows Server 2025 uyumu, CI'da ölçülür**~~ — ölçüldü (aşağıda, "Windows Server 2025 CI"); çerçevesiz pencere, sürükleme ve yerel menü iş akışında henüz yok. (bu makine Windows 11 gereksinimlerini karşılamıyor; kurulmayacak, atlatılmayacak): GitHub Actions `windows-2025` (Server 2025, derleme 26100) üzerinde bir iş akışı şablon uygulamayı derleyip açar ve ölçer — başlık rengi (`theme-color` verilince `DwmGetWindowAttribute(DWMWA_CAPTION_COLOR)` beklenen renk mi, ekran görüntüsü artifact olarak), koyu/açık, simge, küçük ekranda yerleşim, çerçevesiz pencere ve sürükleme, yerel menü, tek kopya, MSI kurulum/kaldırma. Önce Server 2025'te `DWMWA_CAPTION_COLOR`'ın gerçekten çalıştığı ölçülecek; çalışmıyorsa nedeni yazılır. Server 2025'e ya da Windows 11'e özgü fark çıkarsa düzeltilir (Windows 10'da ölçülenler bozulmadan).
 
 5. **Linux'tan Windows paketi, yalnız `.exe` değil** (adım adım): `lepton package --windows` Linux'ta `.zip` ve `.msi` yazar — ikisinin yazıcısı da saf Rust (`zip.rs`, `installer_db.rs` + `cfb`/`cab`), simge Zig'in kaynak derleyicisiyle, WebView2 başlığı depoda.
    1. Paket çalışan makineye değil hedefe göre: `platform::bundle_os`/`executable` hedeften (dosya adı `windows`, `.exe`), `packages_as` MSI'yı hedef Windows olduğunda Linux'ta da kabul eder.

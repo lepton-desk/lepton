@@ -25,7 +25,7 @@ No browser ships with the app: it uses the system's web engine.
 | Plugins | `os`, `fs`, `clipboard`, `dialog` | the same four, measured end to end |
 | Single instance, deep links (`deepLinks`) | yes (a unix socket; the desktop entry claims the scheme) | yes (a named pipe; the scheme is registered per user) |
 | Your own title bar (`window.decorations: false`), moving it, native menus | Servo's X11 window; WPE: not yet (Lepton's own WPE platform, next) | yes: resize borders, snap and shadow stay |
-| System title bar follows the page's `theme-color` / `color-scheme` | no (no compositor protocol for it) | dark/light on Windows 10 (measured); the colour itself on Windows 11 (`DWMWA_CAPTION_COLOR`, checked by the `windows` workflow) |
+| System title bar follows the page's `theme-color` / `color-scheme` | no (no compositor protocol for it) | dark/light on Windows 10; the colour itself on Windows 11 (measured on Server 2025, build 26100, by the `windows` workflow) |
 | Small screens (1280 × 800 and below) | the window is centred (X11; Wayland places it itself) | the window is fitted to the work area and centred |
 
 Windows 8.1, 8 and 7 are not supported: WebView2 stopped at 109 there and gets no
