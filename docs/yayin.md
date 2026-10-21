@@ -60,7 +60,11 @@ diye Linux'tan yayımlanırlar (Windows yarısı Windows'ta `pnpm test` ile).
 
 ### 4a. Windows (`D:/lepton`, PowerShell 5.1 — `&&` yok, komutlar ayrı ya da `;` + `if ($?)`)
 
-Hazırlık:
+Hazırlık. CLI ikilisi çekirdeği içine gömer: yayımlanacak commit'ten derlenmeli, yoksa yeni projeler eski çekirdeği alır.
+
+```powershell
+cd D:/lepton; if ($?) { git pull }
+```
 
 ```powershell
 cargo build --release --bin lepton
@@ -121,6 +125,12 @@ cd packages/plugin-os && npm publish --tag beta
 ```bash
 cd packages/plugin-fs && npm publish --tag beta
 ```
+
+```bash
+cd packages/servo-linux-x64 && npm publish --tag beta
+```
+
+`servo-linux-x64`'ün kitaplığı git'te değil: yayından önce yerleştirilmiş olmalı (yukarıda, "Servo kitaplığı").
 
 ```bash
 cd packages/create-lepton-app && npm publish --tag beta
