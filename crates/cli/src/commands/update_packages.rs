@@ -232,7 +232,7 @@ pub fn latest(root: &Path, manager: PackageManager, tag: &str) -> Option<Version
         attempts.push(("npm", vec!["view".into(), package, "version".into()]));
     }
     attempts.into_iter().find_map(|(program, args)| {
-        let output = Command::new(program)
+        let output = Command::new(lepton_orchestrator::program::resolve(program))
             .args(&args)
             .current_dir(root)
             .output()

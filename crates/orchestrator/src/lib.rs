@@ -13,6 +13,8 @@
 
 pub mod colour;
 mod process;
+/// The file a program name starts (`npm` is `npm.cmd` on Windows).
+pub mod program;
 pub mod supervise;
 mod toolchain;
 

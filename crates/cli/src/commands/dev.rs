@@ -172,7 +172,8 @@ impl Flags {
         }
 
         for step in &background {
-            let mut command = std::process::Command::new(&step.program);
+            let mut command =
+                std::process::Command::new(lepton_orchestrator::program::resolve(&step.program));
             // Vite's own colours: its output goes to the terminal directly here, but the
             // variables also keep a server started under a pipe coloured (`colour.rs`).
             lepton_orchestrator::colour::apply(&mut command, &step.env);

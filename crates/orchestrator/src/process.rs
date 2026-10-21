@@ -182,7 +182,7 @@ impl Step {
         } else {
             self.program.clone()
         };
-        let mut command = Command::new(program);
+        let mut command = Command::new(crate::program::resolve(&program));
         command.args(&self.args);
         command.envs(self.env.iter().map(|(name, value)| (name, value)));
         // An empty directory means "here", not "the directory whose name is the empty

@@ -65,6 +65,8 @@ pub fn template_label(template: &str) -> String {
 
 pub fn render_label(mode: RenderMode) -> &'static str {
     match mode {
+        // The engine this machine's builds use: Windows once read "WPE WebKit" here.
+        RenderMode::Webview if cfg!(windows) => "webview · your page in WebView2",
         RenderMode::Webview => "webview · your page in WPE WebKit",
         RenderMode::Native => "native · drawn by the core, no web engine",
     }

@@ -188,7 +188,9 @@ fn probe(name: &'static str, args: &[&str]) -> ToolStatus {
 
 /// [`probe`] running `program`, which may be a path, for the tool called `name`.
 pub(crate) fn probe_at(name: &'static str, program: &str, args: &[&str]) -> ToolStatus {
-    let output = Command::new(program).args(args).output();
+    let output = Command::new(crate::program::resolve(program))
+        .args(args)
+        .output();
 
     match output {
         Ok(output) => {

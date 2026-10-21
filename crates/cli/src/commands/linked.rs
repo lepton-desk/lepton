@@ -373,7 +373,7 @@ mod tests {
     }
 
     fn has_pnpm() -> bool {
-        std::process::Command::new("pnpm")
+        std::process::Command::new(lepton_orchestrator::program::resolve("pnpm"))
             .arg("--version")
             .output()
             .is_ok_and(|out| out.status.success())
