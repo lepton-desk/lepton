@@ -107,8 +107,8 @@ pub fn sync_and_report(root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::{GENERATED, HEADER, Synced, TARGET, sync, types_first};
-    use lepton_orchestrator::testing::{Failure, Scratch, fail};
-    use lepton_orchestrator::{assert_eq, assert_ok, ensure};
+    use lepton_orchestrator::testing::{Failure, Scratch};
+    use lepton_orchestrator::{assert_eq, assert_ok};
 
     fn generated(text: &str) -> String {
         format!("{HEADER} by its core build.\n{text}")
@@ -203,6 +203,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_is_never_written_through() -> Result<(), Failure> {
+        // Only this test makes a link (Unix only), and only it uses these.
+        use lepton_orchestrator::ensure;
+        use lepton_orchestrator::testing::fail;
         let scratch = Scratch::new("command-types-link")?;
         let core = scratch.path().join("src-lepton");
         scratch.write(&format!("src-lepton/{GENERATED}"), &generated("x\n"))?;

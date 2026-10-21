@@ -262,9 +262,16 @@ impl ReplayFlags {
 
 /// Creates `dir`, which must not exist yet, readable by its owner only.
 fn private_dir(dir: &std::path::Path) -> Result<(), CliError> {
-    let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    let builder = {
+        let mut builder = std::fs::DirBuilder::new();
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder
+    };
+    // Windows: a new folder under the user's profile inherits permissions that are the
+    // user's alone.
+    #[cfg(not(unix))]
+    let builder = std::fs::DirBuilder::new();
     builder
         .create(dir)
         .map_err(|error| CliError::Invalid(format!("could not create {}: {error}", dir.display())))
