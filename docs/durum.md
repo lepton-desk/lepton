@@ -58,6 +58,14 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 3. **Windows'ta Zig 0.17:** zvm ile 0.17 kurulup `zig build test`, şablon uygulama, araçlar 0.17 ile de geçmeli (Linux'ta ikisi geçiyor; Windows'ta yalnız 0.16 denendi).
 4. **Windows 11 ve Windows Server 2025 uyumu, CI'da ölçülür** (bu makine Windows 11 gereksinimlerini karşılamıyor; kurulmayacak, atlatılmayacak): GitHub Actions `windows-2025` (Server 2025, derleme 26100) üzerinde bir iş akışı şablon uygulamayı derleyip açar ve ölçer — başlık rengi (`theme-color` verilince `DwmGetWindowAttribute(DWMWA_CAPTION_COLOR)` beklenen renk mi, ekran görüntüsü artifact olarak), koyu/açık, simge, küçük ekranda yerleşim, çerçevesiz pencere ve sürükleme, yerel menü, tek kopya, MSI kurulum/kaldırma. Önce Server 2025'te `DWMWA_CAPTION_COLOR`'ın gerçekten çalıştığı ölçülecek; çalışmıyorsa nedeni yazılır. Server 2025'e ya da Windows 11'e özgü fark çıkarsa düzeltilir (Windows 10'da ölçülenler bozulmadan).
 
+5. **Linux'tan Windows paketi, yalnız `.exe` değil** (adım adım): `lepton package --windows` Linux'ta `.zip` ve `.msi` yazar — ikisinin yazıcısı da saf Rust (`zip.rs`, `installer_db.rs` + `cfb`/`cab`), simge Zig'in kaynak derleyicisiyle, WebView2 başlığı depoda.
+   1. Paket çalışan makineye değil hedefe göre: `platform::bundle_os`/`executable` hedeften (dosya adı `windows`, `.exe`), `packages_as` MSI'yı hedef Windows olduğunda Linux'ta da kabul eder.
+   2. `--verify` Linux'ta Windows paketini çalıştıramaz: açıkça reddeder ("doğrulandı" demez). Wine önerilmez (WebView2 orada güvenilir değil).
+   3. Doğrulama CI'da (madde 4'teki `windows-2025` iş akışı): Linux'ta üretilen MSI'yı orada kurar, açar, ölçer, kaldırır.
+   4. Tekrarlanabilirlik: aynı proje Windows'ta ve Linux'ta paketlenince `.zip` ve `.msi` bayt bayt aynı olmalı (ölçülecek).
+   5. Sonra: imzalama (sertifika gelince), arm64 Windows.
+   - **Ters yön (Windows'tan Linux paketi) sonra:** Linux çekirdeği WPE'nin sistem kitaplıklarına bağlanıyor, `.deb`/pacman bağımlılıkları `dpkg-query`/`pacman` ile bulunuyor; ayrı bir tasarım ister. Çoğu framework iki yönü de yapamıyor.
+
 Kullanıcı Linux'ta çalıştırıp düzeltecek; Windows'ta ölçülenler bozulmamalı.
 
 ## Açık kalanlar
