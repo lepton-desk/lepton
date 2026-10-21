@@ -45,3 +45,6 @@ jobs:
           zig test packages/plugin-fs/zig/fs.zig -lc
           zig test packages/plugin-os/zig/os.zig -lc
           zig test packages/plugin-dialog/zig/request.zig
+
+      - name: Cookie shim
+        run: node --test zig/src/render/webview/cookie_shim.test.mjs

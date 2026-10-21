@@ -162,11 +162,6 @@ const invoke_object = std.fmt.comptimePrint(
     },
 );
 
-/// Writes the user script for a ring of `region_len` bytes into `out`.
-///
-/// Frozen object, fixed buffer: the SDK builds one `DataView` over `bytes` when its
-/// module loads, so the array is allocated once and refreshed in place with `set`. A
-/// replaced array would leave the SDK reading the first snapshot forever.
 /// The dev server's origin as the script may quote it: `scheme://host[:port]` characters
 /// only, or "" (a packaged page, or anything else, which then gets no exception).
 fn quotableOrigin(page_origin: []const u8) []const u8 {
@@ -177,10 +172,32 @@ fn quotableOrigin(page_origin: []const u8) []const u8 {
     return page_origin;
 }
 
+/// `document.cookie` for a page on the core's own scheme, which WPE WebKit and Servo give
+/// no cookies (`cookie_shim.js`). It installs nothing on an http(s) page.
+/// Its comment lines stay in the file and out of every page.
+const cookie_shim = withoutCommentLines(@embedFile("cookie_shim.js"));
+
+fn withoutCommentLines(comptime source: []const u8) []const u8 {
+    @setEvalBranchQuota(200_000);
+    comptime var kept: []const u8 = "";
+    comptime var lines = std.mem.splitScalar(u8, source, '\n');
+    inline while (comptime lines.next()) |line| {
+        if (comptime !std.mem.startsWith(u8, std.mem.trimStart(u8, line, " "), "//")) kept = kept ++ line ++ "\n";
+    }
+    return kept;
+}
+
+/// Writes the user script for a ring of `region_len` bytes into `out`.
+///
+/// Frozen object, fixed buffer: the SDK builds one `DataView` over `bytes` when its
+/// module loads, so the array is allocated once and refreshed in place with `set`. A
+/// replaced array would leave the SDK reading the first snapshot forever.
+///
 /// The transport, for the application's own page only: `page_origin` is the dev server's
 /// origin ("" for a packaged page served from `core_origin`). In any other document — a
 /// page the window navigated to, `about:srcdoc`, an embedded frame — it defines nothing,
-/// so that document has neither `__lepton` nor the run's key (`secret.zig`).
+/// so that document has neither `__lepton` nor the run's key (`secret.zig`), nor the
+/// cookie shim.
 pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, page_origin: []const u8) error{NoSpaceLeft}![:0]const u8 {
     // The application's commands are known when the application is built, not when the
     // core is, so their table is written here at run time beside the comptime layout.
@@ -192,6 +209,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, 
         \\  if (globalThis.__lepton !== undefined) return;
         \\  const own = location.href.startsWith("{s}/") || ("{s}" !== "" && location.origin === "{s}");
         \\  if (!own) return;
+        \\{s}
         \\  const layout = Object.freeze({s});
         \\  const bytes = new Uint8Array({d});
         \\  const view = new DataView(bytes.buffer);
@@ -263,7 +281,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, 
         \\  refresh();
         \\}})();
         \\
-    , .{ core_origin, quotableOrigin(page_origin), quotableOrigin(page_origin), layout_object, region_len, coreUrl(region_name), retry_ms, app, coreUrl(close_name) }, 0);
+    , .{ core_origin, quotableOrigin(page_origin), quotableOrigin(page_origin), cookie_shim, layout_object, region_len, coreUrl(region_name), retry_ms, app, coreUrl(close_name) }, 0);
     secret.fill(out[0..written.len]);
     return written;
 }
@@ -395,7 +413,16 @@ test "the page fetches the core's origin by absolute address, never a wildcard" 
     const text = try scriptFor(&buffer, 1);
     var url: [128]u8 = undefined;
     try std.testing.expect(std.mem.indexOf(u8, text, try keyed("fetch(`lepton://localhost/__lepton/", "/region?after=", &url)) != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "*") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "\"*\"") == null);
+}
+
+test "a page on the core's scheme gets document.cookie, without the shim's comments" {
+    var buffer: [8192]u8 = undefined;
+    const text = try scriptFor(&buffer, 1);
+    try std.testing.expect(std.mem.indexOf(u8, text, "Object.defineProperty(globalObject.Document.prototype, \"cookie\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "cookie-averse") == null);
+    // Installed after the own-page check, so another document gets no shim either.
+    try std.testing.expect(std.mem.indexOf(u8, text, "if (!own) return;").? < std.mem.indexOf(u8, text, "__lepton.cookies").?);
 }
 
 test "the transport defines itself only in the application's own page" {

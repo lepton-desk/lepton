@@ -255,11 +255,9 @@ impl Flags {
         let _linked_watcher = (!native).then(|| {
             super::linked::Watcher::start(root.to_path_buf(), super::linked::program(&chain))
         });
+        // On a termination signal `launch` leaves the exit to the handler, which prints
+        // the receipt.
         let outcome = super::launch::launch(NAME, &super::build::artifact_dir(root), &binary);
-        if lepton_orchestrator::supervise::interrupted() {
-            // The handler is ending the session and prints the receipt; let it finish.
-            lepton_orchestrator::supervise::await_exit();
-        }
         if outcome.is_ok() {
             // "0 rebuilds, 0 restarts" is structural, not a guess: this loop has no path that
             // rebuilds the core or restarts the window while it runs.

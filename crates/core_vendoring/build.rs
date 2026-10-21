@@ -156,6 +156,10 @@ fn walk(core: &Path, root: &Path, carried: &mut Vec<(String, PathBuf)>) {
 
         if path.is_dir() {
             walk(core, &path, carried);
+        } else if name.ends_with(".test.mjs") {
+            // A test of the core's JavaScript (`cookie_shim.test.mjs`), run in the core's
+            // checkout; no project's build reads it.
+            continue;
         } else {
             carried.push((relative_to_core(core, &path), path));
         }

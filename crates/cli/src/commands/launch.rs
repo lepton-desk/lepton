@@ -257,8 +257,16 @@ pub fn launch_with(
     }
     let report = super::report::Report::new();
     let started = report.start("app", &super::report::shown(&program));
+    // A termination signal's handler waits for this report (`supervise::foreground`)…
+    let reporting = lepton_orchestrator::supervise::foreground();
     let outcome = run_streaming(&step);
     report.finished(&started, outcome.is_ok());
+    drop(reporting);
+    if lepton_orchestrator::supervise::interrupted() {
+        // …and then ends the process (130, after `lepton dev`'s receipt), whichever
+        // thread got here first.
+        lepton_orchestrator::supervise::await_exit();
+    }
     outcome.map_err(CliError::from)
 }
 

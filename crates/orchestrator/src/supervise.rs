@@ -163,6 +163,41 @@ pub fn terminate_all() -> usize {
 
 static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+static FOREGROUND: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Marks a child the main thread waits for and reports on (the application under `lepton
+/// run` and `lepton dev`) for as long as the guard lives. On a termination signal the
+/// handler ends the children and then waits, up to `GRACE`, for every guard to drop, so
+/// that report is printed before the process exits. Measured: the handler's exit raced
+/// it, and one Ctrl+C in four ended `lepton run` with 130 and no `✔ app` line.
+pub fn foreground() -> Foreground {
+    FOREGROUND.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Foreground(())
+}
+
+/// See [`foreground`].
+pub struct Foreground(());
+
+impl Drop for Foreground {
+    fn drop(&mut self) {
+        FOREGROUND.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Waits until no [`Foreground`] guard is alive or `limit` has passed; true when none is.
+fn wait_for_foreground(limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        if FOREGROUND.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// Whether a termination signal has arrived. The handler ends the children first, so the
 /// main thread sees a child "fail"; it must not report that as an error and exit before
 /// the handler finishes (measured: the receipt was lost to "`dev` failed (signal 15)").
@@ -215,6 +250,7 @@ pub fn install() {
             if left > 0 {
                 eprintln!("lepton: {left} child process(es) did not exit within {GRACE:?}");
             }
+            wait_for_foreground(GRACE);
             run_interrupt_hook();
             std::process::exit(INTERRUPTED_EXIT);
         });
@@ -227,7 +263,7 @@ pub fn install() {
 
 #[cfg(test)]
 mod tests {
-    use super::{terminate_all, track, untrack};
+    use super::{foreground, terminate_all, track, untrack, wait_for_foreground};
     use crate::testing::{Failure, fail};
     use crate::{assert_eq, ensure};
     use std::process::Command;
@@ -250,6 +286,37 @@ mod tests {
             command.arg("30");
             command
         }
+    }
+
+    #[test]
+    fn the_handler_waits_for_the_foreground_report() -> Result<(), Failure> {
+        use std::time::{Duration, Instant};
+        let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+        let guard = foreground();
+        let began = Instant::now();
+        let reporter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            drop(guard);
+        });
+        ensure!(
+            wait_for_foreground(Duration::from_secs(5)),
+            "the wait ends when the guard drops"
+        );
+        ensure!(
+            began.elapsed() >= Duration::from_millis(150),
+            "the wait lasts until the report is out"
+        );
+        reporter
+            .join()
+            .map_err(|_| fail("the reporter thread", "panicked"))?;
+
+        let held = foreground();
+        ensure!(
+            !wait_for_foreground(Duration::from_millis(50)),
+            "a guard still alive ends the wait at its limit"
+        );
+        drop(held);
+        Ok(())
     }
 
     #[cfg(unix)]
