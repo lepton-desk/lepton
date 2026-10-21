@@ -104,6 +104,9 @@ pub const Registry = struct {
 
     /// Whether a recording leaves out `id`'s argument and result bytes.
     pub fn isPrivate(self: *const Registry, id: u32) bool {
+        // The built-in `app.args`: a start's arguments are a deep link (which may carry a
+        // sign-in code) or a file the user opened — theirs, not the recording's.
+        if (id == @intFromEnum(@import("invoke.zig").Command.app_args)) return true;
         const command = self.appCommand(id) orelse return false;
         return command.private;
     }
@@ -352,6 +355,8 @@ test "plugin commands follow the application's, with the same rules" {
     try std.testing.expect(registry.isPrivate(first_app_id + 1));
     try std.testing.expect(!registry.isPrivate(first_app_id));
     try std.testing.expect(!registry.isPrivate(1));
+    // A start's arguments are the user's: never in a recording's clear bytes.
+    try std.testing.expect(registry.isPrivate(@intFromEnum(@import("invoke.zig").Command.app_args)));
     try std.testing.expectEqualStrings("case.lower", registry.nameOf(first_app_id + 1).?);
     try std.testing.expect(registry.allows("case.lower"));
     try std.testing.expect(!registry.allows("text.upper"));

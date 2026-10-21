@@ -7,7 +7,8 @@
  * arguments of this start are {@link launchArgs}.
  *
  * Both are an `invoke` of `app.args`, which must be listed under `permissions` in
- * `lepton.config.json`. A scheme the application opens is listed under `deepLinks`.
+ * `lepton.config.json` (a new project lists it; a recording keeps its bytes masked). A
+ * scheme the application opens is listed under `deepLinks`.
  *
  * @module
  */

@@ -10,6 +10,7 @@
       "**",
       "!!**/dist",
       "!!**/zig-out",
+      "!!src-lepton/vendor",
       "!!**/out",
       "!!**/.next",
       "!!**/.astro",

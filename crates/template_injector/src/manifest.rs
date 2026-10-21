@@ -316,9 +316,13 @@ pub fn render_manifest(manifest: &Manifest) -> String {
     let _ = writeln!(out, "    \"width\": {},", manifest.window_width);
     let _ = writeln!(out, "    \"height\": {}", manifest.window_height);
     let _ = writeln!(out, "  }},");
-    // The commands the page may call. Explicit and short: the template's own `app.name`
-    // and nothing else. A command is granted by naming it here — there is no wildcard.
-    let mut granted = vec![json_string("app.name")];
+    // The commands the page may call. Explicit and short: the template's own `app.name`,
+    // and `app.args` — this start's arguments and the ones a later start (a deep link)
+    // hands over, which every `deepLinks` application needs. It reads nothing but what
+    // the system passed to this program, answers only the application's own page, and a
+    // recording keeps it masked (`registry.isPrivate`). A command is granted by naming it
+    // here — there is no wildcard.
+    let mut granted = vec![json_string("app.name"), json_string("app.args")];
     for name in &manifest.plugins {
         if let Some(plugin) = crate::plugin_catalog::find(name) {
             granted.extend(plugin.commands.iter().map(|command| json_string(command)));
@@ -700,6 +704,15 @@ mod tests {
         ] {
             ensure!(rendered.contains(key), "missing {key} in:\n{rendered}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_new_project_may_read_its_own_start_arguments() -> Result<(), Failure> {
+        // `app.args` is how a deep link reaches the page (`@lepton-desk/api/app`); without
+        // it every `deepLinks` application answered `denied` (measured on Windows).
+        let rendered = render_manifest(&Manifest::new("Ledger"));
+        assert_contains!(&rendered, "\"permissions\": [\"app.name\", \"app.args\"]");
         Ok(())
     }
 
