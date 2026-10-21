@@ -56,6 +56,7 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
    - Başlık çubuğunun sayfayı izlemesi Linux'ta da (bileşimci izin veriyorsa; yoksa nedenini yaz).
 2. **Açık kalanların hepsi** (aşağıdaki liste ve bu dosyadaki "ölçülmedi" notları).
 3. **Windows'ta Zig 0.17:** zvm ile 0.17 kurulup `zig build test`, şablon uygulama, araçlar 0.17 ile de geçmeli (Linux'ta ikisi geçiyor; Windows'ta yalnız 0.16 denendi).
+4. **Windows 11 ve Windows Server 2025 uyumu, CI'da ölçülür** (bu makine Windows 11 gereksinimlerini karşılamıyor; kurulmayacak, atlatılmayacak): GitHub Actions `windows-2025` (Server 2025, derleme 26100) üzerinde bir iş akışı şablon uygulamayı derleyip açar ve ölçer — başlık rengi (`theme-color` verilince `DwmGetWindowAttribute(DWMWA_CAPTION_COLOR)` beklenen renk mi, ekran görüntüsü artifact olarak), koyu/açık, simge, küçük ekranda yerleşim, çerçevesiz pencere ve sürükleme, yerel menü, tek kopya, MSI kurulum/kaldırma. Önce Server 2025'te `DWMWA_CAPTION_COLOR`'ın gerçekten çalıştığı ölçülecek; çalışmıyorsa nedeni yazılır. Server 2025'e ya da Windows 11'e özgü fark çıkarsa düzeltilir (Windows 10'da ölçülenler bozulmadan).
 
 Kullanıcı Linux'ta çalıştırıp düzeltecek; Windows'ta ölçülenler bozulmamalı.
 
