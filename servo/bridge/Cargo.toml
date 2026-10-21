@@ -39,8 +39,13 @@ url = "2.5"
 # `register_tuple_origin_scheme`, which the bridge calls for the app's scheme, so its
 # pages have a (scheme, host) origin as on WPE WebKit and WebView2. The change is marked
 # `Lepton:` in `origin.rs` and `lib.rs`; carry it over when Servo is upgraded.
+#
+# `servo/patches/servo` is servo 0.6.0 with `SiteDataManager::write_network_state_and_stop`:
+# Servo writes its cookie jar only at the end of its own shutdown, which the core skips
+# (`_exit`), so without it no cookie lasted past a run.
 [patch.crates-io]
 servo-url = { path = "../patches/servo-url" }
+servo = { path = "../patches/servo" }
 
 [lints.rust]
 # Denied, not forbidden: the C boundary (`src/abi.rs`) is the one module allowed it,

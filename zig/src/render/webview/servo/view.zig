@@ -450,6 +450,10 @@ pub const View = struct {
 
     pub fn close(self: *View) void {
         if (self.bridge.recorder) |*recorder| recorder.close();
+        // Servo writes its cookie jar only at the end of the shutdown skipped below
+        // (measured: a cookie the dev server's page wrote was gone at the next start, and
+        // no `cookie_jar.json` was ever written); this writes it now.
+        c.lepton_servo_write_state(self.servo);
         if (host.view == self) host.view = null;
         // Servo, its Xlib display and the window it draws into are left to the process's
         // end, which the view closing always is. Servo's own shutdown (`Drop for

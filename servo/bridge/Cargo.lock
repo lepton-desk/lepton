@@ -4720,8 +4720,6 @@ dependencies = [
 [[package]]
 name = "servo"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd165177ea5703d413842fbfd06707b567ba09d37552187a0309b660b0fef8b8"
 dependencies = [
  "accesskit",
  "arboard",

@@ -287,6 +287,17 @@ pub const View = struct {
         return View{ .web_view = web_view, .view = view };
     }
 
+    /// Keeps the session's cookies in `cookies.sqlite` in the application's data folder. A
+    /// network session given a data directory still keeps cookies in memory only until it
+    /// is told a file (measured: a cookie the dev server's page wrote was gone at the next
+    /// start, while `localStorage` beside it lasted, and no cookie file was ever written).
+    fn keepCookies(session: *anyopaque) void {
+        const manager = platform_abi.webkit_network_session_get_cookie_manager(session) orelse return;
+        var path: [std.fs.max_path_bytes:0]u8 = undefined;
+        const file = std.fmt.bufPrintSentinel(&path, "{s}/cookies.sqlite", .{std.mem.sliceTo(&data_directory, 0)}, 0) catch return;
+        platform_abi.webkit_cookie_manager_set_persistent_storage(manager, file.ptr, platform_abi.cookie_storage_sqlite);
+    }
+
     /// Opens a view on the ABI WebKit 2.54 introduced.
     ///
     /// There is no loader to initialise and no display to construct, because the platform
@@ -304,6 +315,7 @@ pub const View = struct {
         // C types the legacy path has always held — only the spelling differs.
         const created = if (directories_set) blk: {
             const session = platform_abi.webkit_network_session_new(&data_directory, &cache_directory) orelse return Error.NoView;
+            keepCookies(session);
             // The view takes its own reference (construct-only, transfer none).
             defer abi.g_object_unref(session);
             break :blk platform_abi.g_object_new_with(platform_abi.webkit_web_view_get_type(), "network-session", session, @as(?*anyopaque, null));

@@ -90,6 +90,11 @@ LeptonServo *lepton_servo_create(const LeptonServoSurface *surface,
                                  char *error, size_t error_capacity);
 void lepton_servo_destroy(LeptonServo *servo);
 
+/* Writes Servo's cookie jar (with its HSTS list and auth cache) to the data directory
+ * and stops its network, for a process that ends without `lepton_servo_destroy`: Servo
+ * writes them only at the end of its own shutdown. The last call; nothing loads after. */
+void lepton_servo_write_state(LeptonServo *servo);
+
 /* A script run in every page before the page's own (the core's `__lepton`).
  * 0 on success. Only before the first `lepton_servo_load`. */
 int32_t lepton_servo_add_user_script(LeptonServo *servo, const uint8_t *js, size_t len);

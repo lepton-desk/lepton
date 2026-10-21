@@ -264,6 +264,13 @@ impl Engine {
     /// Resizes the view, or before the first `load` the rendering context it will get: the
     /// template sizes the window before it loads, and that size was dropped, leaving Servo
     /// drawing 800×600 in a 1200×800 window (measured in CI, 2026-10-20).
+    /// Servo's cookie jar to the data directory, and its network stopped
+    /// (`servo/patches/servo`, `write_network_state_and_stop`): Servo writes the jar only
+    /// at the end of its own shutdown, which the core never waits for (`_exit`).
+    pub fn write_state(&self) {
+        self.servo.site_data_manager().write_network_state_and_stop();
+    }
+
     pub fn resize(&self, width: u32, height: u32) {
         let size = PhysicalSize {
             width: width.max(1),

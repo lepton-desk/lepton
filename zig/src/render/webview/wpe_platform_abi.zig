@@ -66,6 +66,23 @@ pub const webkit_network_session_new = @extern(
     .{ .name = "webkit_network_session_new" },
 );
 
+/// `WebKitCookieManager *webkit_network_session_get_cookie_manager(WebKitNetworkSession *)`
+/// — WebKitNetworkSession.h:57. Owned by the session (transfer none).
+pub const webkit_network_session_get_cookie_manager = @extern(
+    *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
+    .{ .name = "webkit_network_session_get_cookie_manager" },
+);
+
+/// `void webkit_cookie_manager_set_persistent_storage(WebKitCookieManager *, const char
+/// *filename, WebKitCookiePersistentStorage storage)` — WebKitCookieManager.h:68.
+pub const webkit_cookie_manager_set_persistent_storage = @extern(
+    *const fn (?*anyopaque, [*:0]const u8, c_int) callconv(.c) void,
+    .{ .name = "webkit_cookie_manager_set_persistent_storage" },
+);
+
+/// `WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE` — WebKitCookieManager.h:50.
+pub const cookie_storage_sqlite: c_int = 1;
+
 /// `WPEView *webkit_web_view_get_wpe_view(WebKitWebView *)` — WebKitWebView.h:367.
 pub const webkit_web_view_get_wpe_view = @extern(
     *const fn (?*anyopaque) callconv(.c) ?*anyopaque,

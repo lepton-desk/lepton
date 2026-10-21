@@ -295,6 +295,14 @@ pub extern "C" fn lepton_servo_spin(servo: *mut Engine) {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn lepton_servo_write_state(servo: *mut Engine) {
+    // SAFETY: the core's handle.
+    if let Some(engine) = unsafe { engine(servo) } {
+        engine.write_state();
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn lepton_servo_resize(servo: *mut Engine, width: u32, height: u32) {
     // SAFETY: the core's handle.
     if let Some(engine) = unsafe { engine(servo) } {
