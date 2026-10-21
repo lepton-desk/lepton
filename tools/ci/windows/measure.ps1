@@ -9,6 +9,9 @@ param([Parameter(Mandatory)][string]$Exe, [Parameter(Mandatory)][string]$Out, [s
 # - The native menu: a right click, then Down Down Enter (9) and Esc (none).
 # - The page's own bar: a double click maximizes and restores, a press moves the window,
 #   a press on the content does not.
+# - The three title bar buttons, clicked: minimize, maximize, restore, then close (exit 0)
+#   — the system's (where WM_GETTITLEBARINFOEX says they are drawn) or, -Frameless, the
+#   page's (`windowControls`).
 # - -Frameless (`window.decorations: false`): no system title bar, the client area starts
 #   at the window's top, and the left edge still resizes.
 $ErrorActionPreference = "Stop"
@@ -95,6 +98,41 @@ function Bar {
   if ($moved -eq "0,0") { Say "ok   a press on the content did not move it" } else { Fail "content drag" "moved $moved" }
 }
 
+# Clicks minimize, maximize, maximize again (restore) through `$at`, which answers each
+# button's screen point; a minimized window is brought back as the taskbar would.
+function Trio([string]$whose, [scriptblock]$at) {
+  $h = Handle; Home $h; Front $h
+  $p = & $at "minimize"
+  if (-not $p) { Fail "$whose minimize" "no minimize button found"; return }
+  Click $p[0] $p[1]
+  if (Until { [W.I]::IsIconic($h) } 5) { Say "ok   $whose minimize button minimized" } else { Fail "$whose minimize" "not minimized" }
+  [void][W.I]::ShowWindow($h, 9); Start-Sleep -Milliseconds 700; Front $h
+  $p = & $at "maximize"
+  Click $p[0] $p[1]
+  if (Until { [W.I]::IsZoomed($h) } 5) { Say "ok   $whose maximize button maximized" } else { Fail "$whose maximize" "not maximized" }
+  Start-Sleep -Milliseconds 700
+  $p = & $at "maximize"
+  Click $p[0] $p[1]
+  if (Until { -not [W.I]::IsZoomed($h) } 5) { Say "ok   $whose maximize button, pressed again, restored" } else { Fail "$whose restore" "still maximized" }
+  Start-Sleep -Milliseconds 500
+}
+# The system's buttons: where the system draws them (WM_GETTITLEBARINFOEX, input.ps1).
+$system = {
+  param([string]$which)
+  $found = CaptionButtons (Handle)
+  if (-not $found.ContainsKey($which)) { return $null }
+  return $found[$which]
+}
+# The page's buttons (ci-page.ts): 46 CSS px each at the right end of its 32 px bar.
+$page = {
+  param([string]$which)
+  $h = Handle
+  $scale = [W.I]::GetDpiForWindow($h) / 96
+  $o = ClientOrigin $h; $c = ClientSize $h
+  $from = @{ minimize = 115; maximize = 69; close = 23 }
+  return @(($o.X + $c.Right - [int]($from[$which] * $scale)), ($o.Y + [int](16 * $scale)))
+}
+
 function LeftEdge {
   $h = Handle; Front $h
   $r = WindowRect $h; $width = $r.Right - $r.Left
@@ -129,10 +167,31 @@ if ($Frameless) {
   Menu
 }
 Bar
-if ($Frameless) { LeftEdge }
+if ($Frameless) {
+  LeftEdge
+  Trio "the page's" $page
+} else {
+  Home (Handle)
+  $found = CaptionButtons (Handle)
+  Say "system caption buttons (WM_GETTITLEBARINFOEX, middles): minimize $($found.minimize -join ','), maximize $($found.maximize -join ','), close $($found.close -join ',')"
+  Trio "the system's" $system
+}
 [void](Facts "after-input")
 
-[void]$app.CloseMainWindow()
-if ($app.WaitForExit(15000)) { Say "closed: exit $($app.ExitCode)" } else { Fail "close" "still running 15 s after WM_CLOSE"; $app.Kill() }
+# The last button: close, the system's or the page's, with a real click.
+$closer = if ($Frameless) { $page } else { $system }
+$whose = if ($Frameless) { "the page's" } else { "the system's" }
+$p = & $closer "close"
+if ($p) {
+  Front (Handle)
+  Click $p[0] $p[1]
+  if ($app.WaitForExit(15000)) {
+    if ($app.ExitCode -eq 0) { Say "ok   $whose close button closed the app: exit 0" } else { Fail "$whose close" "exit $($app.ExitCode)" }
+  } else { Fail "$whose close" "still running 15 s after the click" }
+} else { Fail "$whose close" "no close button found" }
+if (-not $app.HasExited) {
+  [void]$app.CloseMainWindow()
+  if (-not $app.WaitForExit(15000)) { $app.Kill() }
+}
 if ($failures.Count) { Say "## failed: $(($failures | Select-Object -Unique) -join ', ')"; exit 1 }
 Say "## all checks passed"

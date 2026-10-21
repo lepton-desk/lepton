@@ -72,7 +72,7 @@ await toggleMaximize();
 ```
 
 `close`, `minimize`, `maximize`, `unmaximize`, `toggleMaximize`, `state()`,
-`onStateChanged`, `onResized`, `startDragging`, `dragRegion`, `popupMenu`.
+`onStateChanged`, `onResized`, `startDragging`, `dragRegion`, `windowControls`, `popupMenu`.
 
 **Your own title bar.** `"window": { "decorations": false }` in `lepton.config.json`
 removes the system's (Windows; the window keeps its resize borders, shadow and snap):
@@ -84,6 +84,29 @@ dragRegion(document.querySelector("#titlebar")); // press to move, double-click 
 
 Buttons inside the bar stay clickable; mark anything else that should not drag with
 `data-no-drag`. CSS `app-region: drag` works too.
+
+The bar's three buttons — minimize, maximize/restore, close — are one call:
+
+```html
+<header id="titlebar">
+  <span>My app</span>
+  <button data-window-control="minimize">–</button>
+  <button data-window-control="maximize">□</button>
+  <button data-window-control="close">×</button>
+</header>
+```
+
+```ts
+import { dragRegion, windowControls } from "@lepton-desk/api/window";
+const bar = document.querySelector<HTMLElement>("#titlebar");
+if (bar) { dragRegion(bar); windowControls(bar); }
+```
+
+The bar carries `data-maximized` while the window is maximized (`#titlebar[data-maximized]`
+for the restore icon). Needs `window.minimize`, `window.maximize`, `window.unmaximize`,
+`window.state` and `window.close` under `permissions`. Measured on Windows 10 with real
+clicks: each button minimizes, maximizes and restores, and closes (exit 0); the same run
+clicks the system's own three buttons in a decorated window.
 
 **Your own context menu.** A shipped application shows no browser menu: draw one in the
 page from a `contextmenu` handler, or ask for the system's (Windows):

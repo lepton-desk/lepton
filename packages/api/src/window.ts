@@ -100,7 +100,8 @@ export async function startDragging(): Promise<void> {
  * that undoes this.
  */
 export function dragRegion(element: HTMLElement): () => void {
-  const interactive = "button, a, input, select, textarea, [contenteditable], [data-no-drag]";
+  const interactive =
+    "button, a, input, select, textarea, [contenteditable], [data-no-drag], [data-window-control]";
   const press = (event: MouseEvent): void => {
     if (event.button !== 0 || (event.target as Element | null)?.closest(interactive)) return;
     if (event.detail === 2) {
@@ -111,6 +112,50 @@ export function dragRegion(element: HTMLElement): () => void {
   };
   element.addEventListener("mousedown", press);
   return () => element.removeEventListener("mousedown", press);
+}
+
+/** What a `data-window-control` button does. */
+export type WindowControl = "minimize" | "maximize" | "close";
+
+/**
+ * The three buttons of a title bar the page draws itself: every element under `root` with
+ * `data-window-control="minimize"`, `"maximize"` or `"close"` minimizes, maximizes or
+ * restores, or closes the window when clicked. `root` carries `data-maximized` while the
+ * window is maximized, so CSS can show the restore icon then. Inside a `dragRegion` the
+ * buttons stay buttons: a press on one does not move the window. Needs `window.minimize`,
+ * `window.maximize`, `window.unmaximize`, `window.state` and `window.close` under
+ * `permissions`. Returns a function that undoes this.
+ */
+export function windowControls(root: HTMLElement): () => void {
+  const actions: Record<WindowControl, () => Promise<void>> = {
+    minimize,
+    maximize: toggleMaximize,
+    close,
+  };
+  const click = (event: MouseEvent): void => {
+    const control = (event.target as Element | null)?.closest<HTMLElement>("[data-window-control]");
+    if (control === null || control === undefined || !root.contains(control)) return;
+    const action = actions[control.dataset.windowControl as WindowControl];
+    if (action === undefined) return;
+    event.preventDefault();
+    void action();
+  };
+  const show = (current: WindowState): void => {
+    root.toggleAttribute("data-maximized", current.maximized);
+  };
+  root.addEventListener("click", click);
+  let unlisten: UnlistenFn | undefined;
+  let undone = false;
+  void state().then(show, () => undefined);
+  void onStateChanged(show).then((stop) => {
+    if (undone) stop();
+    else unlisten = stop;
+  });
+  return () => {
+    undone = true;
+    root.removeEventListener("click", click);
+    unlisten?.();
+  };
 }
 
 /** One entry of a native menu. */

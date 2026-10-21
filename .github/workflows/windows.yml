@@ -62,10 +62,10 @@ jobs:
           $config | Add-Member -NotePropertyName deepLinks -NotePropertyValue @("leptonci") -Force
           $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{ targets = @("zip", "msi") }) -Force
           # ci-page.ts moves the window from its own bar and opens the system's menu.
-          $config.permissions = @($config.permissions) + @("window.start_drag", "window.menu", "window.maximize", "window.unmaximize", "window.state")
+          $config.permissions = @($config.permissions) + @("window.start_drag", "window.menu", "window.maximize", "window.unmaximize", "window.state", "window.minimize", "window.close")
           $config | ConvertTo-Json -Depth 20 | Set-Content lepton.config.json -Encoding utf8NoBOM
           # What measure.ps1 drives: the theme by deep link, the page's bar, the menu.
-          Copy-Item "$env:GITHUB_WORKSPACE\tools\ci\windows\ci-page.ts" src/
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\ci\ci-page.ts" src/
           Add-Content -Path src/main.ts -Value 'import "./ci-page.ts";'
           npm install --no-audit --no-fund
           & $lepton build
