@@ -196,6 +196,10 @@ fn run(init: std.process.Init.Minimal) !void {{
     }};
     defer view.close();
 
+    // `window.decorations: false` (`-Dwindow-decorations`): no title bar, the page draws its
+    // own and moves the window with `window.start_drag` (`@lepton-desk/api/window`). Before
+    // the size, which is the client area's and depends on it.
+    if (comptime !@import("build_options").window_decorations and @hasDecl(@TypeOf(view), "setDecorations")) view.setDecorations(false);
     // `lepton.config.json`'s `window`, passed to the build by the CLI (`-Dwindow-width`).
     const size = configuredSize();
     view.resized(@intCast(size.width), @intCast(size.height));

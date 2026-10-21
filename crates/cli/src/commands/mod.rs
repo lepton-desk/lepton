@@ -40,6 +40,7 @@ pub mod session;
 pub mod update;
 pub mod update_packages;
 pub mod verify;
+pub mod window_shape;
 #[cfg(unix)]
 pub mod verify_linux;
 #[cfg(windows)]

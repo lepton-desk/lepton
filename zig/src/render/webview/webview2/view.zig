@@ -36,6 +36,7 @@ const features = @import("../features.zig");
 const permissions = @import("permissions.zig");
 const downloads = @import("downloads.zig");
 const popup = @import("popup.zig");
+const chrome_mod = @import("chrome.zig");
 
 pub const Error = error{ NoRuntime, NoWindow, Com, Environment, Controller, Timeout };
 
@@ -218,6 +219,10 @@ pub const View = struct {
     transport_len: usize = 0,
     last_state: u32 = 0,
 
+    /// No title bar: the page draws its own (`setDecorations(false)`).
+    frameless: bool = false,
+    chrome: chrome_mod.Chrome = .{},
+
     owner: window.Owner = undefined,
     owned: bool = false,
     resources: c.ICoreWebView2WebResourceRequestedEventHandler = Resources.make(),
@@ -297,11 +302,13 @@ pub const View = struct {
             .moved = &onMoved,
         };
         window.attach(self.window, &self.owner);
+        // The title bar takes the page's `theme-color` and `color-scheme` (`chrome.zig`).
+        self.chrome.followTheme(self.window, self.webview, &self.bridge);
     }
 
     /// Sizes the window's client area to `width` × `height` logical pixels.
     pub fn resized(self: *View, width: i32, height: i32) void {
-        window.setClientSize(self.window, @intCast(@max(width, 1)), @intCast(@max(height, 1)));
+        window.setClientSize(self.window, @intCast(@max(width, 1)), @intCast(@max(height, 1)), self.frameless);
         self.fitController();
     }
 
@@ -356,7 +363,7 @@ pub const View = struct {
         if (self.bridge.page_replay) |*script| script.closeWhenDone(&self.bridge.close_requested);
         permissions.watch(self.webview, &self.bridge, &self.permission_requests);
         downloads.watch(self.webview, &self.bridge, &self.downloads_starting);
-        self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState, .permission = &permissions.answer };
+        self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState, .permission = &permissions.answer, .start_drag = &windowDrag, .menu = &windowMenu };
         self.last_state = self.stateBits();
     }
 
@@ -419,6 +426,26 @@ pub const View = struct {
         };
         _ = c.ShowWindow(self.window, show);
         return true;
+    }
+
+    fn windowDrag(data: ?*anyopaque) bool {
+        const self: *View = @ptrCast(@alignCast(data orelse return false));
+        return window.startDrag(self.window);
+    }
+
+    fn windowMenu(data: ?*anyopaque, menu: []const u8, later: invoke.Later) bool {
+        const self: *View = @ptrCast(@alignCast(data orelse return false));
+        return chrome_mod.showMenu(self.window, menu, later);
+    }
+
+    /// With `false` the window has no title bar and the page draws its own: it keeps the
+    /// resize borders, shadow and snap, and drags the window with `window.start_drag` or
+    /// CSS `app-region: drag`. Call before `resized`, which sizes the client area for it.
+    pub fn setDecorations(self: *View, decorated: bool) void {
+        self.frameless = !decorated;
+        self.own();
+        window.setFrameless(self.window, self.frameless);
+        if (self.frameless) _ = chrome_mod.allowDragRegions(self.webview);
     }
 
     fn windowState(data: ?*anyopaque) ?u32 {

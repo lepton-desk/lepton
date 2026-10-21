@@ -229,6 +229,11 @@ pub const Bridge = struct {
         return self.allowed_origin[0..self.allowed_origin_len :0];
     }
 
+    /// The dev server's origin the page may come from, "" without one.
+    pub fn devOrigin(self: *const Bridge) []const u8 {
+        return self.allowed_origin[0..self.allowed_origin_len];
+    }
+
     /// Serves the bundled frontend at `lepton://localhost/` from `root` (absolute).
     pub fn serveFrom(self: *Bridge, root: []const u8) void {
         self.asset_root_len = @min(root.len, self.asset_root.len);

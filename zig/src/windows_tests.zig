@@ -7,6 +7,9 @@ test {
     _ = @import("platform/windows/dialog.zig");
     _ = @import("platform/grants.zig");
     _ = @import("render/webview/webview2/request.zig");
+    _ = @import("render/webview/webview2/window.zig");
+    _ = @import("render/webview/webview2/chrome.zig");
+    _ = @import("render/webview/menu.zig");
     _ = @import("ipc/shm.zig");
     _ = @import("ipc/ring.zig");
     _ = @import("ipc/wire.zig");

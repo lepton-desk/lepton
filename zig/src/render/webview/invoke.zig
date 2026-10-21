@@ -45,6 +45,13 @@ pub const Command = enum(u32) {
     /// program's (a deep link, a file); with an `app.opened` event's `u32` number, the
     /// ones a later start handed over (`single_instance.zig`).
     app_args = 9,
+    /// Starts moving the window with the mouse, from a page that draws its own title bar
+    /// (`window.decorations: false`). Called on a `mousedown`; `failed` where the
+    /// platform does not let a window start its own move.
+    window_start_drag = 10,
+    /// Shows a native menu at the pointer and answers the chosen item's `u16` id (LE),
+    /// 0 when the user dismissed it. The items: `menu.zig`. Answers once the user chose.
+    window_menu = 11,
     _,
 
     /// The name the page uses: `<group>.<name>`.
@@ -59,13 +66,15 @@ pub const Command = enum(u32) {
             .window_state => "window.state",
             .permission_respond => "permission.respond",
             .app_args => "app.args",
+            .window_start_drag => "window.start_drag",
+            .window_menu => "window.menu",
             _ => @compileError("a command without a public name cannot reach the page"),
         };
     }
 };
 
 /// The named commands, for code generated from them.
-pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond, .app_args };
+pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond, .app_args, .window_start_drag, .window_menu };
 
 /// What the window commands ask the platform to do.
 pub const WindowAction = enum { minimize, maximize, unmaximize };
@@ -87,6 +96,11 @@ pub const Window = struct {
     state: ?*const fn (context: ?*anyopaque) ?u32 = null,
     /// Settles a permission request the page was asked about.
     permission: ?*const fn (id: u32, allow: bool) bool = null,
+    /// Starts a mouse move of the window (`window.start_drag`); unset where it cannot.
+    start_drag: ?*const fn (context: ?*anyopaque) bool = null,
+    /// Shows `menu` (checked by `menu.zig`) and finishes `later` with the chosen id;
+    /// false when it cannot be shown. Unset where there is no native menu.
+    menu: ?*const fn (context: ?*anyopaque, menu: []const u8, later: Later) bool = null,
 
     fn perform(self: Window, action: WindowAction) bool {
         const act = self.act orelse return false;
@@ -227,6 +241,21 @@ pub fn handle(frame: []const u8, registry: *const Registry, window: Window, effe
             const settle = window.permission orelse break :blk reply(out, sequence, .failed, &.{});
             const id = std.mem.readInt(u32, argument[0..4], .little);
             break :blk reply(out, sequence, if (settle(id, argument[4] == 1)) .ok else .failed, &.{});
+        },
+        .window_start_drag => blk: {
+            const drag = window.start_drag orelse break :blk reply(out, sequence, .failed, &.{});
+            break :blk windowReply(out, sequence, drag(window.context));
+        },
+        .window_menu => blk: {
+            if (!@import("menu.zig").valid(argument)) break :blk reply(out, sequence, .malformed, &.{});
+            const show = window.menu orelse break :blk reply(out, sequence, .failed, &.{});
+            var later = effects.later orelse break :blk reply(out, sequence, .failed, &.{});
+            later.sequence = sequence;
+            if (!show(window.context, argument, later)) break :blk reply(out, sequence, .failed, &.{});
+            // The bridge keeps the request until the menu's `Later.finish`.
+            effects.later = null;
+            effects.deferred = true;
+            break :blk out[0..0];
         },
         _ => reply(out, sequence, .unknown_command, &.{}),
     };
@@ -544,4 +573,47 @@ test "permission.respond hands the page's answer to the window's owner" {
     try std.testing.expectEqual(@as(u32, @intFromEnum(Status.failed)), (try wire.readPayload(wire.Reply, stale[wire.header_bytes..])).status);
     const short = try handle(try request(&request_buffer, 3, @intFromEnum(Command.permission_respond), argument[0..4]), &registry, window, &effects, &out);
     try std.testing.expectEqual(@as(u32, @intFromEnum(Status.malformed)), (try wire.readPayload(wire.Reply, short[wire.header_bytes..])).status);
+}
+
+test "window.menu holds the request until the menu answers; without a platform menu it fails" {
+    const granted = (comptime registry_mod.checked(NoState, &.{}, registry_mod.permissionList("window.menu,window.start_drag"))).unbound;
+    var in: [256]u8 = undefined;
+    var out: [256]u8 = undefined;
+    // One item: id 7, no flags, "Aç".
+    const menu = [_]u8{ 1, 7, 0, 0, 3, 0, 'A', 0xC3, 0xA7 };
+
+    var plain: Effects = .{};
+    const failed = try decodeReply(try handle(try request(&in, 1, @intFromEnum(Command.window_menu), &menu), &granted, .{}, &plain, &out));
+    try std.testing.expectEqual(@intFromEnum(Status.failed), failed.reply.status);
+    const no_drag = try decodeReply(try handle(try request(&in, 2, @intFromEnum(Command.window_start_drag), ""), &granted, .{}, &plain, &out));
+    try std.testing.expectEqual(@intFromEnum(Status.failed), no_drag.reply.status);
+    const bad = try decodeReply(try handle(try request(&in, 3, @intFromEnum(Command.window_menu), menu[0..5]), &granted, .{}, &plain, &out));
+    try std.testing.expectEqual(@intFromEnum(Status.malformed), bad.reply.status);
+
+    const Shown = struct {
+        var count: u8 = 0;
+        var owed: u64 = 0;
+        fn show(_: ?*anyopaque, items: []const u8, later: Later) bool {
+            count = items[0];
+            owed = later.sequence;
+            return true;
+        }
+        fn drag(_: ?*anyopaque) bool {
+            return true;
+        }
+    };
+    var held: Effects = .{ .later = .{ .context = null, .finish_fn = &Finished.finish, .slot = 3, .generation = 0 } };
+    const platform: Window = .{ .menu = &Shown.show, .start_drag = &Shown.drag };
+    const now = try handle(try request(&in, 44, @intFromEnum(Command.window_menu), &menu), &granted, platform, &held, &out);
+    try std.testing.expectEqual(@as(usize, 0), now.len);
+    try std.testing.expect(held.deferred);
+    try std.testing.expectEqual(@as(u8, 1), Shown.count);
+    try std.testing.expectEqual(@as(u64, 44), Shown.owed);
+    var again: Effects = .{};
+    const dragged = try decodeReply(try handle(try request(&in, 45, @intFromEnum(Command.window_start_drag), ""), &granted, platform, &again, &out));
+    try std.testing.expectEqual(@intFromEnum(Status.ok), dragged.reply.status);
+}
+
+test {
+    _ = @import("menu.zig");
 }

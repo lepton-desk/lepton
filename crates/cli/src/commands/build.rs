@@ -129,6 +129,7 @@ impl Flags {
             manifest.window_width,
             manifest.window_height,
         );
+        super::window_shape::shape_window(&mut steps, root)?;
         super::plugins::pass_to_core(&mut steps, root)?;
         super::launch::hand_over_frontend(
             &mut steps,

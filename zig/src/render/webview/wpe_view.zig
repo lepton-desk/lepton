@@ -485,6 +485,14 @@ pub const View = struct {
     /// Separate from `open` because a view must be sized before it is mapped, and
     /// because a caller that wants to inspect the engine before committing to a
     /// visible surface needs a chance to.
+    /// `window.decorations: false`. Not on WPE yet: its title bar is the compositor's
+    /// (xdg-decoration), and WPE 2.54's `WPEToplevel` offers no call to decline it. The
+    /// page can still draw its own bar inside; `window.start_drag` answers `failed`.
+    pub fn setDecorations(self: *View, decorated: bool) void {
+        _ = self;
+        _ = decorated;
+    }
+
     pub fn map(self: *View) void {
         abi.wpe_view_set_visible(self.view, 1);
         abi.wpe_view_map(self.view);

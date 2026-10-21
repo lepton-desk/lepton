@@ -392,6 +392,13 @@ pub const View = struct {
         c.lepton_servo_resize(self.servo, size.width, size.height);
     }
 
+    /// `window.decorations: false`. Not under Servo yet (its X11 window keeps the window
+    /// manager's frame); `window.start_drag` answers `failed`.
+    pub fn setDecorations(self: *View, decorated: bool) void {
+        _ = self;
+        _ = decorated;
+    }
+
     pub fn map(self: *View) void {
         // Shown only now, sized and centred (`resized`): see `Request.mapped`.
         self.window.map();

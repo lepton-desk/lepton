@@ -30,6 +30,9 @@ const protocol = await invoke("core.protocol"); // u32, little-endian
 | `window.close` | none | none; the application closes |
 | `window.minimize` / `window.maximize` / `window.unmaximize` | none | none |
 | `window.state` | none | state bits, `u32` LE |
+| `window.start_drag` | none | none; the window follows the mouse (Windows) |
+| `window.menu` | menu items (`encodeMenu`) | chosen id, `u16` LE, 0 dismissed (Windows) |
+| `app.args` | none, or an `app.opened` number | arguments, each NUL-ended |
 
 Every command — built-in or the application's own — runs only if it is listed under
 `permissions` in `lepton.config.json`; otherwise it rejects with reason `denied`.
@@ -69,7 +72,32 @@ await toggleMaximize();
 ```
 
 `close`, `minimize`, `maximize`, `unmaximize`, `toggleMaximize`, `state()`,
-`onStateChanged`, `onResized`.
+`onStateChanged`, `onResized`, `startDragging`, `dragRegion`, `popupMenu`.
+
+**Your own title bar.** `"window": { "decorations": false }` in `lepton.config.json`
+removes the system's (Windows; the window keeps its resize borders, shadow and snap):
+
+```ts
+import { close, dragRegion, minimize, toggleMaximize } from "@lepton-desk/api/window";
+dragRegion(document.querySelector("#titlebar")); // press to move, double-click to maximize
+```
+
+Buttons inside the bar stay clickable; mark anything else that should not drag with
+`data-no-drag`. CSS `app-region: drag` works too.
+
+**Your own context menu.** A shipped application shows no browser menu: draw one in the
+page from a `contextmenu` handler, or ask for the system's (Windows):
+
+```ts
+addEventListener("contextmenu", async (event) => {
+  event.preventDefault();
+  const id = await popupMenu([{ id: 1, label: "&Kopyala" }, { separator: true }, { id: 2, label: "Sil" }]);
+});
+```
+
+**A title bar that follows the page.** Nothing to call: the system title bar takes the
+page's `<meta name="theme-color">` and CSS `color-scheme` as they change — dark or
+light on Windows 10, the colour itself on Windows 11.
 
 ## `@lepton-desk/api/download`
 

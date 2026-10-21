@@ -12,6 +12,8 @@ export interface BuiltinCommands {
   "window.state": true;
   "permission.respond": true;
   "app.args": true;
+  "window.start_drag": true;
+  "window.menu": true;
 }
 
 /** The events the core itself emits. */

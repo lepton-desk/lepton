@@ -73,6 +73,10 @@ pub fn build(b: *std.Build) !void {
     // configuration's own defaults.
     const window_width = b.option(u32, "window-width", "Initial window width") orelse 1200;
     const window_height = b.option(u32, "window-height", "Initial window height") orelse 800;
+    // `window.decorations: false`: no title bar, the page draws its own (Windows).
+    const window_decorations = b.option(bool, "window-decorations", "Draw the system title bar (default: true)") orelse true;
+    // The Windows program's icon (`.ico`): `bundle.icon`, or Lepton's own, named by the CLI.
+    const icon = b.option([]const u8, "icon", "The program's icon, an .ico file (Windows)");
 
     // The vendored location, named once. `configureCore` needs it because
     // `std.Build` resolves paths against the root of the build that called it, and
@@ -98,6 +102,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption([]const u8, "web_permissions", web_permissions);
     options.addOption(u32, "window_width", window_width);
     options.addOption(u32, "window_height", window_height);
+    options.addOption(bool, "window_decorations", window_decorations);
 
     const root = b.createModule(.{
         .root_source_file = b.path("main.zig"),
@@ -173,6 +178,18 @@ pub fn build(b: *std.Build) !void {
     if (target.result.os.tag == .windows and optimize != std.builtin.OptimizeMode.Debug) {
         exe.subsystem = .windows;
     }
+
+    // Windows: the icon as the program's first icon resource, which its window, taskbar
+    // button and Explorer show. Zig compiles the resource itself, from any host. The icon
+    // is copied beside the script and named by its file name: Zig's resource compiler
+    // refuses an absolute path in the script (`BadPathName`, measured).
+    if (target.result.os.tag == .windows) if (icon) |path| {
+        const resources = b.addWriteFiles();
+        const source: std.Build.LazyPath = if (std.fs.path.isAbsolute(path)) .{ .cwd_relative = path } else b.path(path);
+        _ = resources.addCopyFile(source, "lepton-icon.ico");
+        const script = resources.add("lepton-icon.rc", "1 ICON \"lepton-icon.ico\"\n");
+        exe.root_module.addWin32ResourceFile(.{ .file = script });
+    };
 
     b.installArtifact(exe);
 
