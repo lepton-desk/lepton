@@ -2,7 +2,9 @@
 # built by the CLI from this checkout, opened on the runner's desktop and measured from
 # outside — the title bar's DWM attributes as the page changes its theme-color (Windows
 # 11's caption colour, which a Windows 10 machine cannot show), placement, icons, the
-# single instance — then packaged as zip and msi, installed, started and removed.
+# single instance, the native menu and the page's own bar with real mouse and keys —
+# then packaged as zip and msi, installed, run and removed, and built again with
+# "decorations": false (frameless: drag, double click, the resize border).
 # The scripts are tools/ci/windows/; their report and screenshots are the artifact.
 name: windows
 
@@ -59,10 +61,12 @@ jobs:
           $config = Get-Content lepton.config.json -Raw | ConvertFrom-Json
           $config | Add-Member -NotePropertyName deepLinks -NotePropertyValue @("leptonci") -Force
           $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{ targets = @("zip", "msi") }) -Force
+          # ci-page.ts moves the window from its own bar and opens the system's menu.
+          $config.permissions = @($config.permissions) + @("window.start_drag", "window.menu", "window.maximize", "window.unmaximize", "window.state")
           $config | ConvertTo-Json -Depth 20 | Set-Content lepton.config.json -Encoding utf8NoBOM
-          # The page changes its theme-color when a second start hands it a link (measure.ps1).
-          Copy-Item "$env:GITHUB_WORKSPACE\tools\ci\windows\ci-theme.ts" src/
-          Add-Content -Path src/main.ts -Value 'import "./ci-theme.ts";'
+          # What measure.ps1 drives: the theme by deep link, the page's bar, the menu.
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\ci\windows\ci-page.ts" src/
+          Add-Content -Path src/main.ts -Value 'import "./ci-page.ts";'
           npm install --no-audit --no-fund
           & $lepton build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -73,7 +77,9 @@ jobs:
           $exe = (Get-ChildItem "$env:RUNNER_TEMP\ci-app\src-lepton\zig-out\bin\*.exe" | Select-Object -First 1).FullName
           ./tools/ci/windows/measure.ps1 -Exe $exe -Out "$env:RUNNER_TEMP\report\window"
 
+      # Each check runs even when one before it failed; the job still fails.
       - name: Package, install, remove
+        if: ${{ !cancelled() }}
         run: |
           $lepton = "$env:GITHUB_WORKSPACE\target\release\lepton.exe"
           $out = "$env:RUNNER_TEMP\report\package"
@@ -94,6 +100,22 @@ jobs:
           $remove = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn /l*v `"$out\remove.log`"" -Wait -PassThru
           "remove: exit $($remove.ExitCode), folder left: $(Test-Path "$env:LOCALAPPDATA\Programs\$product")" | Tee-Object -Append "$out\files.txt"
           if ($remove.ExitCode -or (Test-Path "$env:LOCALAPPDATA\Programs\$product") -or $measured) { exit 1 }
+
+      # The same app with "window": { "decorations": false }: the page's bar is the title bar.
+      - name: Frameless window
+        if: ${{ !cancelled() }}
+        run: |
+          $lepton = "$env:GITHUB_WORKSPACE\target\release\lepton.exe"
+          Set-Location "$env:RUNNER_TEMP\ci-app"
+          $config = Get-Content lepton.config.json -Raw | ConvertFrom-Json
+          $window = if ($config.window) { $config.window } else { [pscustomobject]@{} }
+          $window | Add-Member -NotePropertyName decorations -NotePropertyValue $false -Force
+          $config | Add-Member -NotePropertyName window -NotePropertyValue $window -Force
+          $config | ConvertTo-Json -Depth 20 | Set-Content lepton.config.json -Encoding utf8NoBOM
+          & $lepton build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $exe = (Get-ChildItem src-lepton\zig-out\bin\*.exe | Select-Object -First 1).FullName
+          & "$env:GITHUB_WORKSPACE\tools\ci\windows\measure.ps1" -Exe $exe -Out "$env:RUNNER_TEMP\report\frameless" -Frameless
 
       - name: Report
         if: always()
