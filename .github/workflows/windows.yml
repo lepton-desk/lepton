@@ -60,6 +60,9 @@ jobs:
           $config | Add-Member -NotePropertyName deepLinks -NotePropertyValue @("leptonci") -Force
           $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{ targets = @("zip", "msi") }) -Force
           $config | ConvertTo-Json -Depth 20 | Set-Content lepton.config.json -Encoding utf8NoBOM
+          # The page changes its theme-color when a second start hands it a link (measure.ps1).
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\ci\windows\ci-theme.ts" src/
+          Add-Content -Path src/main.ts -Value 'import "./ci-theme.ts";'
           npm install --no-audit --no-fund
           & $lepton build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
