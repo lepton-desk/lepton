@@ -47,6 +47,10 @@ scope every path is refused.
   `notes.md:hidden` (a stream), `CON`, `NUL`, a name ending in a dot or a space.
   `exists` answers `denied` there too, rather than telling the page what lies outside.
 - One call moves at most 64 KiB; a larger file rejects with reason `too_large`.
+- `watch(path, handler, { recursive })` reports what changes inside a scope directory —
+  what the page writes and what other programs do — through inotify on Linux and
+  `ReadDirectoryChangesW` on Windows; it watches only what `scope` allows, and never
+  through a link.
 
 Requires `lepton` 0.1.3 or newer (plugin settings), and Linux 5.6 or newer (`openat2`) or
 Windows 10 1803 or newer (`OBJ_DONT_REPARSE`).

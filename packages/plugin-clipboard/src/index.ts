@@ -53,9 +53,22 @@ function aborted(signal: AbortSignal | undefined): Promise<never> | undefined {
   return undefined;
 }
 
-/** Resolves once `document.hasFocus()` is true — at once when it already is. */
+/**
+ * Whether the page runs in WebView2, which always gives it `chrome.webview`. The Windows
+ * clipboard takes a write from a window without focus; Wayland ignores one (measured), which
+ * is the only reason to wait.
+ */
+function inWebView2(): boolean {
+  const chrome = (globalThis as { chrome?: { webview?: unknown } }).chrome;
+  return typeof chrome?.webview === "object" && chrome.webview !== null;
+}
+
+/**
+ * Resolves once `document.hasFocus()` is true — at once when it already is, or when the
+ * system's clipboard does not need it (WebView2).
+ */
 function focused(signal: AbortSignal | undefined): Promise<void> {
-  if (document.hasFocus()) return Promise.resolve();
+  if (document.hasFocus() || inWebView2()) return Promise.resolve();
   return (
     aborted(signal) ??
     new Promise((resolve, reject) => {
@@ -91,8 +104,9 @@ function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
 }
 
 /**
- * Puts `text` on the system clipboard, where other applications can paste it. Waits for
- * the window to have focus first. Rejects with reason `failed` for text containing a NUL
+ * Puts `text` on the system clipboard, where other applications can paste it. On Linux it
+ * waits for the window to have focus first; on Windows it writes at once. Rejects with
+ * reason `failed` for text containing a NUL
  * character, or in a native (non-webview) application.
  */
 export async function writeText(text: string, options: ClipboardOptions = {}): Promise<void> {

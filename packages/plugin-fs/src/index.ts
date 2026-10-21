@@ -309,9 +309,11 @@ export interface WatchEvent {
  * Calls `handler` for every change to `path`: for a directory, its entries being created,
  * written, removed or renamed; for a file, the file itself. With `{ recursive: true }`,
  * every directory below it too, including ones made later, and `name` is then the path
- * below `path` ("2026/a.md"); links are not followed into. `modified` is reported once a writer closes the file. The core pushes each
- * change as it reads it (within a quarter of a second); nothing is polled. Resolves with
- * a function that stops watching. Linux only for now: on Windows it rejects with `failed`.
+ * below `path` ("2026/a.md"); links are not followed into. `modified` is reported once a
+ * writer closes the file on Linux, and once per burst of writes on Windows. The core pushes
+ * each change as it reads it (within a quarter of a second); nothing is polled. Resolves
+ * with a function that stops watching. On Windows a watched directory that is renamed is
+ * not reported; one that is removed is `gone`, as on Linux.
  */
 export async function watch(
   path: string,

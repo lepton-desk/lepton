@@ -35,7 +35,7 @@ const Class = struct {
     const disposition_ex: w.FILE.INFORMATION_CLASS = @enumFromInt(64);
 };
 
-fn check(status: w.NTSTATUS) Error!void {
+pub fn check(status: w.NTSTATUS) Error!void {
     return switch (@intFromEnum(status)) {
         0 => {},
         // A junction or a symbolic link on the way: a way out of the root, or not, refused.
@@ -58,22 +58,24 @@ fn wideOf(relative: []const u8, out: []u16) Error![]u16 {
     return out[0..len];
 }
 
-const Open = struct {
+pub const Open = struct {
     access: w.ACCESS_MASK,
     disposition: w.FILE.CREATE_DISPOSITION = .OPEN,
     options: w.FILE.MODE = .{ .IO = .SYNCHRONOUS_NONALERT },
     /// Open a link as itself rather than refusing it: how a link is removed or renamed
     /// without touching what it points to. Links earlier in the path are still refused.
     link_itself: bool = false,
+    /// Overlapped I/O: a watch reads its directory's changes without blocking the loop.
+    asynchronous: bool = false,
 };
 
 fn openRelative(directory: Handle, name: []const u16, how: Open) Error!Handle {
     var text: w.UNICODE_STRING = .{ .Length = @intCast(name.len * 2), .MaximumLength = @intCast(name.len * 2), .Buffer = @constCast(name.ptr) };
     var attributes: w.OBJECT.ATTRIBUTES = .{ .RootDirectory = directory, .ObjectName = &text, .Attributes = .{ .DONT_REPARSE = true } };
     var access = how.access;
-    access.STANDARD.SYNCHRONIZE = true;
+    access.STANDARD.SYNCHRONIZE = !how.asynchronous;
     var options = how.options;
-    options.IO = .SYNCHRONOUS_NONALERT;
+    options.IO = if (how.asynchronous) .ASYNCHRONOUS else .SYNCHRONOUS_NONALERT;
     options.OPEN_REPARSE_POINT = how.link_itself;
     var io: w.IO_STATUS_BLOCK = undefined;
     var handle: w.HANDLE = undefined;
@@ -82,7 +84,7 @@ fn openRelative(directory: Handle, name: []const u16, how: Open) Error!Handle {
 }
 
 /// Opens `relative` beneath `root`; the kernel refuses anything that would leave it.
-fn beneath(root: Handle, relative: []const u8, how: Open) Error!Handle {
+pub fn beneath(root: Handle, relative: []const u8, how: Open) Error!Handle {
     var words = std.mem.splitScalar(u8, relative, '/');
     while (words.next()) |word| {
         if (std.mem.eql(u8, word, "..")) return error.Denied;
@@ -93,7 +95,7 @@ fn beneath(root: Handle, relative: []const u8, how: Open) Error!Handle {
 
 const read_access: w.ACCESS_MASK = .{ .SPECIFIC = .{ .FILE = .{ .READ_DATA = true, .READ_ATTRIBUTES = true } } };
 const attributes_access: w.ACCESS_MASK = .{ .SPECIFIC = .{ .FILE = .{ .READ_ATTRIBUTES = true } } };
-const list_access: w.ACCESS_MASK = .{ .SPECIFIC = .{ .FILE_DIRECTORY = .{ .LIST = true, .TRAVERSE = true, .READ_ATTRIBUTES = true } } };
+pub const list_access: w.ACCESS_MASK = .{ .SPECIFIC = .{ .FILE_DIRECTORY = .{ .LIST = true, .TRAVERSE = true, .READ_ATTRIBUTES = true } } };
 const delete_access: w.ACCESS_MASK = .{ .STANDARD = .{ .RIGHTS = .{ .DELETE = true } }, .SPECIFIC = .{ .FILE_DIRECTORY = .{ .LIST = true, .READ_ATTRIBUTES = true } } };
 
 /// The root as a directory handle, created first (with its parents) when it may be.
@@ -626,22 +628,14 @@ test "large files are read in ranges, saved by renaming, and trees removed witho
     try std.testing.expect(!sameDirectory(root_fd, outside_fd));
 }
 
-// --- Watching ------------------------------------------------------------------------
-// Not on Windows yet (`ReadDirectoryChangesW` is the way): `fs.watch` answers `failed`.
+// --- Watching: `fs_windows_watch.zig` (`ReadDirectoryChangesW`) ------------------------
 
-pub const Change = enum(u8) { created = 1, modified = 2, removed = 3, renamed_from = 4, renamed_to = 5, gone = 6 };
+const watching = @import("fs_windows_watch.zig");
+pub const Change = watching.Change;
+pub const watch = watching.watch;
+pub const unwatch = watching.unwatch;
+pub const drainWatch = watching.drainWatch;
 
-pub fn watch(root: Handle, relative: [:0]const u8, recursive: bool) Error!u32 {
-    _ = root;
-    _ = relative;
-    _ = recursive;
-    return error.Failed;
-}
-
-pub fn unwatch(number: u32) void {
-    _ = number;
-}
-
-pub fn drainWatch(context: anytype, report: fn (@TypeOf(context), u32, Change, []const u8) void) void {
-    _ = report;
+test {
+    _ = watching;
 }

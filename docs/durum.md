@@ -6,19 +6,25 @@ Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Wi
 
 - Bütün paketler `0.1.9-beta.2`'de, commit `f4e8fec` (trunk). Hiçbiri yayımlanmadı.
 - `tools/npm-preflight.sh` Linux'ta tek bir yerde duruyor: `@lepton-desk/cli-win32-x64` yerleştirilmedi. Bu bekleniyor; sıra Windows'tan başlar.
+- Windows tarafı hazır (2026-10-21): `cli-win32-x64` yerleştirildi, `api`, `plugin-clipboard`, `plugin-dialog`'un `prepublishOnly`'si geçti. Yayımlayan kişi `docs/yayin.md` 4a'daki dört komutu çalıştırır. `beta.1` yayında (`beta` etiketi).
 - `@lepton-desk/servo-linux-x64`'ün kitaplığı CI'dan geldi (`servo-bridge`, çalıştırma 39491335347, SHA-256 `f67bde25…a4f`, CI raporuyla aynı) ve `tools/stage-servo.mjs` ile yerleştirildi. Kitaplık git'te değil: yayımlayan makinede yeniden yerleştirilmeli.
 
 ## Windows'ta yapılacaklar
 
 1. `git pull`, sonra `docs/yayin.md`'deki "4a. Windows" adımları: CLI'yi derleyip yerleştirin (`cargo build --release --bin lepton`, `node packages/cli/scripts/stage.mjs`) ve oradan çıkan paketleri yayımlayın (`cli-win32-x64`, `api`, `plugin-clipboard`, `plugin-dialog`; `--tag beta`). Sonra Linux'ta ön kontrol ve kalan paketler.
-2. Windows'ta henüz **ölçülmemiş**, yalnız derlenmiş olanlar (Linux'tan çapraz derleme geçiyor):
-   - `clipboard` eklentisi (okuma artık son 5 sn içindeki gerçek girdiye bağlı: `GetLastInputInfo` + öndeki pencere bu süreçin mi).
-   - Tek kopya: `\\.\pipe\lepton-<identifier>` (`PIPE_NOWAIT`, `PIPE_REJECT_REMOTE_CLIENTS`). İkinci başlatma argümanlarını birinciye vermeli.
-   - Derin bağlantılar: MSI `HKCU\Software\Classes\<şema>` yazıyor (`URL Protocol` değeri `"1"`; Windows'un yalnız değerin varlığına baktığı varsayımı ölçülmedi).
-   - Varsayılan simge: MSI `bundle.icon` yoksa Lepton'ın `.ico`'sunu kullanıyor (PNG çerçeveli ICO, 16–256 px).
-   - `fs.watch` Windows'ta `failed` döner (henüz `ReadDirectoryChangesW` yok).
+2. ~~Windows'ta ölçülmemiş olanlar~~ — 2026-10-21'de Windows 10 22H2'de ölçüldü (aşağıda).
 
 Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya yazın.
+
+## Windows'ta ölçüldü (2026-10-21, Windows 10 22H2)
+
+Önce: `cargo test --workspace` 347 geçti, `zig build test` (Windows kökü) 51/54 (3 atlandı), `lepton --version` → `0.1.9-beta.2`. `cli-win32-x64` yerleştirildi (6 685 184 bayt); `api`, `plugin-clipboard`, `plugin-dialog` `npm run prepublishOnly` 0; dört tarball `--dry-run` temiz, `beta.2` npm'de boş. Deneme: `lepton new` vanilla-ts, `clipboard,fs`, `deepLinks: ["leptone2e"]`, `bundle.targets: ["msi"]`, paketler `link:`.
+
+- **Varsayılan simge:** MSI 217 088 bayt, `msiexec /qn` 0. Kurulu ürünün `product.ico`'su CLI'nin `assets/icon.ico`'suyla bayt bayt aynı: 7 PNG çerçeve (16, 24, 32, 48, 64, 128, 256). 16/32/48 px `System.Drawing.Icon` ile çizildi (243/1003/2263 opak piksel); 256'yı `System.Drawing` açamıyor (kendi PNG sınırı, kabuğun değil — ölçülmedi). Başlat menüsü kısayolu `product.ico,0`'ı gösteriyor.
+- **Derin bağlantı:** `HKCU\Software\Classes\leptone2e` = `URL:Tbeta2`, `URL Protocol` = `1`, `shell\open\command` = `"…\Programs\Tbeta2\bin\tbeta2.exe" "%1"`. `Start-Process "leptone2e://from-shell?q=%C3%A7"` (kabuk, kayıt defterinden) çalışan sayfaya `app.opened` ile geldi: değerin varlığı yetiyor. Windows adresi `leptone2e://from-shell/?q=%C3%A7` diye normalleştiriyor (`/` ekliyor). Kaldırma (`msiexec /x` 0) anahtarı, program klasörünü ve kısayolu siliyor.
+- **Tek kopya:** ilk başlatmanın argümanı `launchArgs()`'ta (`leptone2e://first?x=1`); ikinci başlatma ~1 sn'de 0 ile bitti, argümanları ilk kopyaya `app.opened` ile ulaştı; süreç ve pencere tek kaldı (dört tur). Boşluklu argüman tırnaklıyken tek parça geliyor (`"quoted arg"`); PowerShell 5.1'in `Start-Process -ArgumentList` dizisi tırnaklamadığı için ilk denemede ikiye bölünmüştü. İlk denemede ikinci kopya bir kez `exit 1` verdi (sayfada `app.args` izni yokken); sonraki dört başlatmada tekrarlanmadı. `app.args` izin gerektiriyor — yeni projenin izinlerinde yok.
+- **Pano:** girdi yokken `readText` → `NotAllowedError`; pencereye gerçek tıklamadan (`SendInput`, pencere önde) hemen sonra dışarıdan konan `dışarıdan çğüş 21` okundu; 7 sn boşta kalınca yine `NotAllowedError`. `writeText`'in yazdığı metin `Get-Clipboard`'da kod noktası kod noktası aynı. **Düzeltildi:** pencere odakta değilken `writeText` odak bekliyordu (4 sn'de bitmedi; bekleme Wayland içindi). Artık WebView2'de (`chrome.webview` her zaman var, ölçüldü) beklemiyor: odaksız pencereden yazılan metin panoya ulaştı (önce pano `baska bir metin`'e çekildi).
+- **`fs.watch` (yazıldı, ölçüldü):** `plugin-fs/zig/fs_windows_watch.zig`, `ReadDirectoryChangesW` (çakışmalı okuma, döngünün her turunda bekletmeden boşaltılıyor; dizin kökün altında `OBJ_DONT_REPARSE` ile açılıyor). Sayfadan: `created a.md`, `modified a.md`, `renamedFrom a.md`, `renamedTo b.md`, `removed b.md`; PowerShell'in yazdıkları da geldi (`created alt`, `created alt/from-powershell.txt`, `modified …`, `removed …`, özyinelemeli). `zig test` 11/11; ağaca konan bir junction'ın hedefindeki yazma izlemeye düşmüyor, junction izlenemiyor (`denied`). Mutasyon: yeniden okumayı kaldırınca üç izleme testi, `MODIFIED` birleştirmesini kaldırınca bir test düştü — Windows tek yazmaya birden çok `MODIFIED` veriyor. Linux'tan farkı: izlenen dizinin adı değişirse bildirilmiyor; silinirse `gone`.
 
 ## 0.1.9-beta.2'de ne var (Linux'ta ölçüldü)
 
@@ -37,9 +43,8 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Chromium tabanlı, sistemle gelir, Microsoft günceller). `--servo` başka sistemde reddedilir.
 
 
-- Windows ölçümleri (yukarıda).
+- Windows: simgenin 256 px çerçevesi kabukta (Gezgin'in büyük simgeleri) gözle bakılmadı; `fs.watch` ve panodaki düzeltme Linux'ta yeniden koşturulmadı (Linux yarıları değişmedi).
 - Servo: Wayland'de XWayland üzerinden. Servo kapanışta sürecin sonuna bırakılıyor (`_exit`): kendi kapanışı worker'ları süresiz bekliyor.
-- `fs.watch`: Windows yok.
 - AUR paketleri 0.1.8'i paketliyor ve `zig0.16`'ya bağlı; bir sonraki kararlı sürümde Arch'ın `zig`'ine geçilecek.
 - Beta.3 adayları: WASM eklentileri (önce tasarım belgesi), arm64+x64 paketleme, Windows imzalama, çalışma zamanı yetki sorusunun genel mekanizması (`fs` ile başlayarak).
 
