@@ -22,6 +22,7 @@ Add-Type -Name I -Namespace W -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetClientRect(System.IntPtr h, out RECT r);
 [DllImport("user32.dll")] public static extern uint GetDpiForWindow(System.IntPtr h);
 [DllImport("user32.dll")] public static extern System.IntPtr SendMessageW(System.IntPtr h, uint msg, System.IntPtr w, System.IntPtr l);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassNameW(System.IntPtr h, System.Text.StringBuilder s, int n);
 public struct RECT { public int Left, Top, Right, Bottom; }
 public struct POINT { public int X, Y; }
 [StructLayout(LayoutKind.Sequential)] public struct TITLEBARINFOEX {
@@ -56,6 +57,15 @@ function Point([int]$x, [int]$y) {
 }
 function Mouse([uint32]$flags) { Send $flags }
 
+function ClassOf([System.IntPtr]$h) { $s = New-Object System.Text.StringBuilder 256; [void][W.I]::GetClassNameW($h, $s, 256); return $s.ToString() }
+# The app's own window (class LeptonWindow, webview2/window.zig). Not .NET's MainWindowHandle
+# alone: that is the process's first visible top-level window, and once it was a 35×19
+# pop-up with no title (measured, the installed app on Server 2025).
+function AppWindow([string]$process) {
+  return Get-Process $process -ErrorAction SilentlyContinue |
+    Where-Object { $_.MainWindowHandle -ne 0 -and (ClassOf $_.MainWindowHandle) -eq "LeptonWindow" } |
+    Select-Object -First 1
+}
 function WindowRect([System.IntPtr]$h) { $r = New-Object W.I+RECT; [void][W.I]::GetWindowRect($h, [ref]$r); return $r }
 function ClientOrigin([System.IntPtr]$h) { $o = New-Object W.I+POINT; [void][W.I]::ClientToScreen($h, [ref]$o); return $o }
 function Front([System.IntPtr]$h) { [void][W.I]::SetForegroundWindow($h); Start-Sleep -Milliseconds 300 }

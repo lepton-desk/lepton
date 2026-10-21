@@ -25,7 +25,7 @@ function Say([string]$line) { Write-Host $line; Add-Content -Path $report -Value
 function Fail([string]$label, [string]$line) { Say "FAIL $label`: $line"; $failures.Add($label) }
 function Facts([string]$label) {
   Say "### $label"
-  $lines = & (Join-Path $here "window-facts.ps1") -Process $name -Shot (Join-Path $Out "$label.png")
+  $lines = & (Join-Path $here "window-facts.ps1") -Process $name -Handle (Handle) -Shot (Join-Path $Out "$label.png")
   foreach ($line in $lines) { Say $line }
   return $lines
 }
@@ -33,7 +33,7 @@ function Expect([string[]]$lines, [string]$prefix, [string]$wanted, [string]$lab
   $line = $lines | Where-Object { $_.StartsWith($prefix) } | Select-Object -First 1
   if ($line -and $line.Contains($wanted)) { Say "ok   $label`: $wanted" } else { Fail $label "wanted '$wanted', got '$line'" }
 }
-function Window { Get-Process $name -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1 }
+function Window { AppWindow $name }
 function Handle { return (Window).MainWindowHandle }
 function Title { return (Window).MainWindowTitle }
 function Until([scriptblock]$condition, [int]$seconds) {
@@ -49,7 +49,7 @@ function Hand([string]$link) {
   $second = Start-Process -FilePath $Exe -ArgumentList $link -PassThru
   if ($second.WaitForExit(15000)) { Say "second start ($link): exit $($second.ExitCode)" }
   else { Fail "single instance" "second start ($link) still running after 15 s"; $second.Kill() }
-  $count = @(Get-Process $name -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 }).Count
+  $count = @(Get-Process $name -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and (ClassOf $_.MainWindowHandle) -eq "LeptonWindow" }).Count
   if ($count -ne 1) { Fail "single instance" "$count windows after the second start" }
 }
 function Theme([string]$theme) {

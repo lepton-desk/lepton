@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Process, [string]$Shot = "")
+param([Parameter(Mandatory)][string]$Process, [System.IntPtr]$Handle = [System.IntPtr]::Zero, [string]$Shot = "")
 # What the system says about the app's window: placement against the work area, the
 # client area, the class and exe icons, whether DWM draws the title bar dark, and the
 # title bar's own colour on screen. DWMWA_CAPTION_COLOR is not read back: it is
@@ -13,6 +13,7 @@ Add-Type -Name F -Namespace W -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetMonitorInfoW(System.IntPtr m, ref MONITORINFO i);
 [DllImport("user32.dll")] public static extern uint GetDpiForWindow(System.IntPtr h);
 [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(System.IntPtr h, System.Text.StringBuilder s, int n);
 [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(System.IntPtr h, uint a, out int v, int size);
 [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(System.IntPtr h, uint a, out RECT v, int size);
 [DllImport("shell32.dll", CharSet=CharSet.Unicode)] public static extern uint ExtractIconExW(string file, int index, System.IntPtr[] large, System.IntPtr[] small, uint count);
@@ -22,7 +23,8 @@ public struct POINT { public int X, Y; }
 '@
 $p = Get-Process $Process -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $p) { throw "no window for process $Process" }
-$h = $p.MainWindowHandle
+# The handle measure.ps1 found (the app's own window), else the process's main window.
+$h = if ($Handle -ne [System.IntPtr]::Zero) { $Handle } else { $p.MainWindowHandle }
 $r = New-Object W.F+RECT; [void][W.F]::GetWindowRect($h, [ref]$r)
 $vis = New-Object W.F+RECT; [void][W.F]::DwmGetWindowAttribute($h, 9, [ref]$vis, 16)
 $m = New-Object W.F+MONITORINFO; $m.cbSize = 40
@@ -30,7 +32,8 @@ $m = New-Object W.F+MONITORINFO; $m.cbSize = 40
 $c = New-Object W.F+RECT; [void][W.F]::GetClientRect($h, [ref]$c)
 $origin = New-Object W.F+POINT; [void][W.F]::ClientToScreen($h, [ref]$origin)
 $work = $m.rcWork
-"title: $($p.MainWindowTitle); foreground: $([W.F]::GetForegroundWindow() -eq $h)"
+$text = New-Object System.Text.StringBuilder 512; [void][W.F]::GetWindowTextW($h, $text, 512)
+"title: $($text.ToString()); foreground: $([W.F]::GetForegroundWindow() -eq $h)"
 "monitor $($m.rcMonitor.Right - $m.rcMonitor.Left)x$($m.rcMonitor.Bottom - $m.rcMonitor.Top), work $($work.Left),$($work.Top) $($work.Right - $work.Left)x$($work.Bottom - $work.Top), dpi $([W.F]::GetDpiForWindow($h))"
 "window $($r.Left),$($r.Top) $($r.Right - $r.Left)x$($r.Bottom - $r.Top); visible frame $($vis.Left),$($vis.Top) $($vis.Right - $vis.Left)x$($vis.Bottom - $vis.Top)"
 "gaps to the work area (visible frame): left $($vis.Left - $work.Left) right $($work.Right - $vis.Right) top $($vis.Top - $work.Top) bottom $($work.Bottom - $vis.Bottom)"
