@@ -36,7 +36,7 @@ jobs:
             libges-1.0-dev libgl1-mesa-dri libgles2-mesa-dev libglib2.0-dev libgstreamer-plugins-bad1.0-dev \
             libgstreamer-plugins-base1.0-dev libgstrtspserver-1.0-dev libharfbuzz-dev liblzma-dev libudev-dev \
             libunwind-dev libvulkan1 libx11-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libxkbcommon-x11-0 libxkbcommon0 libxmu-dev libxmu6 llvm-dev m4 xorg-dev \
+            libxkbcommon-x11-0 libxkbcommon0 libxkbcommon-dev libxmu-dev libxmu6 llvm-dev m4 xorg-dev \
             libgstreamer-plugins-good1.0-dev \
             pkg-config libcairo2-dev libxcb1-dev libxcb-randr0-dev libxcb-image0-dev libwayland-dev libwayland-bin \
             libegl-dev libgles-dev libfontconfig-dev libvulkan-dev \
@@ -180,8 +180,11 @@ jobs:
           cargo build --release --bin lepton 2>&1 | tail -3
           lepton="$GITHUB_WORKSPACE/target/release/lepton"
           cd "$RUNNER_TEMP"
-          "$lepton" new servo-app --template vanilla-ts --target webview --package-manager npm --install --non-interactive 2>&1 | tail -15
+          "$lepton" new servo-app --template vanilla-ts --target webview --package-manager npm --non-interactive 2>&1 | tail -15
           cd servo-app
+          # The SDK from this checkout: the CLI's own version may not be on npm yet.
+          sed -i "s|\"@lepton-desk/api\": \"[^\"]*\"|\"@lepton-desk/api\": \"file:$GITHUB_WORKSPACE/packages/api\"|; s|\"@lepton-desk/cli\": \"[^\"]*\"|\"@lepton-desk/cli\": \"file:$GITHUB_WORKSPACE/packages/cli\"|" package.json
+          npm install --no-audit --no-fund 2>&1 | tail -3
           export LEPTON_SERVO_LIB="$GITHUB_WORKSPACE/servo/bridge/target/release"
           NO_COLOR=1 "$lepton" build --linux --servo 2>&1 | tee "$RUNNER_TEMP/app-build.log" | tail -25
           build=${PIPESTATUS[0]}

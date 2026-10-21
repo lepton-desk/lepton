@@ -2940,6 +2940,7 @@ dependencies = [
  "raw-window-handle",
  "servo",
  "servo-net-traits",
+ "servo-url",
  "tokio",
  "url",
 ]
@@ -6064,8 +6065,6 @@ dependencies = [
 [[package]]
 name = "servo-url"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6ac01aab4efc90075d944c775fa3b8ed30f2b385b4987498df1e89bf0235162"
 dependencies = [
  "encoding_rs",
  "malloc_size_of_derive",

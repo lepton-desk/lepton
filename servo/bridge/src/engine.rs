@@ -167,6 +167,9 @@ impl Engine {
             .make_current()
             .map_err(|error| format!("make the rendering context current: {error:?}"))?;
 
+        // Before anything computes an origin: the app's pages get a tuple origin, so they
+        // have storage (`servo/patches/servo-url`).
+        servo_url::register_tuple_origin_scheme(scheme);
         let queue = Arc::new(Queue::new(wake));
         let mut protocols = ProtocolRegistry::default();
         protocols

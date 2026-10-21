@@ -81,6 +81,9 @@ pub const X11Window = struct {
     screen_height: u16 = 0,
     /// Set when the window manager changed `_NET_WM_STATE`; `takeStateChange` reads it.
     state_changed: bool = false,
+    /// `WM_DELETE_WINDOW`, which the window lists in `WM_PROTOCOLS`: the window manager's
+    /// close (the titlebar's button) arrives as a client message carrying it.
+    delete_window: u32 = 0,
 
     /// One key event, raw: X's keycode (from `min_keycode`) and the modifier and group
     /// state of the event.
@@ -174,6 +177,7 @@ pub const X11Window = struct {
         };
         self.setTitle(request.title);
         self.setAppId(request.app_id);
+        self.acceptClose();
         setPositionHints(conn, window_id, at, request.size);
 
         if (request.mapped) _ = xcb.xcb_map_window(conn, window_id);
@@ -245,6 +249,18 @@ pub const X11Window = struct {
         const mask: u32 = xcb.XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | xcb.XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
         _ = xcb.xcb_send_event(self.conn, 0, self.root, mask, @ptrCast(&event));
         return xcb.xcb_flush(self.conn) > 0;
+    }
+
+    /// Lists `WM_DELETE_WINDOW` in `WM_PROTOCOLS` (ICCCM 4.2.8.1). Without it the window
+    /// manager has no way to ask the window to close: measured on COSMIC's XWayland, its
+    /// close request did nothing; a window manager that falls back to `XKillClient` can
+    /// end the process before the core cleans up.
+    fn acceptClose(self: *X11Window) void {
+        const protocols = self.atom("WM_PROTOCOLS");
+        self.delete_window = self.atom("WM_DELETE_WINDOW");
+        if (protocols == 0 or self.delete_window == 0) return;
+        // ATOM (4), format 32, one value.
+        _ = xcb.xcb_change_property(self.conn, xcb.XCB_PROP_MODE_REPLACE, self.window_id, protocols, 4, 32, 1, &self.delete_window);
     }
 
     /// An atom by name, 0 when the server cannot make it.
@@ -425,28 +441,9 @@ pub const X11Window = struct {
     /// compare against.
     const event_bit: u8 = 0x80;
 
-    /// Applies one event, recording a configure for the caller to take.
+    /// Applies one event (`applyEvent`), then releases it.
     fn handle(self: *X11Window, event: *xcb.xcb_generic_event_t) void {
-        const kind = event.response_type & ~event_bit;
-        switch (kind) {
-            xcb.XCB_CONFIGURE_NOTIFY => {
-                const cfg: *const xcb.xcb_configure_notify_event_t = @ptrCast(@alignCast(event));
-                self.size = .{ .width = cfg.width, .height = cfg.height };
-                // The zones follow the size the display server gave, not the size that was
-                // asked for: the hit test and the drawn controls have to agree, and after a
-                // resize both are measuring the window that exists.
-                self.input.width = self.size.width;
-                self.input.height = self.size.height;
-                self.pending = .{ .size = self.size, .activated = true };
-            },
-            xcb.XCB_CLIENT_MESSAGE => {
-                // A close request from the window manager arrives as a client
-                // message; it is reported the same way a Wayland close is, so the
-                // layer above has one way of learning a window went away.
-                self.pending = Configure{ .size = Size{ .width = 0, .height = 0 }, .activated = false };
-            },
-            else => {},
-        }
+        applyEvent(self, event);
         // XCB has no `xcb_free_event`: an event from `xcb_poll_for_event` is
         // plain `malloc`'d memory and belongs to the caller, who releases it with
         // `free`. Leaking one event per frame would be invisible until the process
@@ -456,29 +453,13 @@ pub const X11Window = struct {
     }
 };
 
-/// The first screen of the setup, or null when the server offers none.
-/// Copies a rendered frame into the window.
-///
-/// X11 has no shared memory in the Wayland sense, so the frame travels as an
-/// `xcb_image_t` the server reads directly from this process's memory. That is one
-/// copy per frame too, and it is why a Wayland client and an X11 client can share a
-/// renderer that knows about neither.
-///
-/// The image is destroyed before returning. `xcb_put_image` is asynchronous, and an
-/// `xcb_image_t` may reuse its buffer once the request has been written, so holding
-/// it past the flush would free memory the server might still be reading.
 /// Drains the connection's events into this window's input state.
 ///
 /// Called once per frame rather than from a loop of its own: the native path already
 /// wakes on the connection and redraws, and a second loop would race the first for the
 /// same events.
 pub fn pumpEvents(self: *X11Window) void {
-    var event = xcb.xcb_poll_for_event(self.conn) orelse return;
-    while (true) {
-        applyEvent(self, event);
-        const next = xcb.xcb_poll_for_event(self.conn) orelse break;
-        event = next;
-    }
+    while (xcb.xcb_poll_for_event(self.conn)) |event| self.handle(event);
 }
 
 /// Applies one queued event, if there is one; false when the queue is empty.
@@ -488,7 +469,7 @@ pub fn pumpEvents(self: *X11Window) void {
 /// before, so a click compared before and after a whole drain was never seen.
 pub fn pumpOne(self: *X11Window) bool {
     const event = xcb.xcb_poll_for_event(self.conn) orelse return false;
-    applyEvent(self, event);
+    self.handle(event);
     return true;
 }
 
@@ -505,7 +486,25 @@ pub fn connectionFd(self: *X11Window) i32 {
 /// where the pointer had got to by the time the frame ran rather than where it was
 /// when it was pressed.
 fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
-    switch (event.response_type & 0x7f) {
+    switch (event.response_type & ~X11Window.event_bit) {
+        xcb.XCB_CONFIGURE_NOTIFY => {
+            const cfg: *const xcb.xcb_configure_notify_event_t = @ptrCast(@alignCast(event));
+            self.size = .{ .width = cfg.width, .height = cfg.height };
+            // The zones follow the size the display server gave, not the size that was
+            // asked for: the hit test and the drawn controls have to agree, and after a
+            // resize both are measuring the window that exists.
+            self.input.width = self.size.width;
+            self.input.height = self.size.height;
+            self.pending = .{ .size = self.size, .activated = true };
+        },
+        xcb.XCB_CLIENT_MESSAGE => {
+            // The window manager's close (`WM_DELETE_WINDOW`, `acceptClose`), reported the
+            // same way a Wayland close is, so the layer above has one way of learning a
+            // window went away. Other client messages are not a close.
+            const message: *const xcb.xcb_client_message_event_t = @ptrCast(@alignCast(event));
+            if (self.delete_window != 0 and message.data.data32[0] == self.delete_window)
+                self.pending = .{ .size = .{ .width = 0, .height = 0 }, .activated = false };
+        },
         xcb.XCB_ENTER_NOTIFY => self.input.enter(),
         xcb.XCB_LEAVE_NOTIFY => {
             self.input.leave();
@@ -518,7 +517,7 @@ fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
         },
         xcb.XCB_BUTTON_PRESS, xcb.XCB_BUTTON_RELEASE => {
             const press: *const xcb.xcb_button_press_event_t = @ptrCast(event);
-            const down = event.response_type & 0x7f == xcb.XCB_BUTTON_PRESS;
+            const down = event.response_type & ~X11Window.event_bit == xcb.XCB_BUTTON_PRESS;
             self.input.move(press.event_x, press.event_y);
             handleButton(self, press.detail, down);
         },
@@ -533,7 +532,7 @@ fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
                 self.keys[self.key_count] = .{
                     .keycode = key.detail,
                     .state = key.state,
-                    .pressed = event.response_type & 0x7f == xcb.XCB_KEY_PRESS,
+                    .pressed = event.response_type & ~X11Window.event_bit == xcb.XCB_KEY_PRESS,
                 };
                 self.key_count += 1;
             }
@@ -543,7 +542,7 @@ fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
                 // one the Wayland path reports for the same physical key.
                 .keycode = key.detail - self.min_keycode + 1,
                 .keysym = 0,
-                .state = if (event.response_type & 0x7f == xcb.XCB_KEY_PRESS) .pressed else .released,
+                .state = if (event.response_type & ~X11Window.event_bit == xcb.XCB_KEY_PRESS) .pressed else .released,
                 .repeat = false,
             });
         },

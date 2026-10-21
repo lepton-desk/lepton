@@ -21,6 +21,8 @@ servo = "=0.6.0"
 # Its library is named `net_traits`: the request body's stream types, which `servo`
 # does not re-export.
 servo-net-traits = "=0.6.0"
+# Patched (`[patch.crates-io]` below): the app's scheme gets a tuple origin.
+servo-url = "=0.6.0"
 ipc-channel = "0.22"
 dpi = "0.1"
 euclid = "0.22"
@@ -31,6 +33,14 @@ parking_lot = "0.12"
 raw-window-handle = "0.6"
 tokio = { version = "1", features = ["sync"] }
 url = "2.5"
+
+# Servo gives a custom scheme's pages an opaque origin, and an opaque origin has no
+# `localStorage` (measured: `SecurityError`). This copy of servo-url 0.6.0 adds
+# `register_tuple_origin_scheme`, which the bridge calls for the app's scheme, so its
+# pages have a (scheme, host) origin as on WPE WebKit and WebView2. The change is marked
+# `Lepton:` in `origin.rs` and `lib.rs`; carry it over when Servo is upgraded.
+[patch.crates-io]
+servo-url = { path = "../patches/servo-url" }
 
 [lints.rust]
 # Denied, not forbidden: the C boundary (`src/abi.rs`) is the one module allowed it,

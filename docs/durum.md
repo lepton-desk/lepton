@@ -30,13 +30,16 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 - **Varsayılan simge:** `src-lepton/icon.svg`, Linux paketinde `share/icons/hicolor/scalable/apps/<id>.svg`.
 - **Kimlik:** `com.<sahip>.<uygulama>`, `--owner`.
 - **Zig 0.16 ve 0.17:** ikisiyle de çekirdek testleri, araçlar, bütün eklentili webview uygulaması (derlendi, çalıştı, Windows'a çapraz derlendi), yerel uygulama. CI `zig` iş akışı ikisini de çalıştırıyor (geçti).
-- **Servo (deneysel):** `npm install -D @lepton-desk/servo-linux-x64`, sonra `lepton build --linux --servo`, `lepton run --servo` ya da `lepton dev --servo`. Bu makinede ölçüldü: sayfa canlı veriyi çizdi; `dev`'de sayfa dev sunucusundan geldi, düzenleme sayfayı yeniledi; Ctrl+C hemen bitiriyor, dosya kalmıyor, SIGTERM'de çıkış kodu 0.
+- **Servo (deneysel, yalnız Linux):** `npm install -D @lepton-desk/servo-linux-x64`, sonra `lepton build --linux --servo`, `lepton run --servo` ya da `lepton dev --servo`. Bu makinede ölçüldü: sayfa canlı veriyi çizdi; `dev`'de sayfa dev sunucusundan geldi, düzenleme sayfayı yeniledi; Ctrl+C hemen bitiriyor, dosya kalmıyor, SIGTERM'de çıkış kodu 0.
 
 ## Açık kalanlar
 
+Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Chromium tabanlı, sistemle gelir, Microsoft günceller). `--servo` başka sistemde reddedilir.
+
+
 - Windows ölçümleri (yukarıda).
-- Servo: klavye girişi yok; Wayland'de XWayland üzerinden. Servo kapanışta sürecin sonuna bırakılıyor (`_exit`): kendi kapanışı worker'ları süresiz bekliyor.
-- `fs.watch`: alt klasörler izlenmiyor; Windows yok.
+- Servo: Wayland'de XWayland üzerinden. Servo kapanışta sürecin sonuna bırakılıyor (`_exit`): kendi kapanışı worker'ları süresiz bekliyor.
+- `fs.watch`: Windows yok.
 - AUR paketleri 0.1.8'i paketliyor ve `zig0.16`'ya bağlı; bir sonraki kararlı sürümde Arch'ın `zig`'ine geçilecek.
 - Beta.3 adayları: WASM eklentileri (önce tasarım belgesi), arm64+x64 paketleme, Windows imzalama, çalışma zamanı yetki sorusunun genel mekanizması (`fs` ile başlayarak).
 
@@ -45,4 +48,11 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 - **Önce:** `servo-bridge` iş akışını çalıştırın. Köprüye `lepton_servo_set_data_directory` eklendi (Rust, burada derlenmedi). Yeni `liblepton_servo` artifact'ını `tools/stage-servo.mjs` ile yerleştirin: paketteki eski kitaplıkta bu fonksiyon yok, `--servo` derlemesi onunla bağlanmaz.
 - **Ölçülecek (yazıldı, Servo derlemesinde denenmedi):** sayfanın `window.minimize/maximize/unmaximize/state` komutları ve `window.state`/`window.resized` olayları (X11, EWMH); `$APPDATA/servo` veri klasörü ve `localStorage`/çerezlerin `_exit` ile kapanıştan sonra kalıp kalmadığı.
 - **Ölçüldü (bu gece):** Servo'da klavye (`Ab ş`, Backspace, Enter) ve tekerlek (adım başına 48 px); pencere WPE pencereleriyle aynı yer ve boyutta açılıyor (eşlenmeden önce boyutlanıp ortalanıyor); `fs.watch({ recursive: true })` (testler iki Zig'de).
-- **Servo'nun kalan eksikleri:** Wayland'de kendi yüzeyi (köprü Wayland yüzeyini kabul ediyor, çekirdek tarafı yok); pano X11'de `failed`, dosya diyalogları Servo altında ölçülmedi; klavyede dead key/compose/IME ve `repeat` yok; motor izinleri (bildirim, kamera) sorulmuyor; yalnız Linux x86_64.
+- **Servo'nun kalan eksikleri:** Wayland'de kendi yüzeyi (köprü Wayland yüzeyini kabul ediyor, çekirdek tarafı yok); pano X11'de `failed`, dosya diyalogları Servo altında ölçülmedi; klavyede dead key/compose/IME ve `repeat` yok; motor izinleri (bildirim, kamera) sorulmuyor; paket yalnız Linux x86_64 için (arm64 yok).
+
+## 2026-10-21 sabahı
+
+- `servo-bridge` çalıştırma 39562336822: kitaplık derlendi (`lepton_servo_set_data_directory` dahil 19 fonksiyon), SHA-256 `dfe24a8e…6d72`, `tools/stage-servo.mjs` ile yerleştirildi. Aynı işin şablon uygulama adımı iki nedenle düştü: runner'da `libxkbcommon-dev` yoktu (çekirdek artık xkbcommon'a bağlanıyor) ve `lepton new --install` yayımlanmamış `@lepton-desk/api@0.1.9-beta.2`'yi npm'de aradı. İkisi iş akışında düzeltildi (yerel), yeniden çalıştırılmadı.
+- **Servo'da pencere komutları (ölçüldü):** `maximize`, `unmaximize`, `minimize`, `state` çalışıyor; `window.state` olayları geliyor. `window.resized` hiç gelmiyordu: Servo'nun kullandığı `pumpOne` X olaylarını `applyEvent`'e veriyordu, o da `ConfigureNotify`'ı işlemiyordu (Servo'ya yeni boyut da gitmiyordu). Ayrıca `pumpOne`/`pumpEvents` olayları `free` etmiyordu. Düzeltildi; şimdi büyütmede 1366×652, geri almada 910×422 geliyor, WPE ile aynı değerler.
+- **Kapatma (ölçüldü):** çekirdeğin X11 penceresi `WM_PROTOCOLS`'a `WM_DELETE_WINDOW` yazmıyordu; pencere yöneticisinin kapatma isteği uygulamaya ulaşamıyordu. Düzeltildi; doğrudan gönderilen `WM_DELETE_WINDOW` ile uygulama temiz kapandı (`✔ app`, `/dev/shm`'de dosya yok). Ayrıca artık yalnız bu ileti kapatma sayılıyor (önce her istemci iletisi sayılıyordu). COSMIC'in XWayland'i dışarıdan gönderilen `_NET_CLOSE_WINDOW`'u uygulamıyor; başlık çubuğundaki gerçek düğme ölçülmedi.
+- **Servo'da kalıcı depolama yok (ölçüldü):** Servo `lepton://localhost/`'u opak köken sayıyor (`url` crate'i yalnız http/https/ws/wss/ftp'ye demet köken veriyor; Servo 0.6'nın `ProtocolHandler`'ında bunu değiştiren seçenek yok). `localStorage` `SecurityError: Cannot access localStorage from opaque origin` atıyor. WPE'de aynı sayfada `localStorage` çalışıyor ve kapanıştan sonra kalıyor (`runs:1`, sonra `runs:2`). `document.cookie` iki motorda da boş kalıyor. Veri klasörünün kalıcılığı bu yüzden Servo'da ölçülemedi. Çözüm yolu kararı bekliyor.
