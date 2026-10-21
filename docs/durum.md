@@ -68,6 +68,12 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 
 Kullanıcı Linux'ta çalıştırıp düzeltecek; Windows'ta ölçülenler bozulmamalı.
 
+### Kararlar (2026-10-21)
+
+- **Cam ve macOS benzeri görünüm:** taklit ya da CSS kütüphanesi yok, sarmalayıcı yok. İki parça, ikisi de iyi yapılacak: (1) **sistem malzemesi** — `window.material` ile her sistemin kendisi: Windows 11 Mica/Acrylic (`DWMWA_SYSTEMBACKDROP_TYPE`), Linux Wayland'de `ext_background_effect_manager_v1` bulanıklığı (bileşimci sunuyorsa; COSMIC'te var, ölçüldü: yalnız `blur`, kırılma/ton yok); sunulmazsa pencere opak kalır ve sayfa bunu bir olayla öğrenir. (2) **Lepton'ın kendi camı** — kendi çizicisinde gerçek kırılma/parlama; önce tasarım belgesi. Ölçüldü: WPE `backdrop-filter: blur()` ve `url(#svg)`'yi kabul ediyor (çizimi ölçülmedi), Servo `backdrop-filter`'ı hiç tanımıyor.
+- **WPE'de süs, taşıma, menü (ve cam):** WPE 2.54'ün Wayland platformu her zaman `MODE_SERVER_SIDE` istiyor, istemci tarafı süs çizemiyor ve `xdg_toplevel`'ı vermiyor (`WPEToplevelWayland.cpp` 2.54). Karar: **Lepton'ın kendi WPE platformu** (`render/webview/platform/lepton_display.zig`, WebKit yaması değil, `WPE_PLATFORM=lepton`) tamamlanacak; sayfa Lepton'ın kendi Wayland penceresine çizilecek. Adım adım; WPE'nin kendi platformu yedek kalır. Servo'nun X11 penceresi zaten Lepton'ın: orada `_MOTIF_WM_HINTS`, `_NET_WM_MOVERESIZE`, kendi menü penceresi.
+
+
 ## Açık kalanlar
 
 Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Chromium tabanlı, sistemle gelir, Microsoft günceller). `--servo` başka sistemde reddedilir.
@@ -97,3 +103,14 @@ Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Ch
 - **Dev sunucusundaki sayfada gerçek çerezler kalıcı değildi (ölçüldü):** `lepton dev`'de (`http://127.0.0.1:5173`) çerez yazılıyor ama sonraki açılışta iki motorda da yoktu; `localStorage` kalıyordu, veri klasöründe çerez dosyası yoktu.
   - WPE: ağ oturumu veri klasörüyle kurulsa da `webkit_cookie_manager_set_persistent_storage` çağrılmadıkça çerezler yalnız bellekte. Artık `$APPDATA/cookies.sqlite` (klasör 0700). Ölçüldü: ikinci açılışta önceki çerez okundu. Eski ABI yolu (`-Dwpe-abi=legacy`, 2.52) ağ oturumu kurmuyor; bu makinede 2.54 olduğu için ölçülemedi.
   - Servo: `cookie_jar.json`'ı yalnız `CoreResourceMsg::Exit`'te yazıyor, kurucu onu bütün script iş parçacıkları birleştikten sonra gönderiyor; çekirdek bu beklemeyi `_exit` ile atladığı için hiç yazılmıyordu. `servo/patches/servo` (servo 0.6.0 + `SiteDataManager::write_network_state_and_stop`) ve `lepton_servo_write_state`: çekirdek Servo'yu bırakmadan önce çağırıyor. `servo-bridge` çalıştırma 39576853066 bütün adımlarıyla geçti (SHA-256 `86a97abd…f7ec`, 20 fonksiyon), yerleştirildi. Ölçüldü: `dev --servo`'da ikinci açılışta önceki çerez okundu, `servo/cookie_jar.json` yazıldı; `run --servo`'da şimin çerezi de kalıyor; her turda `✔ app`, kalan süreç yok, `/dev/shm` boş. Paketteki eski kitaplıkla bu çekirdek Servo'ya bağlanmaz: yayımlarken bu kitaplık yerleştirilmeli.
+
+## 2026-10-21 öğleden sonra: Linux eşitliği
+
+- **Servo'nun X11 penceresi (ölçüldü, gerçek fareyle):** `window.decorations: false` → `_MOTIF_WM_HINTS` (COSMIC başlık çubuğunu kaldırdı, ekran görüntüsü); `window.start_drag` → `_NET_WM_MOVERESIZE` (sayfanın çubuğundan sürükleyince pencere 228,118'den 219,171'e geçti; pencere yöneticisi bırakmayı yuttuğu için bırakma sayfaya Lepton'dan veriliyor); `dragRegion`'ın çift tıklaması büyüttü/geri aldı.
+- **Sağ tık Servo'da sayfaya ulaşmıyordu (bulundu, düzeltildi):** X11 penceresi sağ basışı native yolun çerçeve menüsüne veriyordu. Artık `own_chrome` yalnız native yolda; Servo'da `down 2`, `contextmenu`, `up 2` geliyor.
+- **`window.menu` Servo'da (yazıldı, ölçüldü):** `servo/menu_x11.zig` — imleçte override-redirect pencere, Cairo ile çizim (native çerçeve paleti), işaretçi ve klavye tutuşu; açan basışın bırakması seçmez, dışarı basış ve Esc kapatır (`null`), oklar/Home/End/Enter/Space; devre dışı ve ayırıcı seçilmez. Uygulama odağı kaybedince (`FocusOut`, `_NET_WM_STATE_FOCUSED` gidince) ya da gizlenince kapanır (Tauri/Electron gibi). İşaret ✓ yazı değil çizgi: `sans-serif` burada Noto Sans, U+2713 yok, Cairo'nun basit yazı API'si yedek fonta geçmiyor (ölçüldü: işaret görünmüyordu). Kullanıcı denedi: seçim, dışarı tıklama, klavye, işaret, Alt+Tab'da kapanma.
+- **X11 olayları:** pencereye katman kancası (`overlay`); odak değişimi maskesi; `hasState`.
+- **Zig biçimi:** depo 0.16'nın `zig fmt`'iyle biçimlenir; 0.17'ninki 0.16'da olmayan yerleşikleri yazıyor (`@intFromEnum` → `@backingInt`, ölçüldü), çalıştırılmamalı. Önceden biçimsiz 10 dosya biçimlendi; `zig` iş akışına 0.16 biçim denetimi eklendi.
+- **Başlık çubuğu sayfayı izlesin (Linux):** COSMIC X11'de `_GTK_THEME_VARIANT`'ı yok sayıyor (iki görüntü 0 piksel fark); Wayland'de protokolü yok. Lepton'ın kendi çizdiği başlık çubuğuyla gelecek (`docs/wpe-platform.md` adım 5); Servo için aynı çizim katmanı gerekir.
+- **Yayın sırası (kullanıcı kararı):** 0.1.9-beta.2 kendi WPE platformunu beklemez; WPE'de `decorations: false`, `start_drag`, `window.menu` belgelerde "Linux WPE'de henüz yok" diye yazılır, kendi platform beta.3'e.
+- **Kendi WPE platformu:** plan `docs/wpe-platform.md`. Bugün yalnız `WPELeptonDisplay` seçiliyor (ölçüldü, `zig build platform-check`).

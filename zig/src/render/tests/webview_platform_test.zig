@@ -44,21 +44,21 @@ fn engineAvailable() bool {
 }
 
 test "the engine hands out a display, and a view built from it has a WPEView" {
-        // This is the ordering the whole webview path rests on, exercised through the
-        // production entry point rather than a reimplementation of it. `open` refuses
-        // with `Error.NoDisplay` before it constructs anything if the display is
-        // missing, and with `Error.NoView` if the view yields no WPEView — so passing
-        // means the loader, the display and the view were all real, in that order.
-        if (!engineAvailable()) return error.SkipZigTest;
+    // This is the ordering the whole webview path rests on, exercised through the
+    // production entry point rather than a reimplementation of it. `open` refuses
+    // with `Error.NoDisplay` before it constructs anything if the display is
+    // missing, and with `Error.NoView` if the view yields no WPEView — so passing
+    // means the loader, the display and the view were all real, in that order.
+    if (!engineAvailable()) return error.SkipZigTest;
 
-        var view = try wpe_view.View.open();
-        defer view.close();
+    var view = try wpe_view.View.open();
+    defer view.close();
 
-        // A display is not optional: a view without one answers null here, and the
-        // WPEView is built from the display. So this is the same condition the
-        // ordering guards against, read from the other side.
-        try std.testing.expect(abi.webkit_web_view_get_display(view.web_view) != null);
-        try std.testing.expect(abi.webkit_web_view_get_wpe_view(view.web_view) != null);
+    // A display is not optional: a view without one answers null here, and the
+    // WPEView is built from the display. So this is the same condition the
+    // ordering guards against, read from the other side.
+    try std.testing.expect(abi.webkit_web_view_get_display(view.web_view) != null);
+    try std.testing.expect(abi.webkit_web_view_get_wpe_view(view.web_view) != null);
 }
 
 test "no view backend can be injected, and null is the only working argument" {
@@ -93,7 +93,7 @@ test "no view backend can be injected, and null is the only working argument" {
         try std.testing.expect(abi.webkit_web_view_get_wpe_view(view.?) != null);
         abi.g_object_unref(view);
     }
-    }
+}
 
 test "the engine's answer is measured, and the route is derived from the measurement" {
     // Not "the route is engine_owns_display". That is this machine's answer, and a

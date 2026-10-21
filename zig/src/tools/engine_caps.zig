@@ -27,7 +27,6 @@ pub fn main() !void {
     defer gpa.free(report.default_display_type);
     defer gpa.free(report.owned_display_type);
 
-
     out("engine present   {}\n", .{report.engine_present});
     if (!report.engine_present) {
         out("default display  <no engine loaded>\n", .{});

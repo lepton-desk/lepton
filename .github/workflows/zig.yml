@@ -34,6 +34,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/zig" && tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
           echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
 
+      # 0.16's formatting is the repository's: 0.17's `zig fmt` rewrites builtins 0.16
+      # does not have (`@intFromEnum` to `@backingInt`, measured), so it must not be run.
+      - name: Formatting
+        if: matrix.zig == '0.16.0'
+        run: zig fmt --check zig/src zig/build.zig packages/*/zig
+
       - name: Core tests
         working-directory: zig
         run: |

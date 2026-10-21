@@ -33,12 +33,9 @@ pub const Route = enum {
 
     pub fn describe(self: Route) []const u8 {
         return switch (self) {
-            .display_substitutable =>
-                "a display supplied by this framework reaches the engine",
-            .backend_injectable =>
-                "a view backend supplied by this framework reaches the engine",
-            .engine_owns_display =>
-                "the engine renders into a display it chose; neither door is open",
+            .display_substitutable => "a display supplied by this framework reaches the engine",
+            .backend_injectable => "a view backend supplied by this framework reaches the engine",
+            .engine_owns_display => "the engine renders into a display it chose; neither door is open",
         };
     }
 };

@@ -81,9 +81,22 @@ pub const X11Window = struct {
     screen_height: u16 = 0,
     /// Set when the window manager changed `_NET_WM_STATE`; `takeStateChange` reads it.
     state_changed: bool = false,
+    /// A window of the caller's on this connection (a menu) that is offered every event
+    /// first while set; what it takes does not reach this window's input.
+    overlay: ?Overlay = null,
+    /// Whether this window's frame is Lepton's own (the native path draws a title bar
+    /// and opens its menu on a right press). False for a window an engine fills edge to
+    /// edge (Servo's): every button then reaches the page, the right one included.
+    own_chrome: bool = true,
     /// `WM_DELETE_WINDOW`, which the window lists in `WM_PROTOCOLS`: the window manager's
     /// close (the titlebar's button) arrives as a client message carrying it.
     delete_window: u32 = 0,
+
+    /// See `overlay`. `handle` returns whether the event was the overlay's.
+    pub const Overlay = struct {
+        context: *anyopaque,
+        handle: *const fn (context: *anyopaque, event: *const xcb.xcb_generic_event_t) bool,
+    };
 
     /// One key event, raw: X's keycode (from `min_keycode`) and the modifier and group
     /// state of the event.
@@ -152,7 +165,9 @@ pub const X11Window = struct {
             xcb.XCB_EVENT_MASK_ENTER_WINDOW |
             xcb.XCB_EVENT_MASK_LEAVE_WINDOW |
             // `_NET_WM_STATE` changes: maximized, fullscreen, focused (`state`).
-            xcb.XCB_EVENT_MASK_PROPERTY_CHANGE;
+            xcb.XCB_EVENT_MASK_PROPERTY_CHANGE |
+            // Focus leaving the window, which closes an open menu (`overlay`).
+            xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
 
         var root_mask: u32 = xcb.XCB_EVENT_MASK_KEY_PRESS | xcb.XCB_EVENT_MASK_KEY_RELEASE;
         _ = xcb.xcb_change_window_attributes(conn, screen.root, xcb.XCB_CW_EVENT_MASK, @ptrCast(&root_mask));
@@ -215,6 +230,18 @@ pub const X11Window = struct {
         return bits;
     }
 
+    /// Whether `_NET_WM_STATE` lists the atom `name` (`_NET_WM_STATE_HIDDEN`, …).
+    pub fn hasState(self: *X11Window, name: []const u8) bool {
+        const property = self.atom("_NET_WM_STATE");
+        const wanted = self.atom(name);
+        if (property == 0 or wanted == 0) return false;
+        const reply = xcb.xcb_get_property_reply(self.conn, xcb.xcb_get_property(self.conn, 0, self.window_id, property, 4, 0, 32), null) orelse return false;
+        defer std.c.free(reply);
+        const count: usize = @intCast(@divTrunc(xcb.xcb_get_property_value_length(reply), 4));
+        const atoms: [*]const u32 = @ptrCast(@alignCast(xcb.xcb_get_property_value(reply)));
+        return std.mem.indexOfScalar(u32, atoms[0..count], wanted) != null;
+    }
+
     /// Whether `_NET_WM_STATE` changed since the last call.
     pub fn takeStateChange(self: *X11Window) bool {
         defer self.state_changed = false;
@@ -251,6 +278,40 @@ pub const X11Window = struct {
         return xcb.xcb_flush(self.conn) > 0;
     }
 
+    /// Asks the window manager for no frame (`_MOTIF_WM_HINTS`, decorations 0) or for its
+    /// frame again: the hint every X11 window manager in use reads, though no standard
+    /// defines it. False when there is no such atom to ask with.
+    pub fn setDecorated(self: *X11Window, decorated: bool) bool {
+        const hints = self.atom("_MOTIF_WM_HINTS");
+        if (hints == 0) return false;
+        // flags (MWM_HINTS_DECORATIONS = 2), functions, decorations, input mode, status.
+        const values = [5]u32{ 2, 0, @intFromBool(decorated), 0, 0 };
+        _ = xcb.xcb_change_property(self.conn, xcb.XCB_PROP_MODE_REPLACE, self.window_id, hints, hints, 32, values.len, &values);
+        return xcb.xcb_flush(self.conn) > 0;
+    }
+
+    /// Hands a move of the window to the window manager while the primary button is held
+    /// (EWMH `_NET_WM_MOVERESIZE`, the way a frameless window's own title bar moves it).
+    /// False when the button is no longer down or the atom is missing.
+    ///
+    /// The window manager takes the pointer, so this window never sees the button's
+    /// release: it is recorded here, or the page would go on holding the button.
+    pub fn startMove(self: *X11Window) bool {
+        const reply = xcb.xcb_query_pointer_reply(self.conn, xcb.xcb_query_pointer(self.conn, self.window_id), null) orelse return false;
+        defer std.c.free(reply);
+        if (reply.*.mask & xcb.XCB_BUTTON_MASK_1 == 0) return false;
+        const moveresize = self.atom("_NET_WM_MOVERESIZE");
+        if (moveresize == 0) return false;
+        // The press's implicit grab would keep the pointer from the window manager.
+        _ = xcb.xcb_ungrab_pointer(self.conn, xcb.XCB_CURRENT_TIME);
+        const x: i32 = reply.*.root_x;
+        const y: i32 = reply.*.root_y;
+        // x_root, y_root, direction 8 (_NET_WM_MOVERESIZE_MOVE), button 1, source 1.
+        const sent = self.toRoot(moveresize, .{ @bitCast(x), @bitCast(y), 8, 1, 1 });
+        if (sent) self.input.button(1 << 0, false, 0, 0);
+        return sent;
+    }
+
     /// Lists `WM_DELETE_WINDOW` in `WM_PROTOCOLS` (ICCCM 4.2.8.1). Without it the window
     /// manager has no way to ask the window to close: measured on COSMIC's XWayland, its
     /// close request did nothing; a window manager that falls back to `XKillClient` can
@@ -264,7 +325,7 @@ pub const X11Window = struct {
     }
 
     /// An atom by name, 0 when the server cannot make it.
-    fn atom(self: *X11Window, name: []const u8) u32 {
+    pub fn atom(self: *X11Window, name: []const u8) u32 {
         const reply = xcb.xcb_intern_atom_reply(self.conn, xcb.xcb_intern_atom(self.conn, 0, @intCast(name.len), name.ptr), null) orelse return 0;
         defer std.c.free(reply);
         return reply.*.atom;
@@ -486,6 +547,7 @@ pub fn connectionFd(self: *X11Window) i32 {
 /// where the pointer had got to by the time the frame ran rather than where it was
 /// when it was pressed.
 fn applyEvent(self: *X11Window, event: *const xcb.xcb_generic_event_t) void {
+    if (self.overlay) |overlay| if (overlay.handle(overlay.context, event)) return;
     switch (event.response_type & ~X11Window.event_bit) {
         xcb.XCB_CONFIGURE_NOTIFY => {
             const cfg: *const xcb.xcb_configure_notify_event_t = @ptrCast(@alignCast(event));
@@ -585,10 +647,12 @@ fn setPositionHints(conn: *xcb.xcb_connection_t, target: xcb.xcb_window_t, at: a
 /// The right button opens the menu and never reaches the zone logic, exactly as on
 /// Wayland: a right press on the titlebar must not begin a drag the left button was
 /// never asked for.
-fn handleButton(self: *X11Window, detail: u8, down: bool) void {
+/// The native path's own frame: a right press opens its menu, a release chooses from it
+/// or acts on the title bar. Null when the event was the frame's alone.
+fn handleChrome(self: *X11Window, detail: u8, down: bool) ?void {
     if (down and detail == 3) {
         self.menu.openAt(self.input.x, self.input.y, self.input.width, self.input.height);
-        return;
+        return null;
     }
     if (!down and self.menu.open and detail == 1) {
         if (self.menu.entryAt(self.input.x, self.input.y)) |entry| {
@@ -599,16 +663,21 @@ fn handleButton(self: *X11Window, detail: u8, down: bool) void {
         } else {
             self.menu.dismiss();
         }
-        return;
+        return null;
     }
     if (!down and detail == 1) {
         if (self.menu.open) {
             self.menu.dismiss();
-            return;
+            return null;
         }
         self.chosen = chrome.actionFor(self.input, 0, self.last_click_ms, 1);
         self.chosen_pending = true;
     }
+    return {};
+}
+
+fn handleButton(self: *X11Window, detail: u8, down: bool) void {
+    if (self.own_chrome) handleChrome(self, detail, down) orelse return;
     // Buttons 4 to 7 are the wheel, one press per step (up, down, left, right), in the
     // pixels a step scrolls. They were read as the side and back buttons, so a wheel step
     // reached a page as "back".

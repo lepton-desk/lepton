@@ -106,7 +106,7 @@ pub fn main() !u8 {
     const total_ns: u64 = @intCast(@max(started.durationTo(std.Io.Clock.Timestamp.now(io, .awake)).raw.nanoseconds, 1));
     std.debug.print("window       {d}x{d}, presented through {s}\n", .{ size.width, size.height, if (window.presentPath()) |path| @tagName(path) else "nothing" });
     std.debug.print("frames       {d} in {d} ms = {d:.1} fps; present (draw + swap) {d} us on average\n", .{
-        frames,                                   total_ns / std.time.ns_per_ms,
+        frames,                                                                    total_ns / std.time.ns_per_ms,
         @as(f64, @floatFromInt(frames)) * 1e9 / @as(f64, @floatFromInt(total_ns)), present_ns / frames / 1000,
     });
     std.debug.print("upload       {d} instances = {d} B a frame; the atlas holds {d} B of glyph coverage\n", .{

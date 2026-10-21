@@ -65,7 +65,6 @@ const iterate_main_context = @extern(
 /// The consequence is recorded rather than solved here: a packaged build cannot be *told*
 /// where its local storage lives, only where the engine chose. If that turns out to be
 /// ephemeral, the fix is not this API but the storage path itself.
-
 /// One turn: let the engine answer, then pace the loop.
 ///
 /// Non-blocking on purpose. A blocking iteration would wait for an event that may never
@@ -81,28 +80,9 @@ fn engineTurn() void {
 /// left by an earlier run of the check would be read back as proof of exactly the thing
 /// being measured.
 const clearing_page: [:0]const u8 =
-    "<title>lepton</title><script>"
-    ++ "var done='no';"
-    ++ "try{localStorage.removeItem('lepton-probe');"
-    ++ "done=(localStorage.getItem('lepton-probe')===null)?'cleared':'still-there';}catch(e){done='threw';}"
-    ++ "fetch('lepton://check/reset/'+done);"
-    ++ "</script>";
+    "<title>lepton</title><script>" ++ "var done='no';" ++ "try{localStorage.removeItem('lepton-probe');" ++ "done=(localStorage.getItem('lepton-probe')===null)?'cleared':'still-there';}catch(e){done='threw';}" ++ "fetch('lepton://check/reset/'+done);" ++ "</script>";
 
-const page: [:0]const u8 = "<title>lepton</title>"
-    ++ "<body style='background:#14181c;color:#cdd3d8;font:16px monospace'>"
-    ++ "lepton webview check"
-    ++ "<script>"
-    ++ "var before='absent',after='absent';"
-    ++ "try{"
-    ++ "var seen=localStorage.getItem('lepton-probe');"
-    ++ "if(seen!==null){before=seen;}"
-    ++ "localStorage.setItem('lepton-probe','kept');"
-    ++ "after=(localStorage.getItem('lepton-probe')==='kept')?'kept':'lost';"
-    ++ "}catch(e){before='threw';after='threw';}"
-    ++ "fetch('lepton://check/storage/'+before+'-'+after).then(r=>r.text())"
-    ++ ".then(t=>{document.title='answered'})"
-    ++ ".catch(()=>{document.title='refused'})"
-    ++ "</script></body>";
+const page: [:0]const u8 = "<title>lepton</title>" ++ "<body style='background:#14181c;color:#cdd3d8;font:16px monospace'>" ++ "lepton webview check" ++ "<script>" ++ "var before='absent',after='absent';" ++ "try{" ++ "var seen=localStorage.getItem('lepton-probe');" ++ "if(seen!==null){before=seen;}" ++ "localStorage.setItem('lepton-probe','kept');" ++ "after=(localStorage.getItem('lepton-probe')==='kept')?'kept':'lost';" ++ "}catch(e){before='threw';after='threw';}" ++ "fetch('lepton://check/storage/'+before+'-'+after).then(r=>r.text())" ++ ".then(t=>{document.title='answered'})" ++ ".catch(()=>{document.title='refused'})" ++ "</script></body>";
 
 /// How long to wait for the engine to settle, in turns of `turn_ms`.
 ///
@@ -290,7 +270,6 @@ fn run() !void {
         }
     }
 
-
     if (view.uri()) |landed| {
         std.debug.print("uri          {s}\n", .{landed});
     } else {
@@ -334,7 +313,6 @@ fn run() !void {
             .{ .raw = .fromMilliseconds(turn_ms), .clock = .awake },
             io,
         );
-
     }
     const reset_path = core.webviewBridge.lastPath() orelse "no answer";
     std.debug.print("reset        {s}\n", .{reset_path});

@@ -197,7 +197,7 @@ pub const WaylandWindow = struct {
             .shm = shm,
             .allocator = allocator,
             .size = request.size,
-        .wl_format = wayland_present.formatConstant(request.format),
+            .wl_format = wayland_present.formatConstant(request.format),
             .seat = state.globals.seat,
             .input = .{
                 .width = request.size.width,
@@ -320,47 +320,47 @@ pub const WaylandWindow = struct {
         return c;
     }
 
-/// Waits for the compositor, without spinning.
-///
-/// libwayland's contract is a specific sequence and the order is the whole point:
-///
-///     prepare_read → poll → read_events → dispatch_pending
-///
-/// with `cancel_read` instead of `read_events` when the poll times out.
-///
-/// The previous version polled and then called `read_events` directly, skipping
-/// `prepare_read`. That is not a shorter form of the same thing: `read_events` reads from
-/// the connection's descriptor on the assumption that a read was announced first, and
-/// without the announcement it can block on a descriptor the poll already reported. It
-/// appeared to work only because nothing else had touched the connection between frames —
-/// adding a drain call made the two race, and the wait stopped returning.
-///
-/// `prepare_read` also carries the real reason this is not optional: it is how the library
-/// knows the caller is about to read, so a dispatch from another thread cannot read those
-/// bytes first. Skipping it is only safe while this process is the sole reader, which is
-/// an accident of the current design rather than a property of it.
-pub fn wait(self: *WaylandWindow, timeout_ms: i32) Error!void {
-    _ = wl.wl_display_flush(self.display);
-    while (wl.wl_display_dispatch_pending(self.display) > 0) {}
+    /// Waits for the compositor, without spinning.
+    ///
+    /// libwayland's contract is a specific sequence and the order is the whole point:
+    ///
+    ///     prepare_read → poll → read_events → dispatch_pending
+    ///
+    /// with `cancel_read` instead of `read_events` when the poll times out.
+    ///
+    /// The previous version polled and then called `read_events` directly, skipping
+    /// `prepare_read`. That is not a shorter form of the same thing: `read_events` reads from
+    /// the connection's descriptor on the assumption that a read was announced first, and
+    /// without the announcement it can block on a descriptor the poll already reported. It
+    /// appeared to work only because nothing else had touched the connection between frames —
+    /// adding a drain call made the two race, and the wait stopped returning.
+    ///
+    /// `prepare_read` also carries the real reason this is not optional: it is how the library
+    /// knows the caller is about to read, so a dispatch from another thread cannot read those
+    /// bytes first. Skipping it is only safe while this process is the sole reader, which is
+    /// an accident of the current design rather than a property of it.
+    pub fn wait(self: *WaylandWindow, timeout_ms: i32) Error!void {
+        _ = wl.wl_display_flush(self.display);
+        while (wl.wl_display_dispatch_pending(self.display) > 0) {}
 
-    if (wl.wl_display_prepare_read(self.display) != 0) return error.DisplayLost;
-    // From here on a read is announced, so any path that does not reach `read_events`
-    // must cancel it. Leaking an announced read would leave the connection refusing to
-    // dispatch for the rest of the process's life.
-    errdefer _ = wl.wl_display_cancel_read(self.display);
+        if (wl.wl_display_prepare_read(self.display) != 0) return error.DisplayLost;
+        // From here on a read is announced, so any path that does not reach `read_events`
+        // must cancel it. Leaking an announced read would leave the connection refusing to
+        // dispatch for the rest of the process's life.
+        errdefer _ = wl.wl_display_cancel_read(self.display);
 
-    var fds = [_]posix.pollfd{
-        .{ .fd = wl.wl_display_get_fd(self.display), .events = posix.POLL.IN, .revents = 0 },
-    };
-    _ = posix.poll(&fds, timeout_ms) catch return error.DisplayLost;
+        var fds = [_]posix.pollfd{
+            .{ .fd = wl.wl_display_get_fd(self.display), .events = posix.POLL.IN, .revents = 0 },
+        };
+        _ = posix.poll(&fds, timeout_ms) catch return error.DisplayLost;
 
-    if (fds[0].revents & posix.POLL.IN == 0) {
-        _ = wl.wl_display_cancel_read(self.display);
-        return;
+        if (fds[0].revents & posix.POLL.IN == 0) {
+            _ = wl.wl_display_cancel_read(self.display);
+            return;
+        }
+        if (wl.wl_display_read_events(self.display) < 0) return error.DisplayLost;
+        if (wl.wl_display_dispatch_pending(self.display) < 0) return error.DisplayLost;
     }
-    if (wl.wl_display_read_events(self.display) < 0) return error.DisplayLost;
-    if (wl.wl_display_dispatch_pending(self.display) < 0) return error.DisplayLost;
-}
 
     /// Flushes queued requests to the compositor.
     pub fn flush(self: *WaylandWindow) void {
@@ -535,8 +535,7 @@ pub fn resize(handle: *anyopaque, size: Size) window.Error!void {
     // the globals are gone is the display being lost as far as a caller is concerned, and
     // the contract has no separate word for it.
     w.resize(size) catch |failure| switch (failure) {
-        error.SizeRefused,
-        error.GpuRefused => return error.GpuRefused,
+        error.SizeRefused, error.GpuRefused => return error.GpuRefused,
         error.FrameTruncated => return error.FrameTruncated,
         error.UnsupportedState => return error.UnsupportedState,
         error.BufferRefused,

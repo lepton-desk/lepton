@@ -27,6 +27,7 @@ const bridge_mod = @import("../bridge.zig");
 const transport = @import("../transport.zig");
 const request = @import("request.zig");
 const keymap = @import("keymap.zig");
+const menu_x11 = @import("menu_x11.zig");
 const invoke = @import("../invoke.zig");
 const events = @import("../events.zig");
 
@@ -240,6 +241,9 @@ const buttons = [_]struct { which: input_state.Button, number: u32 }{
 
 pub const View = struct {
     window: x11.X11Window,
+    /// The page's menu (`window.menu`) while it is open, and the request it answers.
+    menu: menu_x11.Menu = .{},
+    menu_answer: ?invoke.Later = null,
     xdisplay: *c.Display,
     servo: *c.LeptonServo,
 
@@ -260,6 +264,9 @@ pub const View = struct {
         var window = x11.X11Window.open(.{ .title = "Lepton", .size = .{ .width = 800, .height = 600 }, .mapped = false }) catch
             return error.NoWindow;
         errdefer window.close();
+        // Servo fills the window; the native path's title bar and right-press menu would
+        // take the page's own right button.
+        window.own_chrome = false;
 
         const xdisplay = c.XOpenDisplay(null) orelse return error.NoXlib;
         errdefer _ = c.XCloseDisplay(xdisplay);
@@ -392,11 +399,10 @@ pub const View = struct {
         c.lepton_servo_resize(self.servo, size.width, size.height);
     }
 
-    /// `window.decorations: false`. Not under Servo yet (its X11 window keeps the window
-    /// manager's frame); `window.start_drag` answers `failed`.
+    /// `window.decorations: false`: the window manager draws no frame (`_MOTIF_WM_HINTS`)
+    /// and the page's own title bar moves the window (`window.start_drag`).
     pub fn setDecorations(self: *View, decorated: bool) void {
-        _ = self;
-        _ = decorated;
+        _ = self.window.setDecorated(decorated);
     }
 
     pub fn map(self: *View) void {
@@ -422,7 +428,7 @@ pub const View = struct {
         // The page's `window.*` commands act on the core's X11 window (EWMH), and its
         // state and size reach the page as `window.state` and `window.resized` events
         // (`applyEvents`). Engine permission prompts are WebKit's; Servo asks none.
-        self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState };
+        self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState, .start_drag = &windowDrag, .menu = &windowMenu };
     }
 
     fn windowAct(data: ?*anyopaque, action: invoke.WindowAction) bool {
@@ -432,6 +438,32 @@ pub const View = struct {
             .maximize => self.window.setMaximized(true),
             .unmaximize => self.window.setMaximized(false),
         };
+    }
+
+    fn windowMenu(data: ?*anyopaque, bytes: []const u8, later: invoke.Later) bool {
+        const self: *View = @ptrCast(@alignCast(data orelse return false));
+        if (self.menu.isOpen()) return false;
+        self.menu_answer = later;
+        self.menu.open(&self.window, bytes, self, &menuDone) catch {
+            self.menu_answer = null;
+            return false;
+        };
+        return true;
+    }
+
+    /// The chosen id as `window.menu` answers it: u16, 0 when dismissed.
+    fn menuDone(context: *anyopaque, id: u16) void {
+        const self: *View = @ptrCast(@alignCast(context));
+        const later = self.menu_answer orelse return;
+        self.menu_answer = null;
+        var result: [2]u8 = undefined;
+        std.mem.writeInt(u16, &result, id, .little);
+        later.finish(.ok, &result);
+    }
+
+    fn windowDrag(data: ?*anyopaque) bool {
+        const self: *View = @ptrCast(@alignCast(data orelse return false));
+        return self.window.startMove();
     }
 
     fn windowState(data: ?*anyopaque) ?u32 {
@@ -460,6 +492,7 @@ pub const View = struct {
         // Servo writes its cookie jar only at the end of the shutdown skipped below
         // (measured: a cookie the dev server's page wrote was gone at the next start, and
         // no `cookie_jar.json` was ever written); this writes it now.
+        self.menu.finish(0);
         c.lepton_servo_write_state(self.servo);
         if (host.view == self) host.view = null;
         // Servo, its Xlib display and the window it draws into are left to the process's

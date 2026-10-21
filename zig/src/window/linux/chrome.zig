@@ -191,7 +191,6 @@ pub const Rect = struct {
     }
 };
 
-
 // --- Drawing ---------------------------------------------------------------
 
 /// The titlebar's palette.
@@ -317,8 +316,6 @@ fn drawDiagonal(target: Surface, x0: i32, y0: i32, x1: i32, y1: i32, ink: Colour
     }
 }
 
-
-
 // --- The window menu -------------------------------------------------------
 
 /// One entry in the window menu.
@@ -434,8 +431,6 @@ pub fn menuAction(item: MenuItem) Action {
         .close => .close,
     };
 }
-
-
 
 /// Paints the window menu, or paints nothing when it is closed.
 ///
