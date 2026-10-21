@@ -47,6 +47,18 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 - **Zig 0.16 ve 0.17:** ikisiyle de çekirdek testleri, araçlar, bütün eklentili webview uygulaması (derlendi, çalıştı, Windows'a çapraz derlendi), yerel uygulama. CI `zig` iş akışı ikisini de çalıştırıyor (geçti).
 - **Servo (deneysel, yalnız Linux):** `npm install -D @lepton-desk/servo-linux-x64`, sonra `lepton build --linux --servo`, `lepton run --servo` ya da `lepton dev --servo`. Bu makinede ölçüldü: sayfa canlı veriyi çizdi; `dev`'de sayfa dev sunucusundan geldi, düzenleme sayfayı yeniledi; Ctrl+C hemen bitiriyor, dosya kalmıyor, SIGTERM'de çıkış kodu 0.
 
+## Sıradaki (kullanıcı, 2026-10-21; limit yüzünden ertelendi)
+
+1. **Linux'ta `failed` kalmasın:**
+   - `window.decorations: false`: WPE'de başlık çubuğu kaldırılsın (önce WPE 2.54/2.56 API'sinde süsleri kapatan bir yol aranacak — `WPEToplevel`, xdg-decoration `client_side` isteği; yoksa Lepton'ın kendi WPE platformunda). Servo'nun X11 penceresinde `_MOTIF_WM_HINTS`.
+   - `window.start_drag`: Wayland'de `xdg_toplevel_move` (basışın `serial`'ı gerekir), X11'de `_NET_WM_MOVERESIZE`.
+   - `window.menu`: yerel menü — WPE menü çizmiyor; Lepton'ın kendi sağ tık menüsü (`window/linux/chrome.zig`) ya da bir xdg-popup.
+   - Başlık çubuğunun sayfayı izlemesi Linux'ta da (bileşimci izin veriyorsa; yoksa nedenini yaz).
+2. **Açık kalanların hepsi** (aşağıdaki liste ve bu dosyadaki "ölçülmedi" notları).
+3. **Windows'ta Zig 0.17:** zvm ile 0.17 kurulup `zig build test`, şablon uygulama, araçlar 0.17 ile de geçmeli (Linux'ta ikisi geçiyor; Windows'ta yalnız 0.16 denendi).
+
+Kullanıcı Linux'ta çalıştırıp düzeltecek; Windows'ta ölçülenler bozulmamalı.
+
 ## Açık kalanlar
 
 Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Chromium tabanlı, sistemle gelir, Microsoft günceller). `--servo` başka sistemde reddedilir.
