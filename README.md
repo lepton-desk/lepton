@@ -70,7 +70,7 @@ Templates: `vanilla-ts`, `vanilla-js`, `react-ts`, `react-js`, `vue-ts`, `svelte
 | `lepton dev` | Vite with HMR + the core built once; frontend edits need no rebuild |
 | `lepton run` | release build of the frontend and core, then the application |
 | `lepton build` | the same, without starting it |
-| `lepton package` | `.tar.gz`, Arch `.pkg.tar.zst`, `.deb` from `bundle.targets`; `--verify` unpacks and runs each |
+| `lepton package` | `.tar.gz`, Arch `.pkg.tar.zst`, `.deb`, `.zip`, `.msi` from `bundle.targets`; `--windows` packages a Windows build from Linux too; `--verify` unpacks and runs each |
 | `lepton record` | opens the application and writes every command the page calls, and its reply, to a file |
 | `lepton replay <file>` | runs a recording against the core again, with no window, and compares every reply |
 | `lepton replay --page <file>` | opens the application and answers the page's calls from the recording |

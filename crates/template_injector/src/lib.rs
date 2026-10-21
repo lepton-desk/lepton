@@ -35,7 +35,7 @@ pub use assets::{
     STYLESHEET, ZIG_BUILD, index_html, package_manifest, zig_entry,
 };
 pub use base::{BaseFrontend, Bindings, TemplateError};
-pub use bundle::{Bundle, BundleTarget, parse_bundle};
+pub use bundle::{Bundle, BundleTarget, parse_bundle, parse_bundle_for};
 pub use frontend::{Frontend, parse_frontend};
 pub use manifest::{
     Language, Manifest, ManifestError, RenderPath, Target, render_manifest, validate,

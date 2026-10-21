@@ -35,6 +35,24 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
 - **Yeni proje `biome check`'ten geçmiyordu (bulundu, düzeltildi):** gömülü çekirdeğin `cookie_shim.js`'i (6 hata) ve `src-lepton/icon.svg` (`<title>` yok). Şablonun `biome.json`'u artık `src-lepton/vendor`'ı dışarıda bırakıyor (Lepton'ın kodu, geliştiricinin değil; proje git deposu olmadığında `.gitignore` okunmuyor), simgeye `<title>Lepton</title>` eklendi (CLI'nin kopyası da). Yeni vanilla-ts: `biome check` 0, `tsc` 0. Windows'ta görüldü; Linux'ta aynı olmalı (dosyalar aynı), denenmedi.
 - **`fs.watch` (yazıldı, ölçüldü):** `plugin-fs/zig/fs_windows_watch.zig`, `ReadDirectoryChangesW` (çakışmalı okuma, döngünün her turunda bekletmeden boşaltılıyor; dizin kökün altında `OBJ_DONT_REPARSE` ile açılıyor). Sayfadan: `created a.md`, `modified a.md`, `renamedFrom a.md`, `renamedTo b.md`, `removed b.md`; PowerShell'in yazdıkları da geldi (`created alt`, `created alt/from-powershell.txt`, `modified …`, `removed …`, özyinelemeli). `zig test` 11/11; ağaca konan bir junction'ın hedefindeki yazma izlemeye düşmüyor, junction izlenemiyor (`denied`). Mutasyon: yeniden okumayı kaldırınca üç izleme testi, `MODIFIED` birleştirmesini kaldırınca bir test düştü — Windows tek yazmaya birden çok `MODIFIED` veriyor. Linux'tan farkı: izlenen dizinin adı değişirse bildirilmiyor; silinirse `gone`.
 
+## Windows'ta Zig 0.17 (2026-10-21, ölçüldü)
+
+- zvm 0.9.1 ile `zvm install 0.17.0` (zvm kurulunca varsayılanı 0.17 yapıyor; `zvm use 0.16.0` ile geri alındı — depo 0.16 ile biçimlenir).
+- 0.17 ile: `zig build test` (Windows kökü) 60/63 (3 atlandı, 0.16 ile aynı); `plugin-fs` 11/11, `plugin-os` 3/3, `plugin-dialog` 2/2; `zig build invoke-check` derlendi.
+- Şablon uygulama (`LEPTON_ZIG=…\0.17.0\zig.exe lepton build`) derlendi ve açıldı; `tools/ci/windows/measure.ps1` 0.16 derlemesiyle aynı sonucu verdi: koyu/açık başlık sayfayı izliyor, ikinci başlatma 0 ile bitti ve tek pencere kaldı, `WM_CLOSE` ile 0 çıkış. Kalan dört "FAIL" başlık/yazı rengi (`DWMWA_CAPTION_COLOR`/`TEXT_COLOR`): Windows 10'da `E_INVALIDARG` (0x80070057), yalnız Windows 11'de var.
+- Bu makinede ayrıca: HEAD'den (`edc2ac7`) `cli-win32-x64` yeniden yerleştirildi (6 802 944 bayt), `api`/`plugin-clipboard`/`plugin-dialog` `prepublishOnly` 0; `beta.2` npm'de hâlâ boş.
+
+## Windows Server 2025 CI (madde 4, yazıldı, CI'da henüz çalışmadı)
+
+- `.github/workflows/windows.yml` (`windows-2025`): CLI, bu depodan `@lepton-desk/api` ile şablon uygulama (`deepLinks: ["leptonci"]`, `bundle.targets: ["zip", "msi"]`), pencere ölçümü, paketleme, MSI kur → aç ve ölç → kaldır (klasör kalmamalı). Rapor ve ekran görüntüleri `windows-2025` artifact'ında.
+- `tools/ci/windows/`: `cdp.mjs` (DevTools ile sayfada ifade; `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port`), `window-facts.ps1` (yerleşim, simgeler, DWM 20/35/36, başlık pikseli, ekran görüntüsü), `measure.ps1` (`theme-color` `#ffd700` → başlık `0x0000D7FF`, yazı siyah, açık; `rgb(27 29 28)` → `0x001C1D1B`, yazı beyaz, koyu; tek kopya; kapanış). Renk denetimi başarılı okuma (`hr 0`) da istiyor: Windows 10'da başarısız okuma 0 döndürüp "siyah yazı"yı yanlışlıkla geçiriyordu.
+
+## Linux'tan Windows paketi (madde 5, adım 1–2 yazıldı)
+
+- `platform::System` (Linux/Windows): exe adı ve paket adındaki sistem hedefe göre; `packages_as(format, sistem)` MSI'yı Windows derlemesi için her makinede kabul ediyor, `deb`/`arch` yalnız Linux'ta Linux derlemesi için.
+- `lepton package --windows` / `--linux`: derlemeye geçiyor; `bundle.targets` yoksa Windows derlemesi `zip`. Hedef bu makine değilse `--verify` derlemeden önce nedeniyle reddediliyor. Masaüstü girdisi yalnız Linux derlemesinde.
+- Testler: Windows paketi testi artık her makinede koşuyor ve `zip` ile `msi`'yi yazıyor; `cargo test` 352 (önce 349), Clippy Windows ve Linux hedefi 0. **Linux'ta çalıştırılmadı:** `lepton package --windows` Linux'ta denenecek, çıkan MSI CI'da kurulacak (adım 3), bayt eşitliği ölçülecek (adım 4).
+
 ## 0.1.9-beta.2'de ne var (Linux'ta ölçüldü)
 
 - **Güvenlik (yüksek/orta/düşük):** çekirdek yolları çalıştırma başına rastgele anahtarın arkasında (`/__lepton/<anahtar>/…`); transport yalnız uygulamanın kendi sayfasına; başka siteler pencereye girmiyor (WPE, WebView2, Servo); dışarıda yalnız http/https/mailto açılıyor; izinler state dizininde; kaydetme penceresi yalnız dosyaya izin veriyor, ev ve üstüne izin yok; yapılandırma değerleri denetleniyor ve kaçışlanıyor; `plugin-fs` ofset taşması ve `.lepton-save` izinleri; Servo gövde sınırı ve zaman aşımı; replay ev dizini, semver ön sürüm, bağlantı üzerinden yazmama; `bundle.icon` proje içinde; `/dev/shm` adları kullanıcıya özel; ertelenmiş özel cevaplar maskeli.
@@ -55,7 +73,7 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
    - `window.menu`: yerel menü — WPE menü çizmiyor; Lepton'ın kendi sağ tık menüsü (`window/linux/chrome.zig`) ya da bir xdg-popup.
    - Başlık çubuğunun sayfayı izlemesi Linux'ta da (bileşimci izin veriyorsa; yoksa nedenini yaz).
 2. **Açık kalanların hepsi** (aşağıdaki liste ve bu dosyadaki "ölçülmedi" notları).
-3. **Windows'ta Zig 0.17:** zvm ile 0.17 kurulup `zig build test`, şablon uygulama, araçlar 0.17 ile de geçmeli (Linux'ta ikisi geçiyor; Windows'ta yalnız 0.16 denendi).
+3. **Windows'ta Zig 0.17:** zvm ile 0.17 kurulup `zig build test`, şablon uygulama, araçlar 0.17 ile de geçmeli (Linux'ta ikisi geçiyor; Windows'ta yalnız 0.16 denendi). Durumu aşağıda, "Windows'ta Zig 0.17".
 4. **Windows 11 ve Windows Server 2025 uyumu, CI'da ölçülür** (bu makine Windows 11 gereksinimlerini karşılamıyor; kurulmayacak, atlatılmayacak): GitHub Actions `windows-2025` (Server 2025, derleme 26100) üzerinde bir iş akışı şablon uygulamayı derleyip açar ve ölçer — başlık rengi (`theme-color` verilince `DwmGetWindowAttribute(DWMWA_CAPTION_COLOR)` beklenen renk mi, ekran görüntüsü artifact olarak), koyu/açık, simge, küçük ekranda yerleşim, çerçevesiz pencere ve sürükleme, yerel menü, tek kopya, MSI kurulum/kaldırma. Önce Server 2025'te `DWMWA_CAPTION_COLOR`'ın gerçekten çalıştığı ölçülecek; çalışmıyorsa nedeni yazılır. Server 2025'e ya da Windows 11'e özgü fark çıkarsa düzeltilir (Windows 10'da ölçülenler bozulmadan).
 
 5. **Linux'tan Windows paketi, yalnız `.exe` değil** (adım adım): `lepton package --windows` Linux'ta `.zip` ve `.msi` yazar — ikisinin yazıcısı da saf Rust (`zip.rs`, `installer_db.rs` + `cfb`/`cab`), simge Zig'in kaynak derleyicisiyle, WebView2 başlığı depoda.

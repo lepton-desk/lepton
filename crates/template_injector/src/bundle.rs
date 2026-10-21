@@ -78,8 +78,16 @@ pub struct Bundle {
 
 impl Default for Bundle {
     fn default() -> Self {
+        Self::for_system(cfg!(windows))
+    }
+}
+
+impl Bundle {
+    /// No section: the plain archive of the system the build is for — `zip` for a
+    /// Windows build, `tar.gz` for a Linux one, wherever it is packaged.
+    pub fn for_system(windows: bool) -> Self {
         Self {
-            targets: vec![if cfg!(windows) {
+            targets: vec![if windows {
                 BundleTarget::Zip
             } else {
                 BundleTarget::TarGz
@@ -91,21 +99,27 @@ impl Default for Bundle {
     }
 }
 
-/// Reads the `bundle` section of a configuration file's text.
+/// Reads the `bundle` section of a configuration file's text, for a build of this system.
+pub fn parse_bundle(text: &str) -> Result<Bundle, ManifestError> {
+    parse_bundle_for(text, cfg!(windows))
+}
+
+/// Reads the `bundle` section of a configuration file's text, for a Windows build when
+/// `windows` (`lepton package --windows` on Linux), else a Linux one.
 ///
 /// Strict: an unknown format, a repeated one or an empty list is an error naming the
 /// file, because a release that silently skips a format is found out by a user.
-pub fn parse_bundle(text: &str) -> Result<Bundle, ManifestError> {
+pub fn parse_bundle_for(text: &str, windows: bool) -> Result<Bundle, ManifestError> {
     let root: Value = serde_json::from_str(text).map_err(|error| ManifestError {
         reason: format!("{SOURCE} is not valid JSON: {error}"),
     })?;
     let section = match root.get("bundle") {
-        None => return Ok(Bundle::default()),
+        None => return Ok(Bundle::for_system(windows)),
         Some(section @ Value::Object(_)) => section,
         Some(_) => return Err(invalid("\"bundle\" must be an object")),
     };
     let targets = match section.get("targets") {
-        None => Bundle::default().targets,
+        None => Bundle::for_system(windows).targets,
         Some(list) => targets(list)?,
     };
     let maintainer = match section.get("maintainer") {
@@ -198,7 +212,7 @@ fn invalid(reason: &str) -> ManifestError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bundle, BundleTarget, parse_bundle};
+    use super::{Bundle, BundleTarget, parse_bundle, parse_bundle_for};
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok};
 
@@ -234,6 +248,18 @@ mod tests {
             BundleTarget::TarGz
         };
         assert_eq!(bundle.targets, vec![expected]);
+        Ok(())
+    }
+
+    #[test]
+    fn no_section_follows_the_system_the_build_is_for() -> Result<(), Failure> {
+        let windows = assert_ok!(parse_bundle_for(r#"{"bundle":{}}"#, true), "parses");
+        assert_eq!(windows.targets, vec![BundleTarget::Zip]);
+        let linux = assert_ok!(
+            parse_bundle_for(r#"{"productName":"Notes"}"#, false),
+            "parses"
+        );
+        assert_eq!(linux.targets, vec![BundleTarget::TarGz]);
         Ok(())
     }
 

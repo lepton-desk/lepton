@@ -7,9 +7,12 @@
 //! a rewrite: the build's tree plus the desktop entry a shell needs to show the
 //! application by name, into `src-lepton/bundle/<name>-<version>-<os>-<arch>/`.
 //!
-//! On Windows the tree is `bin\<name>.exe` and `share\<name>\dist`, with no desktop
-//! entry, and the format is a `.zip` (`zip.rs`); the Arch and Debian formats are Linux
-//! packages and are refused there before anything is built (`platform::packages_as`).
+//! For Windows the tree is `bin\<name>.exe` and `share\<name>\dist`, with no desktop
+//! entry, and the formats are `.zip` (`zip.rs`) and `.msi` (`installer.rs`). What a
+//! package holds follows the build's system, not this machine's: `lepton package
+//! --windows` on Linux cross-compiles the core and writes the same zip and MSI Windows
+//! would. The Arch and Debian formats are Linux packages, refused for any other build
+//! before anything is built (`platform::packages_as`).
 //!
 //! Written in Rust, file by file, with no `tar` or package-manager subprocess: what goes
 //! into a release is decided in one place, and every file in it is one this code chose.
@@ -18,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use super::build::{CORE_DIR, read_manifest};
 use super::{CliError, Outcome};
+use crate::platform::System;
 
 /// The file that marks a directory as one this command wrote, and may therefore replace.
 pub const MARKER: &str = ".lepton-package";
@@ -36,6 +40,14 @@ pub struct Flags {
     /// Lays out the last build without building again.
     #[arg(long)]
     pub no_build: bool,
+
+    /// Packages a Windows build (zip, msi), cross-compiled when this is not Windows.
+    #[arg(long, conflicts_with = "linux")]
+    pub windows: bool,
+
+    /// Packages a Linux build.
+    #[arg(long)]
+    pub linux: bool,
 
     /// Unpacks every written package into an empty directory, starts the application
     /// from there, measures it and closes it; fails if it does not stay up.
@@ -57,6 +69,8 @@ pub struct Spec {
     pub version: String,
     /// The directory bundles are written under.
     pub out: PathBuf,
+    /// The system the build is for, which names the bundle and its executable.
+    pub system: System,
 }
 
 impl Flags {
@@ -75,17 +89,30 @@ impl Flags {
         // A SIGTERM to `lepton` ends the build or the application it started.
         lepton_orchestrator::supervise::install();
         let manifest = read_manifest(root)?;
+        let system = self.system();
         // Refused before the build, not after it: a format this system cannot make is a
         // mistake in the configuration, and a minute of compiling would only delay it.
-        let formats = read_bundle(root)?;
+        let formats = read_bundle(root, system)?;
         for target in &formats.targets {
-            crate::platform::packages_as(*target).map_err(CliError::Invalid)?;
+            crate::platform::packages_as(*target, system).map_err(CliError::Invalid)?;
+        }
+        // A Windows package is checked on Windows (the `windows` workflow installs the
+        // MSI Linux wrote): it cannot start here, and Wine is no measure of WebView2.
+        if self.verify && system != System::host() {
+            return Err(CliError::Invalid(format!(
+                "--verify starts the packaged application, and a {} build does not run on {}; verify it on {}",
+                system.bundle_os(),
+                System::host().bundle_os(),
+                system.bundle_os()
+            )));
         }
 
         if !self.no_build {
             let build = super::build::Flags {
                 native: self.native,
                 webview: self.webview,
+                windows: self.windows,
+                linux: self.linux,
                 ..Default::default()
             };
             build.build_in(root)?;
@@ -98,6 +125,7 @@ impl Flags {
             product: manifest.product_name.clone(),
             version: manifest.version.clone(),
             out: root.join(CORE_DIR).join("bundle"),
+            system,
         };
         let bundle = assemble(&spec)?;
         let report = super::report::Report::new();
@@ -105,7 +133,7 @@ impl Flags {
 
         // ELF `DT_NEEDED` and the distribution's owners: a Linux question. A Windows build
         // needs only system DLLs and the WebView2 runtime (`lepton info`).
-        let depends = if cfg!(target_os = "linux") {
+        let depends = if system == System::Linux && cfg!(target_os = "linux") {
             report_dependencies(&bundle.join("bin").join(&spec.binary))
         } else {
             Vec::new()
@@ -125,6 +153,17 @@ impl Flags {
             }
         }
         Ok(())
+    }
+
+    /// The system the build is for: the one named, else this one.
+    fn system(&self) -> System {
+        if self.windows {
+            System::Windows
+        } else if self.linux {
+            System::Linux
+        } else {
+            System::host()
+        }
     }
 }
 
@@ -176,11 +215,12 @@ fn debian_depends(binary: &Path) -> Result<Vec<String>, CliError> {
     Ok(packages)
 }
 
-/// The `bundle` section of the project's configuration.
-fn read_bundle(root: &Path) -> Result<lepton_template_injector::Bundle, CliError> {
+/// The `bundle` section of the project's configuration, for a build of `system`.
+fn read_bundle(root: &Path, system: System) -> Result<lepton_template_injector::Bundle, CliError> {
     let path = root.join(lepton_orchestrator::CONFIG_FILE);
     let text = std::fs::read_to_string(&path).map_err(|error| io(&path, "read", &error))?;
-    lepton_template_injector::parse_bundle(&text).map_err(|error| CliError::Invalid(error.reason))
+    lepton_template_injector::parse_bundle_for(&text, system == System::Windows)
+        .map_err(|error| CliError::Invalid(error.reason))
 }
 
 /// Writes one release format from the bundle directory and describes what it wrote.
@@ -226,7 +266,7 @@ pub fn write_target(
                 .and_then(Path::parent)
                 .unwrap_or(&spec.prefix);
             let icon = formats.icon.as_deref().map(|relative| root.join(relative));
-            let program = crate::platform::executable(&spec.binary);
+            let program = spec.system.executable(&spec.binary);
             let digest = super::installer::write(&super::installer::Installer {
                 bundle,
                 skip: &[MARKER],
@@ -329,7 +369,7 @@ pub fn bundle_name(spec: &Spec) -> String {
         "{}-{}-{}-{}",
         spec.binary,
         spec.version,
-        crate::platform::bundle_os(),
+        spec.system.bundle_os(),
         std::env::consts::ARCH
     )
 }
@@ -339,7 +379,7 @@ pub fn bundle_name(spec: &Spec) -> String {
 /// A previous bundle of the same name is replaced only when it carries [`MARKER`]: a
 /// directory this command did not write is never deleted on its behalf.
 pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
-    let executable = crate::platform::executable(&spec.binary);
+    let executable = spec.system.executable(&spec.binary);
     let program = spec.prefix.join("bin").join(&executable);
     if !program.is_file() {
         return Err(CliError::Invalid(format!(
@@ -371,7 +411,7 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
 
     // A desktop entry is a Linux desktop's way to name an application; Windows has none in
     // a portable tree (a Start menu entry belongs to an installer, MSI).
-    if cfg!(target_os = "linux") {
+    if spec.system == System::Linux {
         let applications = bundle.join("share").join("applications");
         // A bare `Exec`: installed, the binary is on `PATH`; the entry is for an install,
         // not for this directory.
@@ -461,6 +501,7 @@ mod tests {
             product: String::from("Notes"),
             version: String::from("1.2.0"),
             out: scratch.path().join("bundle"),
+            system: crate::platform::System::Linux,
         }
     }
 
@@ -670,11 +711,14 @@ mod tests {
     }
 }
 
-#[cfg(all(test, windows))]
+// A Windows build is packaged the same on any machine (`--windows` on Linux).
+#[cfg(test)]
 mod windows_tests {
-    use super::{MARKER, Spec, assemble, bundle_name};
+    use super::{MARKER, Spec, assemble, bundle_name, write_target};
+    use crate::platform::System;
     use lepton_orchestrator::testing::{Failure, Scratch};
-    use lepton_orchestrator::{assert_eq, assert_ok, ensure};
+    use lepton_orchestrator::{assert_contains, assert_eq, assert_ok, ensure};
+    use lepton_template_injector::{Bundle, BundleTarget};
 
     #[test]
     fn a_windows_bundle_holds_the_exe_and_the_frontend_and_no_desktop_entry() -> Result<(), Failure>
@@ -690,6 +734,7 @@ mod windows_tests {
             product: String::from("Notes"),
             version: String::from("1.2.3"),
             out: scratch.path().join("bundle"),
+            system: System::Windows,
         };
         assert_eq!(
             bundle_name(&spec),
@@ -716,6 +761,15 @@ mod windows_tests {
             bundle.join(MARKER).is_file(),
             "the bundle is marked as this command's"
         );
+        let formats = Bundle::for_system(true);
+        for target in [BundleTarget::Zip, BundleTarget::Msi] {
+            let (artifact, line) = assert_ok!(
+                write_target(&spec, &bundle, target, &[], &formats),
+                "writes a Windows format"
+            );
+            assert_contains!(&line, "notes-1.2.3-windows-");
+            ensure!(artifact.is_file(), "{} written", artifact.display());
+        }
         Ok(())
     }
 }

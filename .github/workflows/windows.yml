@@ -1,0 +1,101 @@
+# A template app on Windows Server 2025 (build 26100, the base Windows 11 24H2 shares):
+# built by the CLI from this checkout, opened on the runner's desktop and measured from
+# outside — the title bar's DWM attributes as the page changes its theme-color (Windows
+# 11's caption colour, which a Windows 10 machine cannot show), placement, icons, the
+# single instance — then packaged as zip and msi, installed, started and removed.
+# The scripts are tools/ci/windows/; their report and screenshots are the artifact.
+name: windows
+
+on:
+  push:
+    branches: [trunk]
+    paths:
+      - "zig/**"
+      - "crates/**"
+      - "packages/api/**"
+      - "tools/ci/windows/**"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+jobs:
+  app:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zig 0.16
+        run: |
+          Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile "$env:RUNNER_TEMP\zig.zip"
+          Expand-Archive "$env:RUNNER_TEMP\zig.zip" -DestinationPath "$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0"
+
+      - name: CLI
+        run: |
+          cargo build --release --bin lepton
+          ./target/release/lepton.exe --version
+
+      # The SDK from this checkout: the CLI's own version may not be on npm yet. Built
+      # with its own manager (pnpm, its lockfile), so its dist/ is current.
+      - name: Template app
+        run: |
+          npm install -g pnpm@10
+          pnpm --dir packages/api install --frozen-lockfile
+          pnpm --dir packages/api run build
+          $lepton = "$env:GITHUB_WORKSPACE\target\release\lepton.exe"
+          Set-Location $env:RUNNER_TEMP
+          & $lepton new ci-app --template vanilla-ts --target webview --package-manager npm --non-interactive
+          Set-Location ci-app
+          $api = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/api"
+          $cli = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/cli"
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          foreach ($group in "dependencies", "devDependencies") {
+            if ($pkg.$group.'@lepton-desk/api') { $pkg.$group.'@lepton-desk/api' = "file:$api" }
+            if ($pkg.$group.'@lepton-desk/cli') { $pkg.$group.'@lepton-desk/cli' = "file:$cli" }
+          }
+          $pkg | ConvertTo-Json -Depth 20 | Set-Content package.json -Encoding utf8NoBOM
+          $config = Get-Content lepton.config.json -Raw | ConvertFrom-Json
+          $config | Add-Member -NotePropertyName deepLinks -NotePropertyValue @("leptonci") -Force
+          $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{ targets = @("zip", "msi") }) -Force
+          $config | ConvertTo-Json -Depth 20 | Set-Content lepton.config.json -Encoding utf8NoBOM
+          npm install --no-audit --no-fund
+          & $lepton build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem src-lepton/zig-out/bin
+
+      - name: Window
+        run: |
+          $exe = (Get-ChildItem "$env:RUNNER_TEMP\ci-app\src-lepton\zig-out\bin\*.exe" | Select-Object -First 1).FullName
+          ./tools/ci/windows/measure.ps1 -Exe $exe -Out "$env:RUNNER_TEMP\report\window"
+
+      - name: Package, install, remove
+        run: |
+          $lepton = "$env:GITHUB_WORKSPACE\target\release\lepton.exe"
+          $out = "$env:RUNNER_TEMP\report\package"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Set-Location "$env:RUNNER_TEMP\ci-app"
+          & $lepton package
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem src-lepton/bundle -File | ForEach-Object { "$($_.Name) $($_.Length) $((Get-FileHash $_.FullName).Hash)" } | Tee-Object "$out\files.txt"
+          $msi = (Get-ChildItem src-lepton/bundle/*.msi | Select-Object -First 1).FullName
+          $install = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v `"$out\install.log`"" -Wait -PassThru
+          "install: exit $($install.ExitCode)" | Tee-Object -Append "$out\files.txt"
+          if ($install.ExitCode) { exit 1 }
+          $product = (Get-Content lepton.config.json -Raw | ConvertFrom-Json).productName
+          $installed = Get-ChildItem "$env:LOCALAPPDATA\Programs\$product" -Recurse -Filter *.exe | Select-Object -First 1
+          "installed: $($installed.FullName)" | Tee-Object -Append "$out\files.txt"
+          & "$env:GITHUB_WORKSPACE\tools\ci\windows\measure.ps1" -Exe $installed.FullName -Out "$out\installed"
+          $measured = $LASTEXITCODE
+          $remove = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn /l*v `"$out\remove.log`"" -Wait -PassThru
+          "remove: exit $($remove.ExitCode), folder left: $(Test-Path "$env:LOCALAPPDATA\Programs\$product")" | Tee-Object -Append "$out\files.txt"
+          if ($remove.ExitCode -or (Test-Path "$env:LOCALAPPDATA\Programs\$product") -or $measured) { exit 1 }
+
+      - name: Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-2025
+          path: ${{ runner.temp }}/report
+          if-no-files-found: warn

@@ -16,14 +16,44 @@ pub fn home() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// `binary` as the file the build installs: `<binary>.exe` on Windows.
-pub fn executable(binary: &str) -> String {
-    format!("{binary}{}", std::env::consts::EXE_SUFFIX)
+/// The system a build is for — this one unless `--windows`/`--linux` named another.
+/// What a package holds follows it, not the machine writing the package.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum System {
+    Linux,
+    Windows,
 }
 
-/// The system name in a bundle's file name: `linux`, `windows`.
-pub fn bundle_os() -> &'static str {
-    std::env::consts::OS
+impl System {
+    /// The system `lepton` itself runs on.
+    pub fn host() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else {
+            Self::Linux
+        }
+    }
+
+    /// `binary` as the file a build for this system installs: `<binary>.exe` on Windows.
+    pub fn executable(self, binary: &str) -> String {
+        match self {
+            Self::Windows => format!("{binary}.exe"),
+            Self::Linux => binary.to_owned(),
+        }
+    }
+
+    /// The system name in a bundle's file name: `linux`, `windows`.
+    pub fn bundle_os(self) -> &'static str {
+        match self {
+            Self::Windows => "windows",
+            Self::Linux => "linux",
+        }
+    }
+}
+
+/// `binary` as the file the build installs here: `<binary>.exe` on Windows.
+pub fn executable(binary: &str) -> String {
+    System::host().executable(binary)
 }
 
 /// Whether a window can open here; the reason when it cannot.
@@ -74,22 +104,29 @@ pub fn isolated_directories(home: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Whether this system's build can be packaged as `target`: the Arch and Debian formats
-/// carry a Linux build and are refused elsewhere, as the MSI (a Windows build) is off
-/// Windows.
-pub fn packages_as(target: lepton_template_injector::BundleTarget) -> Result<(), String> {
-    if target.windows_only() && !cfg!(windows) {
+/// Whether a build for `system` can be packaged as `target` on this machine.
+///
+/// The MSI carries a Windows build: written for one wherever it is packaged — its writer
+/// is plain Rust (`installer_db.rs` on `cfb` and `cab`), so Linux writes the same file
+/// (`lepton package --windows`). The Arch and Debian formats carry a Linux build, and
+/// their dependencies are asked of this machine's `pacman`/`dpkg-query`: only on Linux,
+/// for Linux.
+pub fn packages_as(
+    target: lepton_template_injector::BundleTarget,
+    system: System,
+) -> Result<(), String> {
+    if target.windows_only() && system != System::Windows {
         return Err(format!(
-            "\"{}\" installs a Windows build and this is {}; package it on Windows",
+            "\"{}\" installs a Windows build and this build is for {}; package with --windows",
             target.name(),
-            std::env::consts::OS
+            system.bundle_os()
         ));
     }
-    if target.linux_only() && !cfg!(target_os = "linux") {
+    if target.linux_only() && (system != System::Linux || !cfg!(target_os = "linux")) {
         return Err(format!(
-            "\"{}\" is a Linux package and this is {}; list \"zip\" in \"bundle.targets\" here",
+            "\"{}\" is a Linux package, made on Linux for a Linux build; list \"zip\" in \"bundle.targets\" for {}",
             target.name(),
-            std::env::consts::OS
+            system.bundle_os()
         ));
     }
     Ok(())
@@ -97,9 +134,9 @@ pub fn packages_as(target: lepton_template_injector::BundleTarget) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::{executable, isolated_home, packages_as};
+    use super::{System, executable, isolated_home, packages_as};
     use lepton_orchestrator::testing::Failure;
-    use lepton_orchestrator::{assert_eq, ensure};
+    use lepton_orchestrator::{assert_contains, assert_eq, assert_err, ensure};
     use lepton_template_injector::BundleTarget;
     use std::path::Path;
 
@@ -134,24 +171,46 @@ mod tests {
 
     #[test]
     fn linux_packages_are_refused_off_linux() -> Result<(), Failure> {
+        for system in [System::Linux, System::Windows] {
+            ensure!(
+                packages_as(BundleTarget::Zip, system).is_ok(),
+                "a zip is made anywhere"
+            );
+        }
         ensure!(
-            packages_as(BundleTarget::Zip).is_ok(),
-            "a zip is made anywhere"
-        );
-        ensure!(
-            packages_as(BundleTarget::TarGz).is_ok(),
+            packages_as(BundleTarget::TarGz, System::host()).is_ok(),
             "a tarball is made anywhere"
         );
-        let deb = packages_as(BundleTarget::Deb);
+        let deb = packages_as(BundleTarget::Deb, System::host());
         ensure!(
             deb.is_ok() == cfg!(target_os = "linux"),
             "a .deb only on Linux: {deb:?}"
         );
-        let msi = packages_as(BundleTarget::Msi);
+        let windows_deb = packages_as(BundleTarget::Deb, System::Windows);
+        ensure!(windows_deb.is_err(), "a .deb never holds a Windows build");
+        Ok(())
+    }
+
+    #[test]
+    fn an_msi_is_written_for_a_windows_build_on_any_machine() -> Result<(), Failure> {
         ensure!(
-            msi.is_ok() == cfg!(windows),
-            "an .msi only on Windows: {msi:?}"
+            packages_as(BundleTarget::Msi, System::Windows).is_ok(),
+            "Linux writes the same MSI for a --windows build"
         );
+        let linux = assert_err!(
+            packages_as(BundleTarget::Msi, System::Linux),
+            "an MSI of a Linux build"
+        );
+        assert_contains!(&linux, "--windows");
+        Ok(())
+    }
+
+    #[test]
+    fn a_build_names_its_own_system_not_the_hosts() -> Result<(), Failure> {
+        assert_eq!(System::Windows.executable("notes"), "notes.exe");
+        assert_eq!(System::Linux.executable("notes"), "notes");
+        assert_eq!(System::Windows.bundle_os(), "windows");
+        assert_eq!(System::Linux.bundle_os(), "linux");
         Ok(())
     }
 }

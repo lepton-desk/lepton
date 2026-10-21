@@ -30,7 +30,10 @@ pub fn read(root: &Path, text: &str) -> Result<Shape, CliError> {
     let config: Value = serde_json::from_str(text).map_err(|error| {
         CliError::Invalid(format!("lepton.config.json is not valid JSON: {error}"))
     })?;
-    let decorated = match config.get("window").and_then(|window| window.get("decorations")) {
+    let decorated = match config
+        .get("window")
+        .and_then(|window| window.get("decorations"))
+    {
         None => true,
         Some(Value::Bool(value)) => *value,
         Some(_) => {
@@ -115,7 +118,10 @@ mod tests {
             }
         );
         let frameless = assert_ok!(
-            read(root, r#"{"window":{"decorations":false},"bundle":{"icon":"app.ico"}}"#),
+            read(
+                root,
+                r#"{"window":{"decorations":false},"bundle":{"icon":"app.ico"}}"#
+            ),
             "frameless with an icon"
         );
         assert_eq!(frameless.decorated, false);
