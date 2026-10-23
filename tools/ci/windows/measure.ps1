@@ -25,7 +25,9 @@ function Say([string]$line) { Write-Host $line; Add-Content -Path $report -Value
 function Fail([string]$label, [string]$line) { Say "FAIL $label`: $line"; $failures.Add($label) }
 function Facts([string]$label) {
   Say "### $label"
-  $lines = & (Join-Path $here "window-facts.ps1") -Process $name -Handle (Handle) -Shot (Join-Path $Out "$label.png")
+  $h = Handle
+  if ($h -eq [System.IntPtr]::Zero) { Fail $label "the app's window is gone"; return @() }
+  $lines = & (Join-Path $here "window-facts.ps1") -Id $app.Id -Handle $h -Shot (Join-Path $Out "$label.png")
   foreach ($line in $lines) { Say $line }
   return $lines
 }
@@ -33,9 +35,10 @@ function Expect([string[]]$lines, [string]$prefix, [string]$wanted, [string]$lab
   $line = $lines | Where-Object { $_.StartsWith($prefix) } | Select-Object -First 1
   if ($line -and $line.Contains($wanted)) { Say "ok   $label`: $wanted" } else { Fail $label "wanted '$wanted', got '$line'" }
 }
-function Window { AppWindow $name }
-function Handle { return (Window).MainWindowHandle }
-function Title { return (Window).MainWindowTitle }
+# The window of the process this script started, found by its class (input.ps1).
+function Handle { return AppWindow $app.Id }
+function Window { $h = Handle; if ($h -eq [System.IntPtr]::Zero) { return $null }; return $h }
+function Title { return TitleOf (Handle) }
 function Until([scriptblock]$condition, [int]$seconds) {
   $deadline = (Get-Date).AddSeconds($seconds)
   while (-not (& $condition)) {
@@ -49,7 +52,7 @@ function Hand([string]$link) {
   $second = Start-Process -FilePath $Exe -ArgumentList $link -PassThru
   if ($second.WaitForExit(15000)) { Say "second start ($link): exit $($second.ExitCode)" }
   else { Fail "single instance" "second start ($link) still running after 15 s"; $second.Kill() }
-  $count = @(Get-Process $name -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 -and (ClassOf $_.MainWindowHandle) -eq "LeptonWindow" }).Count
+  $count = @(Get-Process $name -ErrorAction SilentlyContinue | Where-Object { (AppWindow $_.Id) -ne [System.IntPtr]::Zero }).Count
   if ($count -ne 1) { Fail "single instance" "$count windows after the second start" }
 }
 function Theme([string]$theme) {
@@ -146,7 +149,18 @@ function LeftEdge {
 $os = Get-CimInstance Win32_OperatingSystem
 $build = [int]$os.BuildNumber
 Say "## $($os.Caption) $($os.Version) (build $build)$(if ($Frameless) { ', window.decorations: false' })"
+# A copy already running (an earlier step's, the same identifier) would take this start
+# as its second instance, and that window would be measured instead (measured: a run
+# checked an installed, decorated copy in the frameless step).
+$running = @(Get-Process $name -ErrorAction SilentlyContinue)
+if ($running.Count) {
+  Say "note: $($running.Count) $name process(es) already running; stopped first"
+  $running | Stop-Process -Force
+  [void](Until { -not (Get-Process $name -ErrorAction SilentlyContinue) } 10)
+}
 $app = Start-Process -FilePath $Exe -PassThru
+# Whatever stops this script, the app does not outlive it.
+trap { if ($app -and -not $app.HasExited) { $app.Kill() }; break }
 if (-not (Until { Window } 60)) { Say "FAIL no window after 60 s"; exit 1 }
 Start-Sleep -Seconds 3
 $first = Facts "opened"

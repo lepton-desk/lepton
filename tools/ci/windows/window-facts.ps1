@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Process, [System.IntPtr]$Handle = [System.IntPtr]::Zero, [string]$Shot = "")
+param([Parameter(Mandatory)][int]$Id, [System.IntPtr]$Handle = [System.IntPtr]::Zero, [string]$Shot = "")
 # What the system says about the app's window: placement against the work area, the
 # client area, the class and exe icons, whether DWM draws the title bar dark, and the
 # title bar's own colour on screen. DWMWA_CAPTION_COLOR is not read back: it is
@@ -21,10 +21,10 @@ public struct RECT { public int Left, Top, Right, Bottom; }
 public struct POINT { public int X, Y; }
 [StructLayout(LayoutKind.Sequential)] public struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
 '@
-$p = Get-Process $Process -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-if (-not $p) { throw "no window for process $Process" }
+$p = Get-Process -Id $Id -ErrorAction Stop
 # The handle measure.ps1 found (the app's own window), else the process's main window.
 $h = if ($Handle -ne [System.IntPtr]::Zero) { $Handle } else { $p.MainWindowHandle }
+if ($h -eq [System.IntPtr]::Zero) { throw "no window for process $Id" }
 $r = New-Object W.F+RECT; [void][W.F]::GetWindowRect($h, [ref]$r)
 $vis = New-Object W.F+RECT; [void][W.F]::DwmGetWindowAttribute($h, 9, [ref]$vis, 16)
 $m = New-Object W.F+MONITORINFO; $m.cbSize = 40

@@ -31,6 +31,22 @@ public struct POINT { public int X, Y; }
   [MarshalAs(UnmanagedType.ByValArray, SizeConst = 6)] public RECT[] rgrect;
 }
 [DllImport("user32.dll", EntryPoint = "SendMessageW")] public static extern System.IntPtr SendTitleBarInfo(System.IntPtr h, uint msg, System.IntPtr w, ref TITLEBARINFOEX info);
+public delegate bool EnumProc(System.IntPtr h, System.IntPtr l);
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, System.IntPtr l);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint pid);
+[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowTextW(System.IntPtr h, System.Text.StringBuilder s, int n);
+// The first visible top-level window of process `pid` whose class is `cls`, or zero.
+public static System.IntPtr WindowOf(uint pid, string cls) {
+  System.IntPtr found = System.IntPtr.Zero;
+  EnumWindows(delegate (System.IntPtr h, System.IntPtr l) {
+    uint owner; GetWindowThreadProcessId(h, out owner);
+    if (owner != pid || !IsWindowVisible(h)) return true;
+    var name = new System.Text.StringBuilder(256); GetClassNameW(h, name, 256);
+    if (name.ToString() != cls) return true;
+    found = h; return false;
+  }, System.IntPtr.Zero);
+  return found;
+}
 '@
 
 $MOUSE_MOVE = 0x1; $MOUSE_LEFT_DOWN = 0x2; $MOUSE_LEFT_UP = 0x4; $MOUSE_RIGHT_DOWN = 0x8; $MOUSE_RIGHT_UP = 0x10
@@ -58,14 +74,12 @@ function Point([int]$x, [int]$y) {
 function Mouse([uint32]$flags) { Send $flags }
 
 function ClassOf([System.IntPtr]$h) { $s = New-Object System.Text.StringBuilder 256; [void][W.I]::GetClassNameW($h, $s, 256); return $s.ToString() }
-# The app's own window (class LeptonWindow, webview2/window.zig). Not .NET's MainWindowHandle
-# alone: that is the process's first visible top-level window, and once it was a 35×19
-# pop-up with no title (measured, the installed app on Server 2025).
-function AppWindow([string]$process) {
-  return Get-Process $process -ErrorAction SilentlyContinue |
-    Where-Object { $_.MainWindowHandle -ne 0 -and (ClassOf $_.MainWindowHandle) -eq "LeptonWindow" } |
-    Select-Object -First 1
-}
+# The app's own window (class LeptonWindow, webview2/window.zig) in process `id`, or zero.
+# Not .NET's MainWindowHandle: it is whichever visible top-level window comes first, and
+# on Server 2025 it was a 35×19 pop-up with no title — once from the start, once only
+# 3 s after the app's window had been found (measured).
+function AppWindow([int]$id) { return [W.I]::WindowOf([uint32]$id, "LeptonWindow") }
+function TitleOf([System.IntPtr]$h) { $s = New-Object System.Text.StringBuilder 512; [void][W.I]::GetWindowTextW($h, $s, 512); return $s.ToString() }
 function WindowRect([System.IntPtr]$h) { $r = New-Object W.I+RECT; [void][W.I]::GetWindowRect($h, [ref]$r); return $r }
 function ClientOrigin([System.IntPtr]$h) { $o = New-Object W.I+POINT; [void][W.I]::ClientToScreen($h, [ref]$o); return $o }
 function Front([System.IntPtr]$h) { [void][W.I]::SetForegroundWindow($h); Start-Sleep -Milliseconds 300 }
