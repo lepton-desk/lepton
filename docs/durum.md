@@ -7,6 +7,7 @@ Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Wi
 1. `9cd52ac`'ın CI sonucunu oku (`windows`: gölgelendirici eşitliği ve runner'da D3D11 ilk kez; `zig`).
 2. `windows-gpu-check`'e dikey senkronsuz ölçüm: aynı sahne `Present(0, 0)` ile, saniyedeki kare ve kare başına GPU süresi (D3D11 zaman damgası sorgusu); Linux'taki 2001 şekillik sahne (R7 240'ta 0,65 ms) karşılaştırma için.
 3. CPU yolunu ekranın tazelemesine bağla (`DwmFlush`): bugün 16 ms zamanlayıcıyla 61,2 kare/sn çiziyor, 60 Hz ekran fazlasını göstermiyor.
+4. Sınırsız kare hızı seçeneği, iki platformda ve iki yolda (GPU ve CPU). Varsayılan ekranın tazelemesine bağlı kalır; isteyen açıkça seçer (`lepton.config.json` ayarı → çekirdeğe derleme seçeneği, ölçüm için ortam değişkeni de olabilir). Windows GPU: `Present(0, DXGI_PRESENT_ALLOW_TEARING)` (destek `CheckFeatureSupport` ile sorulur, yoksa `Present(0, 0)`); Windows CPU: beklemesiz çizim. Linux GLES: `eglSwapInterval(0)` ve kare geri çağrısını beklememe; Linux shm: kare geri çağrısını beklememe. Her yolda ölç: saniyedeki kare, CPU süresi; Linux tarafı CI'da veya kullanıcının makinesinde.
 
 ## Yayın durumu
 
