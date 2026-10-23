@@ -710,6 +710,27 @@ pub fn build(b: *std.Build) void {
             "win32-window-check",
             "Open the native path's Win32 window, present a frame and read it back from the screen",
         ).dependOn(&b.addRunArtifact(win32_window_check).step);
+
+        // The GPU half's first measurement: a Direct3D 11 device and a flip-model swap chain
+        // on that window, read back from the screen; WARP alongside.
+        const windows_gpu_check = support.throughLld(b.addExecutable(.{
+            .name = "lepton-windows-gpu-check",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/tools/windows_gpu_check.zig"),
+                .target = target,
+                .optimize = std.builtin.OptimizeMode.Debug,
+                .link_libc = true,
+                .imports = &.{.{ .name = "lepton_window", .module = window_layer }},
+            }),
+        }));
+        support.addCModules(b, windows_gpu_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_d3d11"});
+        for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d3d11", "dxgi" }) |name| {
+            windows_gpu_check.root_module.linkSystemLibrary(name, .{});
+        }
+        b.step(
+            "windows-gpu-check",
+            "Draw with Direct3D 11 into the native window and read it back from the screen",
+        ).dependOn(&b.addRunArtifact(windows_gpu_check).step);
     }
 
     // Only built where the engine is linked. A capability report on a build with no
