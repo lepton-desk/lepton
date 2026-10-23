@@ -465,7 +465,10 @@ pub fn build(b: *std.Build) void {
     // a working EGL implementation and nothing else — a different requirement from the
     // core's, and folding the two together would make one machine's missing driver look
     // like a failure of the framework's own logic.
-    if (hasPkgConfig(b, "egl")) {
+    // Linux only, like every pkg-config probe: on Windows asking for one walks `PATH`, and
+    // a `PATH` entry naming a file (an App Execution Alias, `…\WindowsApps\winget.exe`)
+    // made Zig 0.16 print `IO_REPARSE_TAG_NOT_HANDLED` ten times per build (measured).
+    if (target.result.os.tag == .linux and hasPkgConfig(b, "egl")) {
         const gpu_module = b.createModule(.{
             // The presenter, not the renderer: it imports the renderer, so both files'
             // tests run, and the presenter's choice of path is tested where it is made.
@@ -787,8 +790,9 @@ pub fn build(b: *std.Build) void {
 
     // The 0.2.0 GPU renderer's first measurement: does this machine's Vulkan meet the
     // threshold (`render/gpu/vulkan_threshold.zig`), and does a device with exactly those
-    // features draw? Headless, so it is not tied to the render path.
-    if (hasPkgConfig(b, "vulkan")) {
+    // features draw? Headless, so it is not tied to the render path. Linux only: Windows'
+    // Vulkan is not found through pkg-config (the Windows native path will load it).
+    if (target.result.os.tag == .linux and hasPkgConfig(b, "vulkan")) {
         const vulkan_module = b.createModule(.{
             .root_source_file = b.path("src/tools/vulkan_check.zig"),
             .target = target,
