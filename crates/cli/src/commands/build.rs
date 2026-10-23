@@ -120,12 +120,6 @@ impl Flags {
         let native = !self.webview
             && (self.native
                 || manifest.render_path == lepton_template_injector::RenderPath::Native);
-        // Before anything is built, a dry run included: a native core for Windows does not
-        // compile yet, from this machine or another.
-        if native && platform == Platform::Windows {
-            crate::platform::native_path(crate::platform::System::Windows)
-                .map_err(|reason| CliError::Invalid(reason.to_owned()))?;
-        }
 
         if !native && root.join("package.json").is_file() {
             super::package_manager::ensure_installed(root, &chain)?;
@@ -704,28 +698,6 @@ mod tests {
     }
 
     #[test]
-    fn a_native_build_for_windows_is_refused_with_the_reason() -> Result<(), Failure> {
-        let (scratch, _) = project("build-native-windows", RenderPath::Native)?;
-        let flags = Flags {
-            windows: true,
-            dry_run: true,
-            ..Flags::default()
-        };
-        let error = assert_err!(flags.build_in(scratch.path()), "native for Windows");
-        assert_contains!(&error.to_string(), "does not run on Windows yet");
-
-        // The same project builds for Windows on the webview path.
-        let webview = Flags {
-            windows: true,
-            webview: true,
-            dry_run: true,
-            ..Flags::default()
-        };
-        assert_ok!(webview.build_in(scratch.path()), "--webview for Windows");
-        Ok(())
-    }
-
-    #[test]
     fn macos_is_refused_with_the_reason_before_anything_is_built() -> Result<(), Failure> {
         let scratch = assert_ok!(
             Scratch::new("build-macos"),
@@ -780,11 +752,9 @@ mod tests {
         // the printed command lines would be a lie.
         let (scratch, _) = project("build-dry", RenderPath::Native)?;
 
-        // For Linux by name: a native build for this machine is refused on Windows.
         assert_ok!(
             Flags {
                 dry_run: true,
-                linux: true,
                 ..Flags::default()
             }
             .build_in(scratch.path()),

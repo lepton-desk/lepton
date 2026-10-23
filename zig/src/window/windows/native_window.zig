@@ -15,6 +15,7 @@ const std = @import("std");
 const layer = @import("../window.zig");
 const window = @import("window.zig");
 const win32 = @import("win32.zig");
+const theme = @import("theme.zig");
 const c = win32.c;
 
 const Size = layer.Size;
@@ -69,6 +70,7 @@ pub const NativeWindow = struct {
         window.attach(hwnd, &self.owner);
         window.setTitle(hwnd, request.title);
         if (request.mapped) window.show(hwnd);
+        if (request.title_colour) |rgb| theme.apply(hwnd, .{ .color = rgb });
         // The size Windows gave (cut to a small screen, scaled by DPI) is the first
         // configure, so the caller's first frame is the window's size, not the request's.
         self.size = clientSize(hwnd);

@@ -51,21 +51,6 @@ impl System {
     }
 }
 
-/// Why a native build for Windows is refused. The core's native path is Linux's window
-/// layer (Wayland, X11) and EGL; the Windows one is being written, and until it runs a
-/// native project made or built there would fail deep inside `zig build`.
-pub const NATIVE_ON_WINDOWS: &str = "the native render path does not run on Windows yet (it is \
-     being built: a Win32 window with DirectWrite text); use the webview path, WebView2: \
-     \"renderPath\": \"webview\" in lepton.config.json, or --webview";
-
-/// Whether a build for `system` can take the native render path; the reason when not.
-pub fn native_path(system: System) -> Result<(), &'static str> {
-    match system {
-        System::Linux => Ok(()),
-        System::Windows => Err(NATIVE_ON_WINDOWS),
-    }
-}
-
 /// `binary` as the file the build installs here: `<binary>.exe` on Windows.
 pub fn executable(binary: &str) -> String {
     System::host().executable(binary)
@@ -149,7 +134,7 @@ pub fn packages_as(
 
 #[cfg(test)]
 mod tests {
-    use super::{System, executable, isolated_home, native_path, packages_as};
+    use super::{System, executable, isolated_home, packages_as};
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, ensure};
     use lepton_template_injector::BundleTarget;
@@ -217,14 +202,6 @@ mod tests {
             "an MSI of a Linux build"
         );
         assert_contains!(&linux, "--windows");
-        Ok(())
-    }
-
-    #[test]
-    fn the_native_path_is_linux_only_for_now_and_says_what_to_use() -> Result<(), Failure> {
-        ensure!(native_path(System::Linux).is_ok(), "Linux draws natively");
-        let windows = assert_err!(native_path(System::Windows), "not on Windows yet");
-        assert_contains!(&windows, "webview");
         Ok(())
     }
 

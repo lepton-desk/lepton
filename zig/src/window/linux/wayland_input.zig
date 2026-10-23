@@ -5,6 +5,7 @@
 //! window it belongs to through `currentInput`, and mutates only the input-facing fields
 //! of `WaylandWindow` (`input`, `menu`, `keymap`, the pending action).
 
+const std = @import("std");
 const wl = @import("wayland_c.zig").wl;
 const input_state = @import("input.zig");
 const chrome = @import("chrome.zig");
@@ -95,19 +96,24 @@ pub fn release(self: *WaylandWindow) void {
 /// A seat bound at version 5 entitles the compositor to every event up to v5, and a null
 /// entry is a jump to address zero, so each optional event gets a real (empty) callback.
 /// `axis_relative_direction` (v9) and `warp` (v10) are past the bound version.
-const pointer_listener = wl.wl_pointer_listener{
-    .enter = onPointerEnter,
-    .leave = onPointerLeave,
-    .motion = onPointerMotion,
-    .button = onPointerButton,
-    .axis = onPointerAxis,
-    .frame = onPointerFrame,
-    .axis_source = onPointerAxisSource,
-    .axis_stop = onPointerAxisStop,
-    .axis_discrete = onPointerAxisDiscrete,
-    .axis_value120 = onPointerAxisValue120,
-    .axis_relative_direction = onPointerAxisRelative,
-    .warp = null,
+///
+/// Built from a zeroed listener because the header's fields depend on libwayland's
+/// version: `warp` is not in Ubuntu 24.04's (1.22), and naming it there did not compile
+/// (measured on CI); the later events are set only where the header has them.
+const pointer_listener = listener: {
+    var listener = std.mem.zeroes(wl.wl_pointer_listener);
+    listener.enter = onPointerEnter;
+    listener.leave = onPointerLeave;
+    listener.motion = onPointerMotion;
+    listener.button = onPointerButton;
+    listener.axis = onPointerAxis;
+    listener.frame = onPointerFrame;
+    listener.axis_source = onPointerAxisSource;
+    listener.axis_stop = onPointerAxisStop;
+    listener.axis_discrete = onPointerAxisDiscrete;
+    if (@hasField(wl.wl_pointer_listener, "axis_value120")) listener.axis_value120 = onPointerAxisValue120;
+    if (@hasField(wl.wl_pointer_listener, "axis_relative_direction")) listener.axis_relative_direction = onPointerAxisRelative;
+    break :listener listener;
 };
 
 const keyboard_listener = wl.wl_keyboard_listener{

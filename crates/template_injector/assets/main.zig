@@ -432,6 +432,8 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
         .title = "{product}",
         .app_id = "{identifier}",
         .size = configuredSize(),
+        // The masthead's colour (`Palette.rail`): the system title bar takes it (Windows).
+        .title_colour = .{{ 0x1b, 0x20, 0x26 }},
     }};
 
     var opened = try openWindow(allocator, request);

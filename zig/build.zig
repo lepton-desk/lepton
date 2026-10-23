@@ -226,7 +226,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // GDI's `SetDIBitsToDevice`) and its type (`render/text_windows.zig`, DirectWrite drawn
     // by Direct2D). All system DLLs.
     if (windows and !want_webview) {
-        for ([_][]const u8{ "user32", "gdi32", "d2d1", "dwrite" }) |library| {
+        for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d2d1", "dwrite" }) |library| {
             core.linkSystemLibrary(library, .{});
         }
     }
@@ -703,7 +703,7 @@ pub fn build(b: *std.Build) void {
         }));
         win32_window_check.root_module.addIncludePath(b.path("webview2"));
         support.addCModules(b, win32_window_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_windows"});
-        for ([_][]const u8{ "user32", "gdi32" }) |name| {
+        for ([_][]const u8{ "user32", "gdi32", "dwmapi" }) |name| {
             win32_window_check.root_module.linkSystemLibrary(name, .{});
         }
         b.step(

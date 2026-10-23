@@ -21,20 +21,13 @@ const invoke = @import("../invoke.zig");
 const menu_mod = @import("../menu.zig");
 const Bridge = @import("../bridge.zig").Bridge;
 
-extern "dwmapi" fn DwmSetWindowAttribute(window: c.HWND, attribute: u32, value: *const anyopaque, size: u32) callconv(.winapi) c.HRESULT;
+const title_bar = @import("../../../window/windows/theme.zig");
 
-/// `DWMWA_USE_IMMERSIVE_DARK_MODE`: 20 from Windows 10 20H1, 19 before it.
-const dwmwa_dark = [_]u32{ 20, 19 };
-/// Windows 11 (22000+); Windows 10 refuses them, which changes nothing.
-const dwmwa_caption_color: u32 = 35;
-const dwmwa_text_color: u32 = 36;
-
-/// What the page asked for, as the script reports it.
-pub const Theme = struct {
-    dark: ?bool = null,
-    /// The page's `theme-color`, resolved to RGB.
-    color: ?[3]u8 = null,
-};
+/// What the page asked for, as the script reports it (`color`: its `theme-color`).
+pub const Theme = title_bar.Theme;
+pub const isDark = title_bar.isDark;
+/// Gives the window's title bar `theme` (`window/windows/theme.zig`).
+pub const applyTheme = title_bar.apply;
 
 /// `lepton-theme:<d>:<r>,<g>,<b>` — `d` is `1` dark, `0` light, `-` unsaid; the colour
 /// part is empty when the page names none. Anything else is not a theme message.
@@ -55,41 +48,6 @@ pub fn parseTheme(message: []const u8) ?Theme {
         theme.color = rgb;
     }
     return theme;
-}
-
-/// Whether `rgb` is dark enough for white text: relative luminance (sRGB, WCAG) under
-/// the point where white and black text contrast equally (0.179).
-pub fn isDark(rgb: [3]u8) bool {
-    var linear: [3]f64 = undefined;
-    for (rgb, 0..) |channel, index| {
-        const value = @as(f64, @floatFromInt(channel)) / 255.0;
-        linear[index] = if (value <= 0.04045) value / 12.92 else std.math.pow(f64, (value + 0.055) / 1.055, 2.4);
-    }
-    const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-    return luminance < 0.179;
-}
-
-/// Gives the window's title bar `theme`. The colour decides dark or light when the page
-/// named one, so the title's text stays readable on it.
-pub fn applyTheme(hwnd: c.HWND, theme: Theme) void {
-    const dark = if (theme.color) |rgb| isDark(rgb) else theme.dark orelse return;
-    const flag: c.BOOL = if (dark) c.TRUE else c.FALSE;
-    for (dwmwa_dark) |attribute| {
-        if (wv.ok(DwmSetWindowAttribute(hwnd, attribute, &flag, @sizeOf(c.BOOL)))) break;
-    }
-    if (theme.color) |rgb| {
-        const caption: u32 = @as(u32, rgb[0]) | (@as(u32, rgb[1]) << 8) | (@as(u32, rgb[2]) << 16);
-        const text: u32 = if (dark) 0x00FFFFFF else 0x00000000;
-        _ = DwmSetWindowAttribute(hwnd, dwmwa_caption_color, &caption, @sizeOf(u32));
-        _ = DwmSetWindowAttribute(hwnd, dwmwa_text_color, &text, @sizeOf(u32));
-    }
-    // Windows 10 draws the new frame only when the title bar next changes activation:
-    // measured, an active window kept its light bar until it lost and regained focus
-    // (`SWP_FRAMECHANGED` alone did not repaint it). So the bar is drawn inactive, then
-    // as it is.
-    const active: c.WPARAM = if (c.GetActiveWindow() == hwnd) c.TRUE else c.FALSE;
-    _ = c.DefWindowProcW(hwnd, c.WM_NCACTIVATE, if (active == c.TRUE) c.FALSE else c.TRUE, 0);
-    _ = c.DefWindowProcW(hwnd, c.WM_NCACTIVATE, active, 0);
 }
 
 /// Reads the page's `theme-color` (the first whose `media` matches) and `color-scheme`,

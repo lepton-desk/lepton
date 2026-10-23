@@ -54,9 +54,11 @@ pub const Text = struct {
         errdefer release(write);
 
         // 96 DPI: a DIP is a pixel, as the frame counts them. Opaque (`IGNORE`): the frame
-        // has nothing behind it, and ClearType needs an opaque target. Software: a hardware
-        // target reads every string back from the GPU into the DC, and five strings a frame
-        // held the window at 39.8 frames a second against 50.4 in software (measured, R7 240).
+        // has nothing behind it, and ClearType needs an opaque target. Software, because
+        // this is the CPU path's text — the frame is in memory and GDI presents it: a
+        // hardware target read every string back from the GPU into the DC, and five strings
+        // a frame held the window at 39.8 frames a second against 50.4 (measured, R7 240).
+        // The GPU path (D3D11, the frame never leaves the GPU) draws text from a glyph atlas.
         const properties: c.D2D1_RENDER_TARGET_PROPERTIES = .{
             .type = c.D2D1_RENDER_TARGET_TYPE_SOFTWARE,
             .pixelFormat = .{ .format = c.DXGI_FORMAT_B8G8R8A8_UNORM, .alphaMode = c.D2D1_ALPHA_MODE_IGNORE },

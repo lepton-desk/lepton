@@ -105,10 +105,6 @@ impl Flags {
 
         let native =
             self.native || manifest.render_path == lepton_template_injector::RenderPath::Native;
-        if native {
-            crate::platform::native_path(crate::platform::System::host())
-                .map_err(|reason| CliError::Invalid(reason.to_owned()))?;
-        }
 
         if !native && root.join("package.json").is_file() {
             super::package_manager::ensure_installed(root, &chain)?;

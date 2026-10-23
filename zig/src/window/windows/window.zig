@@ -34,7 +34,10 @@ const class_name = W("LeptonWindow");
 /// `MAKEINTRESOURCE(1)` is an odd integer posing as a string pointer, which a typed
 /// `LPCWSTR` cannot hold, so the resource id is passed as the integer it is.
 extern "user32" fn LoadIconW(instance: c.HINSTANCE, id: usize) callconv(.winapi) c.HICON;
-extern "user32" fn LoadImageW(instance: c.HINSTANCE, id: usize, kind: c.UINT, width: c_int, height: c_int, flags: c.UINT) callconv(.winapi) ?*anyopaque;
+/// Declared returning `HICON` (it is only ever asked for an icon here): a handle is not a
+/// pointer, its value need not be aligned, and `@alignCast` of one panicked in a Debug
+/// build (`lepton run`, measured) — Release builds skip the check, so it never showed.
+extern "user32" fn LoadImageW(instance: c.HINSTANCE, id: usize, kind: c.UINT, width: c_int, height: c_int, flags: c.UINT) callconv(.winapi) c.HICON;
 var class_registered = false;
 
 /// Per-monitor DPI awareness (v2), before the first window: without it Windows scales a
@@ -69,7 +72,7 @@ pub fn open(width: u32, height: u32) ?c.HWND {
             .hbrBackground = null,
             .lpszMenuName = null,
             .lpszClassName = class_name,
-            .hIconSm = @ptrCast(@alignCast(LoadImageW(instance, 1, c.IMAGE_ICON, c.GetSystemMetrics(c.SM_CXSMICON), c.GetSystemMetrics(c.SM_CYSMICON), 0))),
+            .hIconSm = LoadImageW(instance, 1, c.IMAGE_ICON, c.GetSystemMetrics(c.SM_CXSMICON), c.GetSystemMetrics(c.SM_CYSMICON), 0),
         };
         if (c.RegisterClassExW(&class) == 0) return null;
         class_registered = true;

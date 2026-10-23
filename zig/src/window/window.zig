@@ -272,6 +272,10 @@ pub const Request = struct {
     /// size and place are set: an X window manager places a window when it is mapped and
     /// keeps it there (measured on COSMIC's XWayland).
     mapped: bool = true,
+    /// The colour the window's content starts with at its top, for a title bar the system
+    /// draws (Windows): dark or light to match on Windows 10, this colour on Windows 11.
+    /// Null keeps the system's. Linux's native windows draw their own bar and ignore it.
+    title_colour: ?[3]u8 = null,
 };
 
 test {

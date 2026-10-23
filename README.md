@@ -9,7 +9,8 @@ No browser ships with the app: it uses the system's web engine.
   layout reaches TypeScript from the Zig structs at compile time.
 - **Permissions are explicit**: a page may call only the commands listed in
   `lepton.config.json` (`"permissions"`), and an unknown name fails the build.
-- **Pure native mode** (Linux): GLES with an shm/Cairo fallback, no web engine.
+- **Pure native mode**: no web engine. Linux: GLES with an shm/Cairo fallback; Windows:
+  a Win32 window with DirectWrite text (CPU for now, D3D11 next).
 
 > **Status: beta.** Stable is **0.1.8** (Linux). **0.1.9** (in beta, `@beta` on npm) adds
 > Windows. macOS is not supported (see [Platforms](#platforms)). What was measured, and where, is in
@@ -20,7 +21,7 @@ No browser ships with the app: it uses the system's web engine.
 | | Linux | Windows 10 / 11 *0.1.9 beta* |
 |---|---|---|
 | Web engine | WPE WebKit 2.54+ (`wpe-platform`; never WebKitGTK). Servo, experimental, with `--servo` | WebView2, the runtime that comes with Windows (no `WebView2Loader.dll`) |
-| Native render path | yes | not yet |
+| Native render path | yes: GLES 3 on the GPU, shared memory without one | yes, on the CPU for now: a Win32 window, GDI, DirectWrite text, 60 frames a second; the GPU path (D3D11) is next |
 | Packages | `.tar.gz`, `.deb`, Arch `.pkg.tar.zst` | `.zip`, `.msi` (per user, no admin, written without WiX) |
 | Plugins | `os`, `fs`, `clipboard`, `dialog` | the same four, measured end to end |
 | Single instance, deep links (`deepLinks`) | yes (a unix socket; the desktop entry claims the scheme) | yes (a named pipe; the scheme is registered per user) |
@@ -169,8 +170,9 @@ cargo test && cargo clippy --workspace --all-targets
 (cd zig && zig build test && zig build test -Drender=native)   # Linux
 ```
 
-On Windows, `zig build test` runs `zig/src/windows_tests.zig` (the native path is Linux
-only); PowerShell 5.1 has no `&&`, so run the two commands one by one.
+On Windows, `zig build test` runs `zig/src/windows_tests.zig` (the core's root reaches the
+Linux display layers) and `zig build win32-window-check` measures the native window from
+the screen; PowerShell 5.1 has no `&&`, so run the commands one by one.
 
 ## License
 
