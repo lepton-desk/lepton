@@ -353,7 +353,7 @@ test "the page gets the event frame layout and the window-state bits" {
     var buffer: [16384]u8 = undefined;
     const text = try scriptFor(&buffer, 1);
     var url: [128]u8 = undefined;
-    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("url:\"lepton://localhost/__lepton/", "/events\"", &url)) != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("url:\"" ++ core_origin ++ "/__lepton/", "/events\"", &url)) != null);
     var needle: [96]u8 = undefined;
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "kindNotice:{d}", .{@intFromEnum(wire.Kind.notice)})) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "maximized:{d}", .{invoke.WindowState.maximized})) != null);
@@ -391,7 +391,7 @@ test "the page gets invoke's offsets and command ids from the structs" {
     const text = try scriptFor(&buffer, 1);
     var needle: [96]u8 = undefined;
     var url: [128]u8 = undefined;
-    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("url:\"lepton://localhost/__lepton/", "/invoke\"", &url)) != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("url:\"" ++ core_origin ++ "/__lepton/", "/invoke\"", &url)) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "\"window.close\":{d}", .{@intFromEnum(invoke.Command.window_close)})) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "replyStatusOffset:{d}", .{@offsetOf(wire.Reply, "status")})) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, try std.fmt.bufPrint(&needle, "requestBytes:{d}", .{@sizeOf(wire.Request)})) != null);
@@ -412,7 +412,7 @@ test "the page fetches the core's origin by absolute address, never a wildcard" 
     var buffer: [8192]u8 = undefined;
     const text = try scriptFor(&buffer, 1);
     var url: [128]u8 = undefined;
-    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("fetch(`lepton://localhost/__lepton/", "/region?after=", &url)) != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, try keyed("fetch(`" ++ core_origin ++ "/__lepton/", "/region?after=", &url)) != null);
     try std.testing.expect(std.mem.indexOf(u8, text, "\"*\"") == null);
 }
 
@@ -428,7 +428,7 @@ test "a page on the core's scheme gets document.cookie, without the shim's comme
 test "the transport defines itself only in the application's own page" {
     var buffer: [8192]u8 = undefined;
     const packaged = try script(&buffer, 1, &no_commands, "");
-    try std.testing.expect(std.mem.indexOf(u8, packaged, "location.href.startsWith(\"lepton://localhost/\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, packaged, "location.href.startsWith(\"" ++ core_origin ++ "/\")") != null);
     try std.testing.expect(std.mem.indexOf(u8, packaged, "if (!own) return;") != null);
     // Every core URL carries the key; none is left as the marker.
     try std.testing.expect(std.mem.indexOf(u8, packaged, secret.marker) == null);

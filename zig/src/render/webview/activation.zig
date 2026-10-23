@@ -70,6 +70,9 @@ test "a press counts for the window and not after" {
     last_press_ms.store(0, .seq_cst);
     try std.testing.expect(!recent());
     press();
-    try std.testing.expect(recent());
+    // Windows counts the system's input while a window of this process is in front, not
+    // `press` (the input goes to WebView2's own window): a test process has no window, so
+    // a press there is not this user acting here.
+    try std.testing.expectEqual(builtin.os.tag != .windows, recent());
     last_press_ms.store(0, .seq_cst);
 }

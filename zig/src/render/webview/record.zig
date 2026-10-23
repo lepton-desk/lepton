@@ -248,9 +248,24 @@ pub const Reader = struct {
 
 const invoke = @import("invoke.zig");
 
+/// Test support: what the file `name` holds, into `out` (empty when unreadable). On every
+/// system, so the recorder's tests run on Windows too (`windows_tests.zig`).
+pub fn readBackForTest(name: [*:0]const u8, out: []u8) []u8 {
+    const bytes = @import("replay.zig").readWhole(std.heap.page_allocator, name) orelse return out[0..0];
+    defer std.heap.page_allocator.free(bytes);
+    const length = @min(bytes.len, out.len);
+    @memcpy(out[0..length], bytes[0..length]);
+    return out[0..length];
+}
+
+/// Test support: removes the file `name`, if it is there.
+pub fn removeForTest(name: [*:0]const u8) void {
+    std.Io.Dir.cwd().deleteFile(io(), std.mem.span(name)) catch {};
+}
+
 test "a recording reads back frame for frame, private bytes left out" {
     const name = "record-test.lrec";
-    defer _ = std.c.unlink(name);
+    defer removeForTest(name);
     var request_buffer: [128]u8 = undefined;
     var reply_buffer: [128]u8 = undefined;
     const request = try invoke.request(&request_buffer, 7, 1000, "secret path");
@@ -263,15 +278,16 @@ test "a recording reads back frame for frame, private bytes left out" {
     recorder.add(.late_reply, reply, true, false, 40);
     recorder.close();
 
-    const linux = std.os.linux;
-    var info: linux.Statx = undefined;
-    try std.testing.expectEqual(@as(usize, 0), linux.statx(linux.AT.FDCWD, name, 0, .{ .MODE = true }, &info));
-    try std.testing.expectEqual(@as(u16, 0o600), info.mode & 0o777);
+    // Private to its owner (`0600`) where files have modes; Windows has no such bits.
+    if (!windows) {
+        const linux = std.os.linux;
+        var info: linux.Statx = undefined;
+        try std.testing.expectEqual(@as(usize, 0), linux.statx(linux.AT.FDCWD, name, 0, .{ .MODE = true }, &info));
+        try std.testing.expectEqual(@as(u16, 0o600), info.mode & 0o777);
+    }
 
     var bytes: [1024]u8 = undefined;
-    const fd = std.c.open(name, .{ .ACCMODE = .RDONLY, .CLOEXEC = true });
-    defer _ = std.c.close(fd);
-    const read = std.c.read(fd, &bytes, bytes.len);
+    const read = readBackForTest(name, &bytes).len;
     try std.testing.expect(read > 0);
     const recording = bytes[0..@intCast(read)];
     try std.testing.expect(std.mem.indexOf(u8, recording, "secret") != null);
@@ -315,16 +331,14 @@ test "a file that is not a recording, or of another version, is refused" {
 
 test "an unmasked recording keeps private bytes" {
     const name = "record-unmasked-test.lrec";
-    defer _ = std.c.unlink(name);
+    defer removeForTest(name);
     var buffer: [128]u8 = undefined;
     const request = try invoke.request(&buffer, 1, 1000, "kept");
     var recorder = Recorder.create(name, true) orelse return error.CannotCreate;
     recorder.add(.request, request, true, false, 0);
     recorder.close();
     var bytes: [256]u8 = undefined;
-    const fd = std.c.open(name, .{ .ACCMODE = .RDONLY, .CLOEXEC = true });
-    defer _ = std.c.close(fd);
-    const read = std.c.read(fd, &bytes, bytes.len);
+    const read = readBackForTest(name, &bytes).len;
     var reader = try Reader.init(bytes[0..@intCast(read)]);
     const record = (try reader.next()).?;
     try std.testing.expect(!record.flags.masked);
@@ -344,7 +358,7 @@ test "an event keeps its name and, masked, not its data" {
 
 test "the core's window events are recorded whole, an application's masked" {
     const name = "record-events-test.lrec";
-    defer _ = std.c.unlink(name);
+    defer removeForTest(name);
     var log: @import("events.zig").Log = .{};
     var buffer: [512]u8 = undefined;
     var recorder = Recorder.create(name, false) orelse return error.CannotCreate;
@@ -354,9 +368,7 @@ test "the core's window events are recorded whole, an application's masked" {
     recorder.addEvent("notes.saved", try log.writeSince(1, &buffer), true);
     recorder.close();
     var bytes: [1024]u8 = undefined;
-    const fd = std.c.open(name, .{ .ACCMODE = .RDONLY, .CLOEXEC = true });
-    defer _ = std.c.close(fd);
-    const read = std.c.read(fd, &bytes, bytes.len);
+    const read = readBackForTest(name, &bytes).len;
     var reader = try Reader.init(bytes[0..@intCast(read)]);
     const window = (try reader.next()).?;
     try std.testing.expect(!window.flags.masked and !window.flags.during);

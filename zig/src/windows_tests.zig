@@ -22,4 +22,12 @@ test {
     _ = @import("render/webview/registry.zig");
     _ = @import("render/webview/events.zig");
     _ = @import("render/gpu/windows_gpu.zig");
+    _ = @import("render/webview/transport.zig");
+    _ = @import("render/webview/activation.zig");
+    _ = @import("render/webview/bridge.zig");
+    _ = @import("render/webview/record.zig");
+    _ = @import("render/webview/replay.zig");
+    _ = @import("render/webview/page_replay.zig");
+    _ = @import("render/webview/assets.zig");
+    _ = @import("platform/single_instance.zig");
 }

@@ -308,7 +308,7 @@ const events_mod = @import("events.zig");
 
 test "a page replay answers from the recording and notices a page that diverged" {
     const file = "page-replay-test.lrec";
-    defer _ = std.c.unlink(file);
+    defer record.removeForTest(file);
     var recorder = record.Recorder.create(file, false) orelse return error.CannotCreate;
     var request_buffer: [128]u8 = undefined;
     var reply_buffer: [128]u8 = undefined;
@@ -336,9 +336,7 @@ test "a page replay answers from the recording and notices a page that diverged"
     recorder.close();
 
     var bytes: [2048]u8 = undefined;
-    const fd = std.c.open(file, .{ .ACCMODE = .RDONLY, .CLOEXEC = true });
-    defer _ = std.c.close(fd);
-    const read = std.c.read(fd, &bytes, bytes.len);
+    const read = record.readBackForTest(file, &bytes).len;
     try std.testing.expect(read > 0);
 
     var script = try Script.load(std.testing.allocator, bytes[0..@intCast(read)]);
@@ -373,7 +371,7 @@ test "a page replay answers from the recording and notices a page that diverged"
 
 test "a page that makes exactly the recorded calls passes" {
     const file = "page-replay-pass-test.lrec";
-    defer _ = std.c.unlink(file);
+    defer record.removeForTest(file);
     var recorder = record.Recorder.create(file, false) orelse return error.CannotCreate;
     var request_buffer: [128]u8 = undefined;
     var reply_buffer: [128]u8 = undefined;
@@ -381,9 +379,7 @@ test "a page that makes exactly the recorded calls passes" {
     recorder.add(.reply, try invoke.reply(&reply_buffer, 1, .failed, ""), false, false, 2);
     recorder.close();
     var bytes: [512]u8 = undefined;
-    const fd = std.c.open(file, .{ .ACCMODE = .RDONLY, .CLOEXEC = true });
-    defer _ = std.c.close(fd);
-    const read = std.c.read(fd, &bytes, bytes.len);
+    const read = record.readBackForTest(file, &bytes).len;
     var script = try Script.load(std.testing.allocator, bytes[0..@intCast(read)]);
     defer script.deinit();
     // A recorded failure is answered as a failure: the page sees what the user saw.

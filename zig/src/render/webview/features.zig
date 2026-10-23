@@ -283,9 +283,10 @@ pub fn isOwnPage(uri: []const u8) bool {
 
 test "a window keeps only the application's own pages" {
     setPageOrigin("");
-    try std.testing.expect(isOwnPage("lepton://localhost/"));
-    try std.testing.expect(isOwnPage("lepton://localhost/settings.html?x=1"));
-    try std.testing.expect(!isOwnPage("lepton://localhost.evil/"));
+    const origin = @import("transport.zig").core_origin;
+    try std.testing.expect(isOwnPage(origin ++ "/"));
+    try std.testing.expect(isOwnPage(origin ++ "/settings.html?x=1"));
+    try std.testing.expect(!isOwnPage(origin ++ ".evil/"));
     try std.testing.expect(!isOwnPage("http://127.0.0.1:5173/"));
     try std.testing.expect(!isOwnPage("https://example.org/"));
     try std.testing.expect(!isOwnPage("file:///etc/passwd"));

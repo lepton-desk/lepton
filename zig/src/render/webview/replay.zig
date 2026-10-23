@@ -233,11 +233,9 @@ fn recordSession(file: [*:0]const u8, registry: *const invoke.Registry, requests
         recorder.add(.reply, answer, registry.isPrivate(id), false, recorder.now());
     }
     recorder.close();
-    const fd = std.c.open(file, .{ .ACCMODE = .RDONLY, .CLOEXEC = true });
-    defer _ = std.c.close(fd);
-    const read = std.c.read(fd, into.ptr, into.len);
-    if (read <= 0) return error.Unreadable;
-    return into[0..@intCast(read)];
+    const read = record.readBackForTest(file, into);
+    if (read.len == 0) return error.Unreadable;
+    return read;
 }
 
 test "the replay entry point is compiled" {
@@ -246,7 +244,7 @@ test "the replay entry point is compiled" {
 
 test "a replay against the same core matches, and a changed state is caught" {
     const file = "replay-test.lrec";
-    defer _ = std.c.unlink(file);
+    defer record.removeForTest(file);
     var frames: [5][96]u8 = undefined;
     const requests = [_][]const u8{
         try invoke.request(&frames[0], 1, 1, "ping"),
