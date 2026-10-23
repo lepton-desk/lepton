@@ -4,3 +4,5 @@
 * text=auto eol=lf
 # Microsoft's header, byte for byte as the package ships it (CRLF), so it matches its source.
 zig/webview2/WebView2.h -text
+# Compiled shaders (tools/d3d11-shaders.mjs): bytes, never line endings.
+*.dxbc binary

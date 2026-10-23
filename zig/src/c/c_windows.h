@@ -29,4 +29,13 @@
 #if __has_include(<WebView2.h>)
 #include <WebView2.h>
 #endif
+/* The native path's GPU half (`render/gpu/d3d11.zig`): here rather than in a header of its
+   own, so the swap chain is made on the window's own HWND type — a handle crossed between
+   two translations needs an alignment cast, and a handle's value need not be aligned. */
+#if __has_include(<d3d11.h>)
+#include <d3d11.h>
+#endif
+#if __has_include(<dxgi1_3.h>)
+#include <dxgi1_3.h>
+#endif
 #endif

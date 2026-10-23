@@ -10,9 +10,13 @@
 //! Run with `zig build windows-gpu-check` (Windows only).
 
 const std = @import("std");
-const layer = @import("lepton_window").window;
+const core = @import("lepton_window");
+const layer = core.window;
 const native = layer.win32;
-const c = @import("c_d3d11");
+const d3d11 = core.d3d11;
+const scene = core.scene;
+const atlas = core.atlas;
+const c = @import("c_windows");
 
 const iid_dxgi_device: c.GUID = .{ .Data1 = 0x54ec77fa, .Data2 = 0x1377, .Data3 = 0x44e6, .Data4 = .{ 0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c } };
 const iid_dxgi_factory2: c.GUID = .{ .Data1 = 0x50c83a1c, .Data2 = 0xe072, .Data3 = 0x4c48, .Data4 = .{ 0x87, 0xb0, 0x36, 0x30, 0xfa, 0x36, 0xa6, 0xd0 } };
@@ -69,15 +73,27 @@ fn levelName(level: c.D3D_FEATURE_LEVEL) []const u8 {
     };
 }
 
-/// The colour on screen at a client point, `0xRRGGBB`.
+/// The colour on screen at a client point, `0xRRGGBB`. When another window is over the
+/// point (`WindowFromPoint`), this one is brought to the front and read again once; still
+/// covered, the colour is `covered_point`, and the check fails saying so rather than reporting
+/// another window's pixel as this one's (a run once read #2073ab for #2180bf, and two
+/// reruns read #2180bf).
 fn screenAt(hwnd: c.HWND, x: i32, y: i32) u32 {
     var point: c.POINT = .{ .x = x, .y = y };
     _ = c.ClientToScreen(hwnd, &point);
+    if (c.WindowFromPoint(point) != hwnd) {
+        _ = c.SetForegroundWindow(hwnd);
+        c.Sleep(300);
+        if (c.WindowFromPoint(point) != hwnd) return covered_point;
+    }
     const dc = c.GetDC(null) orelse return 0xFFFF_FFFF;
     defer _ = c.ReleaseDC(null, dc);
     const colour: u32 = c.GetPixel(dc, point.x, point.y);
     return ((colour & 0xFF) << 16) | (colour & 0xFF00) | ((colour >> 16) & 0xFF);
 }
+
+/// What `screenAt` answers for a point another window covers: no 24-bit colour is this.
+const covered_point: u32 = 0xC0FFEE00;
 
 fn ticks() i64 {
     var now: c.LARGE_INTEGER = undefined;
@@ -86,6 +102,96 @@ fn ticks() i64 {
 }
 
 pub fn main() !void {
+    try rawSwapChain();
+    try sceneOnWindow();
+    if (failed) std.process.exit(1);
+    std.debug.print("all checks passed\n", .{});
+}
+
+/// The renderer (`render/gpu/d3d11.zig`) on a window of its own: the shapes the GLES 3
+/// tests assert on, read back from the screen; frames paced by the swap chain; a resize.
+fn sceneOnWindow() !void {
+    const allocator = std.heap.page_allocator;
+    var w: native.NativeWindow = undefined;
+    try w.open(.{ .title = "lepton d3d11 scene check", .size = .{ .width = 480, .height = 320 } });
+    defer w.close();
+    _ = c.SetForegroundWindow(@ptrCast(w.hwnd));
+    var size = (w.takeConfigure() orelse return error.NoConfigure).size;
+    const hwnd: c.HWND = @ptrCast(w.hwnd);
+
+    var renderer = d3d11.Renderer.open(w.hwnd, size.width, size.height) catch |err| {
+        expect(false, "renderer", "{t}", .{err});
+        return;
+    };
+    defer renderer.deinit();
+    w.setFrameWait(renderer.frameWait());
+    expect(renderer.frameWait() != null, "renderer", "level {s}, frame-latency object {s}", .{ levelName(renderer.level), if (renderer.frameWait() != null) "yes" else "no" });
+
+    var glyphs = try atlas.Atlas.init(allocator);
+    defer glyphs.deinit(allocator);
+    // A 4×4 coverage block: left half full, right half none (the GLES 3 test's).
+    var bitmap: [16]u8 = undefined;
+    for (0..4) |at| @memcpy(bitmap[at * 4 ..][0..4], &[_]u8{ 255, 255, 0, 0 });
+    const slot = (try glyphs.put(allocator, .{ .font = 0, .glyph = 1, .size = 4 }, 4, 4, 4, &bitmap, 0, 4)).?;
+
+    var list: scene.List = .{};
+    defer list.deinit(allocator);
+    try list.rect(allocator, .{ .x = 20, .y = 20, .width = 120, .height = 80 }, .{ .fill = scene.rgba(0xc03020ff), .radius = 24 });
+    try list.rect(allocator, .{ .x = 160, .y = 20, .width = 80, .height = 80 }, .{ .fill = scene.rgba(0xff000080) });
+    try list.glyph(allocator, .{ .x = 260, .y = 20, .width = 64, .height = 64 }, slot.uv(), scene.rgba(0xff0000ff));
+    const clear = scene.rgba(0x0000ffff);
+
+    for (0..30) |_| {
+        try renderer.draw(&list, &glyphs, clear, .{ .width = size.width, .height = size.height });
+        try w.wait(16);
+    }
+    const near = struct {
+        fn f(got: u32, want: u32) bool {
+            inline for (.{ 16, 8, 0 }) |shift| {
+                const a: i32 = @intCast((got >> shift) & 0xff);
+                const b: i32 = @intCast((want >> shift) & 0xff);
+                if (@abs(a - b) > 3) return false;
+            }
+            return true;
+        }
+    }.f;
+    const inside = screenAt(hwnd, 80, 60);
+    expect(near(inside, 0xc03020), "rect", "#{x:0>6} inside, drawn #c03020", .{inside});
+    const corner = screenAt(hwnd, 22, 22);
+    expect(near(corner, 0x0000ff), "rounded corner", "#{x:0>6} outside the radius, clear #0000ff", .{corner});
+    const blended = screenAt(hwnd, 200, 60);
+    expect(near(blended, 0x80007f), "blend", "#{x:0>6}, half red over blue #80007f", .{blended});
+    const covered = screenAt(hwnd, 270, 50);
+    const uncovered = screenAt(hwnd, 314, 50);
+    expect(near(covered, 0xff0000) and near(uncovered, 0x0000ff), "glyph", "#{x:0>6} | #{x:0>6}, atlas coverage left half", .{ covered, uncovered });
+    expect(glyphs.takeDirty() == null, "atlas", "sent once ({d} bytes uploaded in all)", .{renderer.uploaded});
+
+    // Frames paced by the swap chain: as many a second as the display refreshes.
+    var frequency: c.LARGE_INTEGER = undefined;
+    _ = c.QueryPerformanceFrequency(&frequency);
+    const frames = 120;
+    const started = ticks();
+    for (0..frames) |_| {
+        try renderer.draw(&list, &glyphs, clear, .{ .width = size.width, .height = size.height });
+        try w.wait(16);
+    }
+    const elapsed_ms = @divTrunc((ticks() - started) * 1000, frequency.QuadPart);
+    const per_second = @divTrunc(@as(i64, frames) * 1000, @max(elapsed_ms, 1));
+    expect(per_second >= 57 and per_second <= 63, "paced", "{d} frames in {d} ms = {d}/s", .{ frames, elapsed_ms, per_second });
+
+    // A resize: the swap chain follows, the new corner is drawn.
+    try w.resize(.{ .width = size.width + 100, .height = size.height + 60 });
+    for (0..10) |_| try w.wait(16);
+    if (w.takeConfigure()) |configure| size = configure.size;
+    for (0..10) |_| {
+        try renderer.draw(&list, &glyphs, clear, .{ .width = size.width, .height = size.height });
+        try w.wait(16);
+    }
+    const far = screenAt(hwnd, @intCast(size.width - 4), @intCast(size.height - 4));
+    expect(renderer.width == size.width and near(far, 0x0000ff), "resize", "{d}x{d}, far corner #{x:0>6}", .{ renderer.width, renderer.height, far });
+}
+
+fn rawSwapChain() !void {
     var w: native.NativeWindow = undefined;
     try w.open(.{ .title = "lepton windows gpu check", .size = .{ .width = 480, .height = 320 } });
     defer w.close();
@@ -189,7 +295,4 @@ pub fn main() !void {
         release(software.context);
         release(software.device);
     } else expect(false, "warp", "no WARP device", .{});
-
-    if (failed) std.process.exit(1);
-    std.debug.print("all checks passed\n", .{});
 }

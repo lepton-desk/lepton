@@ -48,6 +48,14 @@ pub const NativeWindow = struct {
     /// frames 16 ms apart however long the frame took to draw. Sleeping 16 ms after each
     /// frame drew 50 frames a second, the drawing's own time added to every period.
     deadline: i64 = 0,
+    /// The GPU path's swap chain signal (`render/gpu/d3d11.zig`, `frameWait`): set, `wait`
+    /// sleeps on it instead of the timer, and frames follow the display's refresh.
+    frame_wait: ?c.HANDLE = null,
+
+    /// Paces `wait` by the swap chain's frame-latency object (null: the timer again).
+    pub fn setFrameWait(self: *NativeWindow, handle: ?*anyopaque) void {
+        self.frame_wait = handle;
+    }
 
     /// Opens the window in place: `self` is the owner the window procedure reaches, so it
     /// must already be where it will stay.
@@ -106,7 +114,11 @@ pub const NativeWindow = struct {
     /// something to arrive first. Messages already in the queue end the wait at once
     /// (`MWMO_INPUTAVAILABLE`).
     pub fn wait(self: *NativeWindow, timeout_ms: i32) layer.Error!void {
-        const woke = if (timeout_ms > 0 and self.timer != null) timed: {
+        const woke = if (timeout_ms > 0 and self.frame_wait != null)
+            // The swap chain says when the next frame may be drawn; `timeout_ms` is only
+            // the longest this waits if it never does.
+            c.MsgWaitForMultipleObjectsEx(1, &self.frame_wait.?, @intCast(timeout_ms * 4), c.QS_ALLINPUT, c.MWMO_INPUTAVAILABLE)
+        else if (timeout_ms > 0 and self.timer != null) timed: {
             var frequency: c.LARGE_INTEGER = undefined;
             var now: c.LARGE_INTEGER = undefined;
             _ = c.QueryPerformanceFrequency(&frequency);

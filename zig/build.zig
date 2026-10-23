@@ -723,7 +723,7 @@ pub fn build(b: *std.Build) void {
                 .imports = &.{.{ .name = "lepton_window", .module = window_layer }},
             }),
         }));
-        support.addCModules(b, windows_gpu_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_d3d11"});
+        support.addCModules(b, windows_gpu_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_windows"});
         for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d3d11", "dxgi" }) |name| {
             windows_gpu_check.root_module.linkSystemLibrary(name, .{});
         }

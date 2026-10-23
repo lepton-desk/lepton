@@ -34,6 +34,22 @@ jobs:
           Expand-Archive "$env:RUNNER_TEMP\zig.zip" -DestinationPath "$env:RUNNER_TEMP"
           Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\zig-x86_64-windows-0.16.0"
 
+      # The DXBC in the repository is what its HLSL compiles to (docs/plans/windows.md):
+      # this runner has the Windows SDK's fxc.
+      - name: Shaders match their source
+        run: node tools/d3d11-shaders.mjs --check
+
+      # The native path's GPU half: a Direct3D 11 device and swap chain on the native window,
+      # the draw command list read back from the screen. The runner has no GPU of its own;
+      # what it does have is measured, not assumed.
+      - name: Direct3D 11
+        if: ${{ !cancelled() }}
+        working-directory: zig
+        run: |
+          zig build win32-window-check
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          zig build windows-gpu-check
+
       - name: CLI
         run: |
           cargo build --release --bin lepton
