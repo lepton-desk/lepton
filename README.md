@@ -12,7 +12,7 @@ No browser ships with the app: it uses the system's web engine.
 - **Pure native mode** (Linux): GLES with an shm/Cairo fallback, no web engine.
 
 > **Status: beta.** Stable is **0.1.8** (Linux). **0.1.9** (in beta, `@beta` on npm) adds
-> Windows. macOS is planned, not built. What was measured, and where, is in
+> Windows. macOS is not supported (see [Platforms](#platforms)). What was measured, and where, is in
 > [`docs/durum.md`](docs/durum.md).
 
 ## Platforms

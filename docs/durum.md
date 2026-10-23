@@ -88,7 +88,7 @@ Linux'ta ölçülen her şey aşağıda; Windows'ta ölçüm yapınca bu dosyaya
    - Başlık çubuğunun sayfayı izlemesi Linux'ta da (bileşimci izin veriyorsa; yoksa nedenini yaz).
 2. **Açık kalanların hepsi** (aşağıdaki liste ve bu dosyadaki "ölçülmedi" notları).
 3. **Windows'ta Zig 0.17:** zvm ile 0.17 kurulup `zig build test`, şablon uygulama, araçlar 0.17 ile de geçmeli (Linux'ta ikisi geçiyor; Windows'ta yalnız 0.16 denendi). Durumu aşağıda, "Windows'ta Zig 0.17".
-4. ~~**Windows 11 ve Windows Server 2025 uyumu, CI'da ölçülür**~~ — ölçüldü (aşağıda, "Windows Server 2025 CI"); çerçevesiz pencere, sürükleme ve yerel menü iş akışında henüz yok. (bu makine Windows 11 gereksinimlerini karşılamıyor; kurulmayacak, atlatılmayacak): GitHub Actions `windows-2025` (Server 2025, derleme 26100) üzerinde bir iş akışı şablon uygulamayı derleyip açar ve ölçer — başlık rengi (`theme-color` verilince `DwmGetWindowAttribute(DWMWA_CAPTION_COLOR)` beklenen renk mi, ekran görüntüsü artifact olarak), koyu/açık, simge, küçük ekranda yerleşim, çerçevesiz pencere ve sürükleme, yerel menü, tek kopya, MSI kurulum/kaldırma. Önce Server 2025'te `DWMWA_CAPTION_COLOR`'ın gerçekten çalıştığı ölçülecek; çalışmıyorsa nedeni yazılır. Server 2025'e ya da Windows 11'e özgü fark çıkarsa düzeltilir (Windows 10'da ölçülenler bozulmadan).
+4. ~~**Windows 11 ve Windows Server 2025 uyumu, CI'da ölçülür**~~ — ölçüldü (aşağıda, "Windows Server 2025 CI"); çerçevesiz pencere, sürükleme, yerel menü ve başlık çubuğunun üç düğmesi de artık iş akışında (aşağıda, "Başlık çubuğunun üç düğmesi"). (bu makine Windows 11 gereksinimlerini karşılamıyor; kurulmayacak, atlatılmayacak): GitHub Actions `windows-2025` (Server 2025, derleme 26100) üzerinde bir iş akışı şablon uygulamayı derleyip açar ve ölçer — başlık rengi (`theme-color` verilince `DwmGetWindowAttribute(DWMWA_CAPTION_COLOR)` beklenen renk mi, ekran görüntüsü artifact olarak), koyu/açık, simge, küçük ekranda yerleşim, çerçevesiz pencere ve sürükleme, yerel menü, tek kopya, MSI kurulum/kaldırma. Önce Server 2025'te `DWMWA_CAPTION_COLOR`'ın gerçekten çalıştığı ölçülecek; çalışmıyorsa nedeni yazılır. Server 2025'e ya da Windows 11'e özgü fark çıkarsa düzeltilir (Windows 10'da ölçülenler bozulmadan).
 
 5. **Linux'tan Windows paketi, yalnız `.exe` değil** (adım adım): `lepton package --windows` Linux'ta `.zip` ve `.msi` yazar — ikisinin yazıcısı da saf Rust (`zip.rs`, `installer_db.rs` + `cfb`/`cab`), simge Zig'in kaynak derleyicisiyle, WebView2 başlığı depoda.
    1. Paket çalışan makineye değil hedefe göre: `platform::bundle_os`/`executable` hedeften (dosya adı `windows`, `.exe`), `packages_as` MSI'yı hedef Windows olduğunda Linux'ta da kabul eder.
@@ -146,3 +146,57 @@ Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Ch
 - **Başlık çubuğu sayfayı izlesin (Linux):** COSMIC X11'de `_GTK_THEME_VARIANT`'ı yok sayıyor (iki görüntü 0 piksel fark); Wayland'de protokolü yok. Lepton'ın kendi çizdiği başlık çubuğuyla gelecek (`docs/wpe-platform.md` adım 5); Servo için aynı çizim katmanı gerekir.
 - **Yayın sırası (kullanıcı kararı):** 0.1.9-beta.2 kendi WPE platformunu beklemez; WPE'de `decorations: false`, `start_drag`, `window.menu` belgelerde "Linux WPE'de henüz yok" diye yazılır, kendi platform beta.3'e.
 - **Kendi WPE platformu:** plan `docs/wpe-platform.md`. Bugün yalnız `WPELeptonDisplay` seçiliyor (ölçüldü, `zig build platform-check`).
+
+## Başlık çubuğunun üç düğmesi (2026-10-21/23, Windows'ta ölçüldü)
+
+- `windowControls(bar)` (`@lepton-desk/api/window`): `[data-window-control="minimize|maximize|close"]` düğmeleri; büyütülmüşken çubukta `data-maximized`. İzinler: `window.minimize`, `maximize`, `unmaximize`, `state`, `close`.
+- Gerçek fareyle (`SendInput`) ölçüldü, `tools/ci/windows/measure.ps1`:
+  - **Sistemin düğmeleri** (çerçeveli pencere; yerleri `WM_GETTITLEBARINFOEX`'ten — `WM_NCHITTEST` DWM'nin çizdiği düğmeleri değil eski düzeni söylüyor, Not Defteri'nde de): küçült → `IsIconic`, büyüt → `IsZoomed`, yeniden → geri alındı, kapat → çıkış 0.
+  - **Sayfanın düğmeleri** (`decorations: false`): aynı dört sonuç.
+  - Windows 10 22H2 (bu makine): ikisi de geçti. Server 2025 (CI 39627630003, 39629060471): ikisi de geçti.
+- **CI 39629060471'de düşen iki adım ölçümün hatasıydı, uygulamanın değil:** .NET'in `MainWindowHandle`'ı pencere bulunduktan 3 sn sonra 35×19'luk bir açılır pencereye döndü, betik çöktü ve kurulu uygulama açık kaldı; çerçevesiz adımın başlattığı uygulama (aynı kimlik) tek kopya kuralıyla argümanını ona verip çıktı, ölçülen pencere eski çerçeveli kopyaydı (`client top - window top = 31`). Düzeltildi (`8859993`): pencere başlatılan sürecin `LeptonWindow` sınıflı penceresi (`EnumWindows`), açılışta çalışan kopyalar kapatılıyor, betik düşerse uygulama da kapatılıyor. Bu makinede eski kopya açıkken çerçevesiz ölçüm baştan sona geçti. CI 39940123813 (`8859993`): üç adım da geçti — pencere, MSI kur/aç/kaldır (klasör kalmadı), çerçevesiz pencere.
+- **Linux: ölçülmedi.** `tools/ci/linux/window-controls.sh` (Servo X11, `_NET_WM_STATE`) yazıldı, hiç çalıştırılmadı ve hiçbir iş akışında yok. WPE'de `decorations: false` yok, sayfanın çubuğu bileşimcinin çubuğunun altında kalır; düğmeler yine çalışmalı, elle denenecek: çubuğun sağındaki üç düğme sırayla küçültmeli, büyütmeli, geri almalı, kapatmalı (çıkış 0).
+
+## Eksikler (2026-10-23; iki tarama, her madde kodda doğrulandı)
+
+Kanıt satırları tarama anındaki kod içindir. "Kayıtlı" = bu dosyada zaten vardı.
+
+### Windows'ta (Linux'ta olup Windows'ta olmayan)
+
+Engelleyen:
+1. **Native çizim yolu Windows'ta yok, CLI yine de seçtiriyor.** `window/window.zig` yalnız Wayland/X11; `build.zig:645` "core does not build there yet". `lepton new --template …` hedef verilmezse `RenderMode::Native` (`commands/new.rs:129`), sihirbaz da sunuyor; `build/run --native` denetimsiz `-Drender=native`. Windows'ta reddedilmeli ya da varsayılan webview olmalı.
+2. **`window.open` açılır penceresi `webPermissions`'ı ve indirmeleri atlıyor.** `webview2/popup.zig` yalnız `WebResourceRequested`, `DocumentTitleChanged`, `WindowCloseRequested`, `NavigationStarting`, `NewWindowRequested` bağlıyor; `PermissionRequested`/`DownloadStarting` yok. Linux'ta açılır pencere de politikadan geçiyor (`features.zig`, `permissions.watchView`). Koddan okundu, ölçülmedi.
+3. **`lepton info` WebView2 yokken "native builds only" diyor** (`commands/info.rs:113`): Windows'ta native yol yok.
+
+Eksik:
+4. Derin bağlantı `dev`/`run`'da ve `.zip`'te kaydolmuyor; yalnız MSI `HKCU\Software\Classes` yazıyor (`desktop_entry::announce` Linux dışında dönüyor).
+5. Sayfanın `console`'u terminale gelmiyor (Linux Debug'da `write_console_messages_to_stdout`; `webview2/view.zig`'de karşılığı yok).
+6. Bildirimler WebView2'nin kendi arayüzünde; `setApplication`'ın adı/kimliği kullanılmıyor, hangi uygulamaya atfedildiği (AUMID) ölçülmedi.
+7. İzin türleri: `webview2/permissions.zig` `kindOf` yalnız mikrofon, kamera, konum, bildirim; `pointer-lock`, `device-info`, `media-keys`, `storage-access`, `xr` için `allow` etkisiz. `navigator.permissions.query` politikadan cevaplanmıyor.
+8. Oturum kapanışı/kapatma: sürüm derlemesi Windows alt sisteminde; `termination.zig` `SetConsoleCtrlHandler`'a dayanıyor, pencere `WM_QUERYENDSESSION`/`WM_ENDSESSION`'ı işlemiyor. Ölçülmeli.
+9. Motor kurulum önerisi yok (Linux paket yöneticisini öneriyor; Windows yalnız adres yazıyor).
+10. Yoklama araçları (`webview-check`, `engine-caps`, `platform-check`…) Linux'a özel; Windows'ta yalnız `webview2-check`.
+11. `windows_tests.zig` `record`, `replay`, `page_replay`, `bridge`, `transport`, `assets`, `single_instance`, `activation`, `webview2/permissions` (kendi testi var) dosyalarını kapsamıyor: uçtan uca ölçüldüler ama birim testleri Windows'ta koşmuyor.
+12. `lepton`'ın çocukları Windows'ta `taskkill /T /F` ile bitiyor (Linux'ta SIGTERM).
+13. Windows'ta yapılan `tar.gz`'de ikili `+x` almıyor (`archive.rs:254`, yorum da eski).
+14. Dev sunucusu sayfasında çerezlerin kalıcılığı Windows'ta ölçülmedi.
+- Bilerek: Servo yalnız Linux; systemd scope/masaüstü girdisi Linux'a özel; MSIX/imza sertifika bekliyor; arm64 yok.
+- Eski yorum: `plugin-fs/zig/plugin.zig:280` "Windows answers `failed`" diyor, `fs.watch` Windows'ta var.
+
+### Linux'ta (Windows'ta olup Linux'ta olmayan)
+
+Kayıtlı (yukarıda): WPE'de `decorations: false`, `start_drag`, `window.menu` → `failed` (kendi WPE platformu, beta.3); başlık çubuğunun sayfayı izlemesi; Linux'tan Windows paketi ölçülmedi; Servo'da izinler, pano, diyaloglar.
+
+Yeni:
+1. **WPE'de pencere boyutu küçük ekrana sığdırılmıyor:** `wpe_view.zig` `resized` istenen boyutu çalışma alanına bakmadan veriyor (Windows `place`/`isSmall`, Servo ve Lepton'ın kendi pencereleri sığdırıyor). Ölçülmedi.
+2. **Servo penceresi uygulama kimliğini almıyor:** `servo/view.zig` `X11Window.open`'a `app_id` vermiyor, `WM_CLASS` varsayılan `dev.lepton.app`; masaüstü girdisinin `StartupWMClass=<identifier>`'ıyla eşleşmez, simge ve dock gruplaması kaçar. `_NET_WM_ICON` hiç yok.
+3. **`bundle.icon` Linux paketine gitmiyor:** yalnız `.ico`, yalnız Windows; Linux hep `src-lepton/icon.svg`.
+4. **CSS `app-region: drag` yalnız WebView2'de**; api README platform belirtmiyor.
+5. **Servo'da çerçevesiz pencere kenardan boyutlanmıyor:** yalnız taşıma isteniyor (`_NET_WM_MOVERESIZE` yön 8).
+6. **WPE'de `dragRegion` her basışta yakalanmamış bir ret bırakıyor** (`window.ts:111` `void startDragging()`, cevap `failed`).
+7. **Servo menüsünde `&` olduğu gibi çiziliyor** (Windows'ta erişim tuşu; README örneği `&Kopyala`).
+8. **`windowControls` Linux'ta ölçülmedi** (yukarıda).
+9. Belgeler: api README `start_drag`/`menu`/çerçevesiz için "(Windows)" diyor, Servo'yu anmıyor ve "Linux WPE'de henüz yok" demiyor; `window.ts` "Linux for now", `window_shape.rs`/`lepton-build.zig` "(Windows)" — Servo'da hepsi var.
+10. Küçük: Linux derlemesi de `-Dicon` alıp kullanılmayan `.ico` yazıyor; `wpe_view.zig`'de `map`'in belge yorumu `setDecorations`'ın üstüne kaymış.
+
+**Windows değişiklikleri Linux'u bozdu mu?** Koddan: hayır. `program::resolve` Linux'ta adı değiştirmeden döndürüyor (test var); `invoke.zig`'in yeni 10/11 komutları geri çağrı yoksa `failed` (Linux testi var); `main.zig`'deki tek değişiklik `@hasDecl` korumalı. Davranış değişikliği: `bundle.targets`'taki `msi` artık `--windows` olmayan her derlemede (Linux'ta da) nedeniyle reddediliyor. Linux'ta derlenip koşturulmadı.

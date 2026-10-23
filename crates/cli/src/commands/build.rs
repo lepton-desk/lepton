@@ -25,6 +25,11 @@ const NAME: &str = "build";
 /// derived from anything, so it cannot drift between the CLI and the template.
 pub const CORE_DIR: &str = "src-lepton";
 
+/// Why `--macos` is refused.
+pub const MACOS_UNSUPPORTED: &str = "--macos: macOS is not supported. Signing and notarizing \
+     for it needs a paid Apple developer account and Mac hardware to test on, which Lepton \
+     cannot keep up; Linux and Windows are supported";
+
 /// Flags for `lepton build`.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct Flags {
@@ -36,7 +41,7 @@ pub struct Flags {
     #[arg(long, conflicts_with_all = ["linux", "macos", "webview"])]
     pub windows: bool,
 
-    /// Builds for macOS.
+    /// macOS: not supported. Kept so the build says why instead of "unknown flag".
     #[arg(long, conflicts_with_all = ["linux", "windows", "webview"])]
     pub macos: bool,
 
@@ -87,6 +92,11 @@ impl Flags {
 
     /// Builds the project rooted at `root`.
     pub fn build_in(&self, root: &Path) -> Outcome {
+        // It once cross-compiled for `aarch64-macos` and handed over a binary nobody had
+        // run. Refused before anything is built, a dry run included.
+        if self.macos {
+            return Err(CliError::Invalid(MACOS_UNSUPPORTED.to_owned()));
+        }
         // Servo's library is found first, a dry run included: without it the core cannot
         // link, and a `--servo` build that quietly became WPE WebKit is what this flag
         // once did (measured 2026-10-18).
@@ -684,6 +694,23 @@ mod tests {
 
         let accepted = crate::Cli::try_parse_from(["lepton", "build", "--linux", "--servo"]);
         ensure!(accepted.is_ok(), "--linux --servo should parse");
+        Ok(())
+    }
+
+    #[test]
+    fn macos_is_refused_with_the_reason_before_anything_is_built() -> Result<(), Failure> {
+        let scratch = assert_ok!(
+            Scratch::new("build-macos"),
+            "the scratch directory should be creatable"
+        );
+        let flags = Flags {
+            macos: true,
+            dry_run: true,
+            ..Flags::default()
+        };
+        // An empty directory: the refusal comes before the project is even looked for.
+        let error = assert_err!(flags.build_in(scratch.path()), "--macos must be refused");
+        assert_contains!(&error.to_string(), "macOS is not supported");
         Ok(())
     }
 
