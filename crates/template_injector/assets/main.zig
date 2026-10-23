@@ -453,7 +453,11 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
     }} else {{
         core.report.fact("text", .warn, "no cairo; drawing without labels", .{{}});
     }}
-    defer if (subject) |*type_face| type_face.deinit();
+    // `core.render.Text` is `void` in a build without Cairo (Windows today), so every use
+    // of it is behind `can_draw_text`, decided at compile time.
+    defer if (comptime core.render.can_draw_text) {{
+        if (subject) |*type_face| type_face.deinit();
+    }};
 
     var state: State = .{{}};
 
@@ -483,7 +487,9 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
             try frame.resize(configure.size);
             // The text draws through a view of the frame's buffer at the frame's stride;
             // both can change on a resize, so the view is rebuilt with them.
-            if (subject) |*type_face| try type_face.retarget(frame);
+            if (comptime core.render.can_draw_text) {{
+                if (subject) |*type_face| try type_face.retarget(frame);
+            }}
             try opened.resize(configure.size);
         }}
 
@@ -513,17 +519,22 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
         // The window's own chrome, over the content: client-side decorations are drawn by
         // the client or not at all, and a window without them can be neither moved nor
         // closed. Painted from the window's live input state, so hover follows the pointer.
-        switch (opened) {{
+        // Windows draws the frame itself (title bar, buttons, borders): nothing to paint.
+        if (comptime !windows) switch (opened) {{
             inline else => |handle| {{
                 core.waylandChrome.paintTitlebar(handle.input, frame);
                 core.waylandChrome.paintMenu(handle.menu, frame);
             }},
-        }}
-        try opened.presentPixels(frame.pixels, frame.size, frame.format);
-        if (frames == 1) switch (opened) {{
-            .wayland => |handle| if (handle.presentPath()) |path| std.debug.print("present      {{s}}\n", .{{@tagName(path)}}),
-            .x11 => std.debug.print("present      shm\n", .{{}}),
         }};
+        try opened.presentPixels(frame.pixels, frame.size, frame.format);
+        if (frames == 1) {{
+            if (comptime windows) {{
+                std.debug.print("present      gdi\n", .{{}});
+            }} else switch (opened) {{
+                .wayland => |handle| if (handle.presentPath()) |path| std.debug.print("present      {{s}}\n", .{{@tagName(path)}}),
+                .x11 => std.debug.print("present      shm\n", .{{}}),
+            }}
+        }}
 
         opened.wait(16) catch break;
         _ = channel;
@@ -554,30 +565,9 @@ fn paint(frame: *core.surface.Surface, subject: ?*core.render.Text, frames: u32,
     frame.fillRect(0, 0, width, baseline * 4, ink.rail);
     frame.hLine(0, baseline * 4, width, ink.rule);
 
-    if (subject) |type_face| {{
-        _ = type_face.draw(baseline, baseline * 3, "{product}", ink.heading);
-        _ = type_face.draw(baseline, baseline * 3 + baseline * 2, "native render, no web engine", ink.body);
-    }}
-
-    // The frame counter, which is the part a developer actually watches: it only advances
-    // if the loop presented, and a stalled render stops it visibly rather than silently.
-    var counter: [32]u8 = undefined;
-    const counter_text = std.fmt.bufPrint(&counter, "frames {{d}}\x00", .{{frames}}) catch return;
-    if (subject) |type_face| {{
-        _ = type_face.draw(baseline, baseline * 8, counter_text, ink.body);
-    }}
-
-    // A live measure off the shared-memory channel, so the window shows the IPC the
-    // frontend SDK is already speaking. No page is involved and none is needed: this is
-    // the same channel the frontend binds at run time.
-    if (state.resident_bytes) |bytes| {{
-        var line: [64]u8 = undefined;
-        const text = std.fmt.bufPrintSentinel(&line, "resident set {{d}} KiB", .{{bytes / 1024}}, 0) catch return;
-        if (subject) |type_face| {{
-            _ = type_face.draw(baseline, baseline * 10, text, ink.body);
-        }}
-    }} else if (subject) |type_face| {{
-        _ = type_face.draw(baseline, baseline * 10, "resident set unavailable", ink.dim);
+    // Type only where the build can draw it (`core.render.Text` is `void` without Cairo).
+    if (comptime core.render.can_draw_text) {{
+        if (subject) |type_face| label(type_face, frames, state, ink);
     }}
 
     // A baseline lattice down the body, so a present that writes the wrong stride or the
@@ -585,6 +575,29 @@ fn paint(frame: *core.surface.Surface, subject: ?*core.render.Text, frames: u32,
     var y: i32 = baseline * 12;
     while (y < height - baseline) : (y += baseline * 3) {{
         frame.hLine(baseline, y, width - baseline * 2, ink.groove);
+    }}
+}}
+
+/// The screen's type: the name, the frame counter and the resident set.
+fn label(type_face: *core.render.Text, frames: u32, state: *State, ink: Palette) void {{
+    _ = type_face.draw(baseline, baseline * 3, "{product}", ink.heading);
+    _ = type_face.draw(baseline, baseline * 3 + baseline * 2, "native render, no web engine", ink.body);
+
+    // The frame counter, which is the part a developer actually watches: it only advances
+    // if the loop presented, and a stalled render stops it visibly rather than silently.
+    var counter: [32]u8 = undefined;
+    const counter_text = std.fmt.bufPrint(&counter, "frames {{d}}\x00", .{{frames}}) catch return;
+    _ = type_face.draw(baseline, baseline * 8, counter_text, ink.body);
+
+    // A live measure off the shared-memory channel, so the window shows the IPC the
+    // frontend SDK is already speaking. No page is involved and none is needed: this is
+    // the same channel the frontend binds at run time.
+    if (state.resident_bytes) |bytes| {{
+        var line: [64]u8 = undefined;
+        const text = std.fmt.bufPrintSentinel(&line, "resident set {{d}} KiB", .{{bytes / 1024}}, 0) catch return;
+        _ = type_face.draw(baseline, baseline * 10, text, ink.body);
+    }} else {{
+        _ = type_face.draw(baseline, baseline * 10, "resident set unavailable", ink.dim);
     }}
 }}
 
@@ -672,7 +685,35 @@ const baseline: i32 = 24;
 /// the construction differs. Both backends' methods are transcribed from their own modules;
 /// where one is a method and the other a free function over `*anyopaque`, that difference
 /// is real and is not smoothed over here.
-const Opened = union(enum) {{
+const Opened = if (windows) Win32Opened else LinuxOpened;
+
+/// Windows: the Win32 window (`core.window.win32`); Windows draws its frame.
+const Win32Opened = union(enum) {{
+    win32: *core.window.win32.NativeWindow,
+
+    fn close(self: Win32Opened, allocator: std.mem.Allocator) void {{
+        self.win32.close();
+        allocator.destroy(self.win32);
+    }}
+
+    fn takeConfigure(self: Win32Opened) ?core.window.Configure {{
+        return self.win32.takeConfigure();
+    }}
+
+    fn resize(self: Win32Opened, size: core.window.Size) !void {{
+        return self.win32.resize(size);
+    }}
+
+    fn presentPixels(self: Win32Opened, pixels: []const u8, size: core.window.Size, format: core.window.PixelFormat) !void {{
+        return self.win32.presentPixels(pixels, size, format);
+    }}
+
+    fn wait(self: Win32Opened, timeout_ms: i32) !void {{
+        return self.win32.wait(timeout_ms);
+    }}
+}};
+
+const LinuxOpened = union(enum) {{
     wayland: *core.waylandWindow.WaylandWindow,
     x11: *core.x11Window.X11Window,
 
@@ -724,6 +765,12 @@ const Opened = union(enum) {{
 }};
 
 fn openWindow(allocator: std.mem.Allocator, request: core.window.Request) !Opened {{
+    if (comptime windows) {{
+        const handle = try allocator.create(core.window.win32.NativeWindow);
+        errdefer allocator.destroy(handle);
+        try handle.open(request);
+        return .{{ .win32 = handle }};
+    }}
     const display = try core.display.Display.probe(core.display.processGetenv, null);
     switch (display.session) {{
         .wayland => {{

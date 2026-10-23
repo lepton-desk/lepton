@@ -7,9 +7,9 @@ name: zig
 on:
   push:
     branches: [trunk]
-    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", ".github/workflows/zig.yml"]
+    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", "crates/cli/**", ".github/workflows/zig.yml"]
   pull_request:
-    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", ".github/workflows/zig.yml"]
+    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", "crates/cli/**", ".github/workflows/zig.yml"]
   workflow_dispatch:
 
 jobs:
@@ -54,3 +54,14 @@ jobs:
 
       - name: Cookie shim
         run: node --test zig/src/render/webview/cookie_shim.test.mjs
+
+      # The template's own `main.zig` is compiled only in a project; the core tests above
+      # never reach it. A native app from this tree's CLI, built (the runner has no display
+      # to open it on), with this matrix's Zig.
+      - name: Native template app
+        run: |
+          cargo build --release --bin lepton
+          export LEPTON_ZIG="$(command -v zig)"
+          ./target/release/lepton new ci-native --template vanilla-ts --target native --non-interactive
+          cd ci-native
+          ../target/release/lepton build --native

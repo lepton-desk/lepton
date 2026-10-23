@@ -221,6 +221,13 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
             core.linkSystemLibrary(library, .{});
         }
     }
+    // The native path's window on Windows (`window/windows/native_window.zig`): a Win32
+    // window and GDI's `SetDIBitsToDevice`.
+    if (windows and !want_webview) {
+        for ([_][]const u8{ "user32", "gdi32" }) |library| {
+            core.linkSystemLibrary(library, .{});
+        }
+    }
 
     // The platform backend's library name, taken from its own `.pc` file rather than
     // assembled from a version convention. `wpe_loader_init` hands its argument

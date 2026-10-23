@@ -40,6 +40,18 @@ for platform in cli-linux-x64 cli-win32-x64; do
 done
 echo "all at $version"
 
+step "the template history is what this version ships"
+# `lepton update` tells a project's own edits from the template by comparing with
+# `assets/history/<version>/`, written when the version was set (`release-version.mjs`). A
+# template changed after that and published unsynced makes every untouched project look
+# edited on the next update (beta.2's copies were two changes behind, found 2026-10-23).
+assets="$root/crates/template_injector/assets"
+cmp -s "$assets/main.zig" "$assets/history/$version/main.zig" ||
+  fail "assets/history/$version/main.zig differs from assets/main.zig: copy it before publishing"
+cmp -s "$assets/lepton-build.zig" "$assets/history/$version/build.zig" ||
+  fail "assets/history/$version/build.zig differs from assets/lepton-build.zig: copy it before publishing"
+echo "history/$version matches the templates"
+
 step "dist-tag"
 # Plain versions are `latest`, `-beta.N` is `beta` (0.2.0), `-rc.N` is `next` (1.0.0); npm 11
 # refuses a prerelease without `--tag`, and a beta under `latest` would reach every install.
