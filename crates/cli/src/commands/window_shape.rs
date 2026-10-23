@@ -124,7 +124,7 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
 }
 
 /// Whether a core build makes a Windows program: its `-Dtarget`, or this machine without one.
-fn targets_windows(step: &Step) -> bool {
+pub(super) fn targets_windows(step: &Step) -> bool {
     match step
         .args
         .iter()

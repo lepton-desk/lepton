@@ -13,7 +13,8 @@
 //!
 //! Windows has no SIGTERM. Measured on 2026-10-18 with `cmd /c node`: `Child::kill` ended
 //! `cmd` and left node running; `taskkill /T` without `/F` refuses console processes;
-//! `taskkill /T /F` ended the tree. So a tracked child is ended with its tree there, and
+//! `taskkill /T /F` ended the tree. So a tracked child is asked first (`taskkill /T`, which
+//! closes a windowed app the way its title bar does) and then ended with its tree, and
 //! [`install`] also puts `lepton` in a kill-on-close job object, which its children join:
 //! when `lepton` ends — even by `Stop-Process -Force`, which no handler sees — the kernel
 //! closes the job and ends them (measured). `ctrlc` reports Ctrl-C, Ctrl-Break, a closed
@@ -101,14 +102,40 @@ mod platform {
     use std::process::{Command, Stdio};
     use std::sync::OnceLock;
 
-    /// `/T` takes the tree, `/F` is required for console processes (refused without it).
+    /// Asked first, then made: `taskkill /T` without `/F` sends a windowed process
+    /// `WM_CLOSE`, so a Lepton app closes the way its title bar closes it (measured: exit 0
+    /// in 377 ms, where `/F` gave exit 1 and no cleanup). A console process refuses it at
+    /// once (exit 128, measured with `cmd /c ping`) and gets `/F` without waiting; one that
+    /// accepted and is still running after [`GRACE`](super::GRACE) gets `/F` too.
     pub fn terminate(pid: u32) {
-        let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &pid.to_string()])
+        let asked = taskkill(pid, false);
+        if asked {
+            let until = std::time::Instant::now() + super::GRACE;
+            while std::time::Instant::now() < until {
+                if !alive(pid) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        let _ = taskkill(pid, true);
+    }
+
+    /// `taskkill /T` (the tree), with `/F` when `force`; whether it accepted.
+    fn taskkill(pid: u32, force: bool) -> bool {
+        let pid = pid.to_string();
+        let mut args = vec!["/T"];
+        if force {
+            args.push("/F");
+        }
+        args.extend(["/PID", pid.as_str()]);
+        Command::new("taskkill")
+            .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status();
+            .status()
+            .is_ok_and(|status| status.success())
     }
 
     /// Whether `pid` is still running, from `tasklist`'s CSV row (its other messages are

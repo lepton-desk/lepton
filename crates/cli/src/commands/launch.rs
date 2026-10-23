@@ -95,6 +95,16 @@ fn grant_web_permissions(steps: &mut [Step], root: &Path, config: &str) -> Resul
         .iter()
         .map(|(kind, policy)| format!("{kind}={policy}"))
         .collect();
+    let for_windows = steps
+        .iter()
+        .any(|step| is_core_build(step) && super::window_shape::targets_windows(step));
+    if for_windows {
+        for kind in inert_on_windows(&pairs) {
+            eprintln!(
+                "lepton: webPermissions \"{kind}\" has no counterpart in WebView2 (Windows): the page is not asked for it there, so allow or ask changes nothing"
+            );
+        }
+    }
     for step in steps.iter_mut() {
         if is_core_build(step) {
             step.args
@@ -102,6 +112,24 @@ fn grant_web_permissions(steps: &mut [Step], root: &Path, config: &str) -> Resul
         }
     }
     Ok(())
+}
+
+/// The kinds WebView2 has no permission for (`COREWEBVIEW2_PERMISSION_KIND`, WebView2.h:
+/// camera, microphone, geolocation and notifications are the four Lepton's kinds share),
+/// given anything but `deny`: a policy Windows would accept and never read.
+fn inert_on_windows<K: AsRef<str>, P: AsRef<str>>(pairs: &[(K, P)]) -> Vec<String> {
+    const WITHOUT: [&str; 5] = [
+        "pointer-lock",
+        "device-info",
+        "media-keys",
+        "storage-access",
+        "xr",
+    ];
+    pairs
+        .iter()
+        .filter(|(kind, policy)| WITHOUT.contains(&kind.as_ref()) && policy.as_ref() != "deny")
+        .map(|(kind, _)| kind.as_ref().to_owned())
+        .collect()
 }
 
 /// Hands `lepton.config.json`'s `window.width`/`window.height` to every core build as
@@ -346,7 +374,7 @@ mod tests {
 
 #[cfg(test)]
 mod naming_tests {
-    use super::{binary_name, grant_permissions, name_core, size_window};
+    use super::{binary_name, grant_permissions, inert_on_windows, name_core, size_window};
     use crate::commands::build::CORE_DIR;
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{Step, assert_eq, ensure};
@@ -496,6 +524,21 @@ mod naming_tests {
             "wildcard"
         );
         lepton_orchestrator::assert_contains!(&error.to_string(), "wildcards are not allowed");
+        Ok(())
+    }
+
+    #[test]
+    fn the_kinds_webview2_cannot_ask_for_are_named_unless_denied() -> Result<(), Failure> {
+        let pairs = [
+            ("camera", "allow"),
+            ("pointer-lock", "allow"),
+            ("xr", "ask"),
+            ("media-keys", "deny"),
+        ];
+        assert_eq!(
+            inert_on_windows(&pairs),
+            vec![String::from("pointer-lock"), String::from("xr")]
+        );
         Ok(())
     }
 

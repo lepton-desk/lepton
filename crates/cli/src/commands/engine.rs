@@ -27,6 +27,14 @@ const WEBVIEW2_KEYS: [&str; 2] = [
 
 /// Where Microsoft hands out the Evergreen runtime.
 const WEBVIEW2_DOWNLOAD: &str = "https://developer.microsoft.com/microsoft-edge/webview2/";
+/// The runtime through winget: Microsoft's package, by its id.
+const WEBVIEW2_WINGET: [&str; 5] = [
+    "winget",
+    "install",
+    "--id",
+    "Microsoft.EdgeWebView2Runtime",
+    "--exact",
+];
 
 /// The version WPEPlatform became stable in, which the core's platform path is written for.
 const MINIMUM: (u32, u32) = (2, 54);
@@ -254,8 +262,28 @@ impl Family {
     }
 }
 
-/// What this machine's distribution can do about a missing engine.
+/// What this machine's distribution can do about a missing engine. On Windows, winget's
+/// `Microsoft.EdgeWebView2Runtime` (Microsoft's own package, measured with `winget show`)
+/// when winget is there; it asks for the package's agreements itself.
 pub fn offer() -> Option<Offer> {
+    if cfg!(windows) {
+        let winget = Command::new("winget")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        return winget.then(|| Offer {
+            system: String::from("Windows"),
+            install: Some(
+                WEBVIEW2_WINGET
+                    .iter()
+                    .map(|part| (*part).to_owned())
+                    .collect(),
+            ),
+            version: None,
+        });
+    }
     let os_release = std::fs::read_to_string("/etc/os-release").ok()?;
     let family = family(&os_release)?;
     let system = os_release
@@ -292,14 +320,23 @@ fn new_enough(version: &str) -> bool {
 /// The lines that say what to do, for `lepton info` and a blocked build alike: short,
 /// with the one command to run when there is one, and the native path either way.
 pub fn advice(offer: Option<&Offer>) -> Vec<String> {
-    if cfg!(windows) {
-        return vec![
-            String::from("Install the WebView2 Runtime (Evergreen) from Microsoft:"),
-            format!("  {WEBVIEW2_DOWNLOAD}"),
-            String::from("Windows 11 and an up-to-date Windows 10 already have it."),
-        ];
-    }
     let native = String::from("Or leave the engine out for now: `--native` draws without one.");
+    if cfg!(windows) {
+        let mut lines = vec![String::from(
+            "Install the WebView2 Runtime (Evergreen) from Microsoft:",
+        )];
+        if let Some(command) = offer.and_then(|offer| offer.install.as_ref()) {
+            lines.push(format!("  {}", command.join(" ")));
+            lines.push(format!("  or {WEBVIEW2_DOWNLOAD}"));
+        } else {
+            lines.push(format!("  {WEBVIEW2_DOWNLOAD}"));
+        }
+        lines.push(String::from(
+            "Windows 11 and an up-to-date Windows 10 already have it.",
+        ));
+        lines.push(native);
+        return lines;
+    }
     match offer {
         Some(Offer {
             install: Some(command),
@@ -362,13 +399,13 @@ pub fn ensure() -> Result<(), super::CliError> {
                 super::CliError::Invalid(format!("could not run {program}: {error}"))
             })?;
             if status.success() && Engine::probe().ready() {
-                eprintln!("lepton: WPE WebKit is in. Carrying on.");
+                eprintln!("lepton: the engine is in. Carrying on.");
                 return Ok(());
             }
         }
     }
     Err(super::CliError::Invalid(String::from(if cfg!(windows) {
-        "the webview path needs the WebView2 runtime; install it as above"
+        "the webview path needs the WebView2 runtime; install it as above, or build with --native"
     } else {
         "the webview path needs WPE WebKit; install it as above, or build with --native"
     })))
@@ -467,9 +504,26 @@ mod tests {
         let text = advice(None).join("\n");
         assert!(text.contains("WebView2 Runtime"), "{text}");
         assert!(text.contains(super::WEBVIEW2_DOWNLOAD), "{text}");
+        // The native path is on Windows too now (`window/windows/native_window.zig`).
+        assert!(text.contains("--native"), "{text}");
+        let winget = super::Offer {
+            system: String::from("Windows"),
+            install: Some(
+                super::WEBVIEW2_WINGET
+                    .iter()
+                    .map(|part| (*part).to_owned())
+                    .collect(),
+            ),
+            version: None,
+        };
+        let with_winget = advice(Some(&winget)).join("\n");
         assert!(
-            !text.contains("--native"),
-            "no native path on Windows yet: {text}"
+            with_winget.contains("winget install --id Microsoft.EdgeWebView2Runtime --exact"),
+            "{with_winget}"
+        );
+        assert!(
+            with_winget.contains(super::WEBVIEW2_DOWNLOAD),
+            "{with_winget}"
         );
     }
 
