@@ -12,6 +12,11 @@
 //! that is the wrong size by exactly the scale factor.
 
 const std = @import("std");
+const builtin = @import("builtin");
+
+/// The native render path's window on Windows (`windows/native_window.zig`); absent
+/// elsewhere. Reached from here so a probe rooted at this file can open one.
+pub const win32 = if (builtin.os.tag == .windows) @import("windows/native_window.zig") else struct {};
 
 pub const Error = error{
     /// The window system refused the size, usually because it exceeds what the
@@ -125,7 +130,42 @@ pub const Window = struct {
     /// distinct type behind this handle, and `backend` is which one.
     backend: Backend,
 
-    pub const Backend = union(enum) {
+    /// The window systems of the system this is built for: Win32 on Windows, Wayland and
+    /// X11 elsewhere. Chosen at compile time, so a Windows build never analyses the Linux
+    /// backends (their headers translate to nothing there) and a Linux build is unchanged.
+    pub const Backend = if (builtin.os.tag == .windows) Win32Backend else LinuxBackend;
+
+    pub const Win32Backend = union(enum) {
+        win32: *anyopaque,
+
+        const native = @import("windows/native_window.zig");
+
+        pub fn resize(w: Win32Backend, requested: Size) Error!void {
+            return native.resize(w.win32, requested);
+        }
+
+        pub fn title(w: Win32Backend, text: []const u8) Error!void {
+            return native.setTitle(w.win32, text);
+        }
+
+        pub fn size(w: Win32Backend) Size {
+            return native.currentSize(w.win32);
+        }
+
+        pub fn wait(w: Win32Backend, timeout_ms: i32) Error!void {
+            return native.wait(w.win32, timeout_ms);
+        }
+
+        pub fn presentPixels(w: Win32Backend, pixels: []const u8, frame: Size, format: PixelFormat) Error!void {
+            return native.presentPixels(w.win32, pixels, frame, format);
+        }
+
+        pub fn takeConfigure(w: Win32Backend) ?Configure {
+            return native.takeConfigure(w.win32);
+        }
+    };
+
+    pub const LinuxBackend = union(enum) {
         wayland: *anyopaque,
         x11: *anyopaque,
 

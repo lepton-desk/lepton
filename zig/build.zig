@@ -465,9 +465,8 @@ pub fn build(b: *std.Build) void {
     // a working EGL implementation and nothing else — a different requirement from the
     // core's, and folding the two together would make one machine's missing driver look
     // like a failure of the framework's own logic.
-    // Linux only, like every pkg-config probe: on Windows asking for one walks `PATH`, and
-    // a `PATH` entry naming a file (an App Execution Alias, `…\WindowsApps\winget.exe`)
-    // made Zig 0.16 print `IO_REPARSE_TAG_NOT_HANDLED` ten times per build (measured).
+    // Linux only: the GPU tests need a Linux EGL (and `hasPkgConfig` asks only a Linux
+    // build machine, `build_support.pkgConfig`).
     if (target.result.os.tag == .linux and hasPkgConfig(b, "egl")) {
         const gpu_module = b.createModule(.{
             // The presenter, not the renderer: it imports the renderer, so both files'
@@ -666,6 +665,36 @@ pub fn build(b: *std.Build) void {
             "webview2-check",
             "Put WebView2 in a real Win32 window, load a page and report what reached it",
         ).dependOn(&run_webview2_check.step);
+
+        // The native render path's Win32 window, measured from the screen. The window layer
+        // comes from `src/windows_root.zig`: the core's root does not build on Windows yet.
+        const window_layer = b.createModule(.{
+            .root_source_file = b.path("src/windows_root.zig"),
+            .target = target,
+            .optimize = std.builtin.OptimizeMode.Debug,
+            .link_libc = true,
+        });
+        window_layer.addIncludePath(b.path("webview2"));
+        support.addCModules(b, window_layer, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &core_c_headers);
+        const win32_window_check = support.throughLld(b.addExecutable(.{
+            .name = "lepton-win32-window-check",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/tools/win32_window_check.zig"),
+                .target = target,
+                .optimize = std.builtin.OptimizeMode.Debug,
+                .link_libc = true,
+                .imports = &.{.{ .name = "lepton_window", .module = window_layer }},
+            }),
+        }));
+        win32_window_check.root_module.addIncludePath(b.path("webview2"));
+        support.addCModules(b, win32_window_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_windows"});
+        for ([_][]const u8{ "user32", "gdi32" }) |name| {
+            win32_window_check.root_module.linkSystemLibrary(name, .{});
+        }
+        b.step(
+            "win32-window-check",
+            "Open the native path's Win32 window, present a frame and read it back from the screen",
+        ).dependOn(&b.addRunArtifact(win32_window_check).step);
     }
 
     // Only built where the engine is linked. A capability report on a build with no

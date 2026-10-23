@@ -43,8 +43,19 @@ pub fn addInstallLibOption(b: *std.Build, opts: *std.Build.Step.Options, name: [
     }
 }
 
+/// The build machine's `pkg-config`, or null. Asked only on a Linux build machine: the
+/// libraries it describes are Linux's, and elsewhere looking for it walks `PATH` — on
+/// Windows a `PATH` entry naming a file (an App Execution Alias, `…\WindowsApps\winget.exe`)
+/// made `std.Build.findProgram` print `IO_REPARSE_TAG_NOT_HANDLED` once per entry it tried
+/// (measured: 10 lines per build, 0 without that entry; the trace runs through
+/// `tryFindProgram` → `realPathFileAlloc` → `OpenFile`).
+fn pkgConfig(b: *std.Build) ?[]const u8 {
+    if (b.graph.host.result.os.tag != .linux) return null;
+    return findProgram(b, "pkg-config");
+}
+
 pub fn hasPkgConfig(b: *std.Build, pkg: []const u8) bool {
-    const found = findProgram(b, "pkg-config") orelse return false;
+    const found = pkgConfig(b) orelse return false;
     var code: u8 = 0;
     // `--exists` takes the leading dashes; the bare word exits non-zero even for a
     // package pkg-config can resolve, which would report every host as lacking
@@ -68,7 +79,7 @@ pub fn hasPkgConfig(b: *std.Build, pkg: []const u8) bool {
 /// boundary at. A distribution that backported either way is a case worth reading the
 /// linker message for, not worth guessing about here.
 pub fn pkgConfigVersion(b: *std.Build, pkg: []const u8) ?[]const u8 {
-    const found = findProgram(b, "pkg-config") orelse return null;
+    const found = pkgConfig(b) orelse return null;
     var code: u8 = 0;
     const stdout = b.runAllowFail(&.{ found, "--modversion", pkg }, &code, .ignore) catch return null;
     if (code != 0) return null;
@@ -81,7 +92,7 @@ pub fn pkgConfigVersion(b: *std.Build, pkg: []const u8) ?[]const u8 {
 /// requires `wpe-1.0` (openSUSE's and Debian's 2.54.1), one without it does not (Arch's
 /// 2.54.1, `ENABLE_WPE_LEGACY_API=OFF`). The version number cannot tell them apart.
 pub fn pkgConfigRequires(b: *std.Build, pkg: []const u8, required: []const u8) bool {
-    const found = findProgram(b, "pkg-config") orelse return false;
+    const found = pkgConfig(b) orelse return false;
     var code: u8 = 0;
     const stdout = b.runAllowFail(&.{ found, "--print-requires", pkg }, &code, .ignore) catch return false;
     if (code != 0) return false;
@@ -115,7 +126,7 @@ pub fn wpeBackendLibrary(b: *std.Build, pkg: []const u8) ?[]const u8 {
     // path never loads and which Arch no longer packages (measured with its `.pc`
     // hidden: `zig build webview-check` failed before compiling anything).
     if (!hasPkgConfig(b, pkg)) return null;
-    const found = findProgram(b, "pkg-config") orelse return null;
+    const found = pkgConfig(b) orelse return null;
     const reported = b.run(&.{ found, "--libs-only-l", pkg });
 
     var flags = std.mem.tokenizeAny(u8, reported, " \t\r\n");
@@ -136,7 +147,7 @@ pub fn wpeBackendLibrary(b: *std.Build, pkg: []const u8) ?[]const u8 {
 /// here", the other says "and here is where its headers are", and a build that had
 /// only the first would compile `@cImport` against a header set that does not exist.
 pub fn addPkgConfigIncludes(b: *std.Build, module: *std.Build.Module, pkg: []const u8) void {
-    const found = findProgram(b, "pkg-config") orelse return;
+    const found = pkgConfig(b) orelse return;
     var code: u8 = 0;
     const outcome = b.runAllowFail(&.{ found, "--cflags-only-I", pkg }, &code, .ignore) catch return;
     if (code != 0) return;
