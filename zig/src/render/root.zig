@@ -33,18 +33,24 @@ pub const is_native: bool = build_options.native_render;
 /// destructors, run by `exit`, faulted under its still-running threads (measured).
 pub const exit_without_teardown: bool = !build_options.native_render and build_options.have_servo;
 
-/// Type rasterisation, available only when this build found Cairo and Pango.
+/// A native build for Windows draws type with DirectWrite (`text_windows.zig`), which
+/// comes with the system; Linux with Cairo, when the build found it.
+const windows_text = @import("builtin").os.tag == .windows and build_options.native_render;
+
+/// Type rasterisation: Cairo on Linux when the build found it, DirectWrite on Windows.
 ///
-/// Null rather than a stub when they are absent: a caller that asked for text on a
+/// Null rather than a stub when neither is there: a caller that asked for text on a
 /// machine without a text stack should be told the machine cannot, not handed a
 /// function that draws nothing and reports success.
 pub const Text = if (build_options.have_cairo)
     text.Text
+else if (windows_text)
+    @import("text_windows.zig").Text
 else
     void;
 
 /// Whether this build can draw type.
-pub const can_draw_text: bool = build_options.have_cairo;
+pub const can_draw_text: bool = build_options.have_cairo or windows_text;
 
 /// The webview, or null when this build has no engine.
 pub const WebView = if (webview.is_available()) webview.View else void;

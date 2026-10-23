@@ -111,6 +111,20 @@ pub fn main() !void {
     try pump(&w, 300);
     _ = w.takeConfigure();
 
+    // `wait(16)` with nothing to handle sleeps 16 ms, not the system tick rounded up: the
+    // loop it paces draws at 60 frames a second, not 32.
+    try pump(&w, 300);
+    var frequency: c.LARGE_INTEGER = undefined;
+    var started: c.LARGE_INTEGER = undefined;
+    var ended: c.LARGE_INTEGER = undefined;
+    _ = c.QueryPerformanceFrequency(&frequency);
+    _ = c.QueryPerformanceCounter(&started);
+    const waits = 30;
+    for (0..waits) |_| try w.wait(16);
+    _ = c.QueryPerformanceCounter(&ended);
+    const average_us = @divTrunc((ended.QuadPart - started.QuadPart) * 1_000_000, frequency.QuadPart * waits);
+    expect(average_us >= 15_000 and average_us <= 24_000, "wait(16)", "{d} us on average over {d}", .{ average_us, waits });
+
     _ = c.PostMessageW(w.hwnd, c.WM_CLOSE, 0, 0);
     try pump(&w, 200);
     const closing = w.takeConfigure();

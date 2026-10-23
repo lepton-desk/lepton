@@ -176,7 +176,10 @@ Kararlar `docs/plans/windows.md`: pencere Win32, metin DirectWrite; çizici Vulk
    - Henüz yok: metin (Cairo yok → "no cairo; drawing without labels"; DirectWrite gelecek). Bu yüzden CLI Windows'ta native'i hâlâ reddediyor; metin gelince kalkacak.
    - **Bulundu, düzeltildi: şablon geçmişi yayından önce eşitlenmemişti.** `assets/history/0.1.9-beta.2/` (sürüm verilirken `release-version.mjs` kopyalar) şablonun iki değişiklik gerisindeydi; yayımlansaydı `lepton update` dokunulmamış projeleri "düzenlenmiş" sayacaktı. Eşitlendi; `tools/npm-preflight.sh`'ye denetim eklendi (eşitken "match", kopya değişince "differ", ölçüldü).
    - **Linux'ta şablon hiç derlenmiyordu (CI):** `zig` iş akışı yalnız çekirdek testlerini çalıştırıyordu. Artık iki Zig sürümüyle CLI'den native şablon uygulaması derleniyor (runner'da ekran yok, açılmıyor).
-5. **Sırada:** DirectWrite metni (glif bitmap'leri → çerçeve), sonra CLI'nin Windows native reddi kalkar.
+5. **DirectWrite metni ve 60 kare** (yapıldı, 2026-10-23): `render/text_windows.zig`, `text.zig` ile aynı arayüz; DirectWrite dizer, Direct2D DC render target (yazılım, 96 DPI) metnin kutusunu karenin kopyası üstüne çizip geri yazıyor; `monospace`/`sans`/`serif` → Consolas/Segoe UI/Times New Roman. Test: "Lepton" taban çizgisinde, kutusunun içinde, rengiyle (mutasyon: 10 px kaydırınca düşüyor). Uygulamada metin görünüyor (ekran görüntüsü), "no cairo" uyarısı yok.
+   - Kare hızı (ölçüldü, ekrandaki sayaçtan 5 sn arayla): ilk 32,5 kare/sn — `wait(16)` sistem adımına (15,625 ms) yuvarlanıp iki adım bekliyordu; yüksek çözünürlüklü bekleme zamanlayıcısıyla (1803+) 39,8; Direct2D donanım hedefi her metni GPU'dan geri okuyordu, yazılım hedefiyle 50,4; bekleme artık periyotlu (kare 16 ms arayla, çizim süresi periyodun içinde) → **62,3 kare/sn**. `win32-window-check`: `wait(16)` ortalaması 16 000 µs.
+   - **Linux'ta bulundu, düzeltildi:** EGL başlıkları olmayan makinede native şablon derlenmiyordu (`presenter.zig`: `EGLDisplay` yok; yeni CI adımı buldu). `have_egl` derleme seçeneği; EGL yoksa GPU sunucusu derlenmez, kareler paylaşımlı bellekten. CI'da doğrulanacak.
+6. **Sırada:** CLI'nin Windows native reddini kaldırmak, `lepton build/run --native` ile ölçmek; başlık çubuğunun koyu sayfayla koyu olması (native pencere açık çubukla açılıyor).
 
 ## Eksikler (2026-10-23; iki tarama, her madde kodda doğrulandı)
 

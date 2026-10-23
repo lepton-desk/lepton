@@ -18,6 +18,10 @@ const win32 = @import("win32.zig");
 const c = win32.c;
 
 const Size = layer.Size;
+
+/// `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` (synchapi.h, Windows 10 1803+), named here
+/// because older headers do not define it.
+const create_waitable_timer_high_resolution: c.DWORD = 0x2;
 const Configure = layer.Configure;
 const Request = layer.Request;
 
@@ -35,6 +39,14 @@ pub const NativeWindow = struct {
     size: Size,
     /// The configure not yet taken. An empty size is the window closing, as on Linux.
     pending: ?Configure = null,
+    /// What `wait` sleeps on: a high-resolution waitable timer (Windows 10 1803+), else an
+    /// ordinary one. A plain timeout is rounded to the system tick (15.625 ms): `wait(16)`
+    /// slept two ticks and the window drew 32 frames a second instead of 60 (measured).
+    timer: ?c.HANDLE = null,
+    /// When the current wait period ends (performance-counter ticks), so `wait(16)` paces
+    /// frames 16 ms apart however long the frame took to draw. Sleeping 16 ms after each
+    /// frame drew 50 frames a second, the drawing's own time added to every period.
+    deadline: i64 = 0,
 
     /// Opens the window in place: `self` is the owner the window procedure reaches, so it
     /// must already be where it will stay.
@@ -51,6 +63,8 @@ pub const NativeWindow = struct {
                 .moved = &ignore,
             },
             .size = clientSize(hwnd),
+            .timer = c.CreateWaitableTimerExW(null, null, create_waitable_timer_high_resolution, c.TIMER_ALL_ACCESS) orelse
+                c.CreateWaitableTimerExW(null, null, 0, c.TIMER_ALL_ACCESS),
         };
         window.attach(hwnd, &self.owner);
         window.setTitle(hwnd, request.title);
@@ -64,6 +78,7 @@ pub const NativeWindow = struct {
     pub fn close(self: *NativeWindow) void {
         _ = c.SetWindowLongPtrW(self.hwnd, c.GWLP_USERDATA, 0);
         _ = c.DestroyWindow(self.hwnd);
+        if (self.timer) |timer| _ = c.CloseHandle(timer);
     }
 
     /// Sets the client area to `size`. Windows answers with `WM_SIZE`, which becomes the
@@ -88,9 +103,28 @@ pub const NativeWindow = struct {
     /// Handles what Windows has queued, waiting up to `timeout_ms` (negative: forever) for
     /// something to arrive first. Messages already in the queue end the wait at once
     /// (`MWMO_INPUTAVAILABLE`).
-    pub fn wait(_: *NativeWindow, timeout_ms: i32) layer.Error!void {
-        const milliseconds: c.DWORD = if (timeout_ms < 0) c.INFINITE else @intCast(timeout_ms);
-        const woke = c.MsgWaitForMultipleObjectsEx(0, null, milliseconds, c.QS_ALLINPUT, c.MWMO_INPUTAVAILABLE);
+    pub fn wait(self: *NativeWindow, timeout_ms: i32) layer.Error!void {
+        const woke = if (timeout_ms > 0 and self.timer != null) timed: {
+            var frequency: c.LARGE_INTEGER = undefined;
+            var now: c.LARGE_INTEGER = undefined;
+            _ = c.QueryPerformanceFrequency(&frequency);
+            _ = c.QueryPerformanceCounter(&now);
+            const period = @divTrunc(frequency.QuadPart * timeout_ms, 1000);
+            // The next period starts once this one has ended; a message that woke the last
+            // wait early leaves the deadline where it was. Behind by a whole period (the
+            // first wait, a stall): start again from now rather than drawing the missed
+            // frames back to back.
+            if (now.QuadPart >= self.deadline) {
+                self.deadline += period;
+                if (self.deadline <= now.QuadPart) self.deadline = now.QuadPart + period;
+            }
+            const remaining = self.deadline - now.QuadPart;
+            // Relative due time: negative, in 100 ns units. A one-shot synchronization
+            // timer, reset by the wait that it ends; set again on each call.
+            const due: c.LARGE_INTEGER = .{ .QuadPart = -@divTrunc(remaining * 10_000_000, frequency.QuadPart) };
+            if (c.SetWaitableTimer(self.timer.?, &due, 0, null, null, c.FALSE) == 0) return error.DisplayLost;
+            break :timed c.MsgWaitForMultipleObjectsEx(1, &self.timer.?, c.INFINITE, c.QS_ALLINPUT, c.MWMO_INPUTAVAILABLE);
+        } else c.MsgWaitForMultipleObjectsEx(0, null, if (timeout_ms < 0) c.INFINITE else 0, c.QS_ALLINPUT, c.MWMO_INPUTAVAILABLE);
         if (woke == c.WAIT_FAILED) return error.DisplayLost;
         var message: c.MSG = undefined;
         while (c.PeekMessageW(&message, null, 0, 0, c.PM_REMOVE) != 0) {

@@ -305,6 +305,7 @@ const header_needs = .{
     .{ "c_process", .{}, "" },
     .{ "c_win_dialog", .{}, "" },
     .{ "c_windows", .{}, "webview2" },
+    .{ "c_win_text", .{}, "" },
     .{ "c_webview2_check", .{}, "webview2" },
 };
 

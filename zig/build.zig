@@ -84,6 +84,7 @@ const platform_module_name = "wpe-display-lepton";
 const core_c_headers = [_][]const u8{
     "c_shm_posix",   "c_process",   "c_wayland_probe", "c_xcb_probe", "c_win_dialog", "c_gles3",   "c_glyph",
     "c_gl_renderer", "c_presenter", "c_cairo",         "c_servo",     "c_windows",    "c_wayland", "c_x11",
+    "c_win_text",
 };
 
 fn cHeaders(root: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, protocols: ?ProtocolBindings) support.CHeaders {
@@ -221,10 +222,11 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
             core.linkSystemLibrary(library, .{});
         }
     }
-    // The native path's window on Windows (`window/windows/native_window.zig`): a Win32
-    // window and GDI's `SetDIBitsToDevice`.
+    // The native path on Windows: its window (`window/windows/native_window.zig`, Win32 and
+    // GDI's `SetDIBitsToDevice`) and its type (`render/text_windows.zig`, DirectWrite drawn
+    // by Direct2D). All system DLLs.
     if (windows and !want_webview) {
-        for ([_][]const u8{ "user32", "gdi32" }) |library| {
+        for ([_][]const u8{ "user32", "gdi32", "d2d1", "dwrite" }) |library| {
             core.linkSystemLibrary(library, .{});
         }
     }
@@ -253,9 +255,13 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     // surface, and copies through shared memory when it will not. Both halves are always
     // compiled in — the choice is made at run time and the machine that falls back must
     // not have been built without the other path.
-    const gpu_text = native_render and linux and hasPkgConfig(b, "egl") and hasPkgConfig(b, "freetype2") and
+    // Without EGL's headers the GPU half is compiled out (`have_egl`): every frame takes
+    // shared memory. A native build on a machine without them failed to compile before
+    // (`presenter.zig`: no `EGLDisplay`, measured on CI's Ubuntu 24.04 runner).
+    const have_egl = native_render and linux and hasPkgConfig(b, "egl");
+    const gpu_text = have_egl and hasPkgConfig(b, "freetype2") and
         hasPkgConfig(b, "harfbuzz") and hasPkgConfig(b, "fontconfig");
-    if (native_render and linux and hasPkgConfig(b, "egl")) {
+    if (have_egl) {
         core.linkSystemLibrary("egl", .{});
         core.linkSystemLibrary("GLESv2", .{});
         core.linkSystemLibrary("wayland-egl", .{});
@@ -332,6 +338,8 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     opts.addOption(bool, "have_wayland", have_wayland);
     opts.addOption(bool, "native_render", native_render);
     opts.addOption(bool, "have_cairo", have_cairo);
+    // The native path can present through the GPU (EGL, GLESv2, wayland-egl linked).
+    opts.addOption(bool, "have_egl", have_egl);
     // The native path can draw its screen as a command list on the GPU (EGL + text libs).
     opts.addOption(bool, "gpu_scene", gpu_text);
     opts.addOption(bool, "have_wpe", have_wpe);
@@ -450,7 +458,7 @@ pub fn build(b: *std.Build) void {
         windows_tests.addOptions("build_options", configured.options);
         windows_tests.addIncludePath(b.path("webview2"));
         support.addCModules(b, windows_tests, cHeaders(".", target, optimize, null), &core_c_headers);
-        for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi", "shell32", "dwmapi" }) |library| {
+        for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi", "shell32", "dwmapi", "gdi32", "d2d1", "dwrite" }) |library| {
             windows_tests.linkSystemLibrary(library, .{});
         }
         break :blk windows_tests;

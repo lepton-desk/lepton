@@ -131,7 +131,9 @@ pub const WaylandWindow = struct {
     /// collapsing them into one null would ask again on the next frame — and asking again
     /// is not free: every attempt initialises an EGL display and allocates driver state,
     /// so a window that is refused once would grow by tens of megabytes in two frames.
-    gpu: ?presenter.Presenter = null,
+    /// `void` in a build without the presenter (`wayland_present.gpu_present`): its type
+    /// holds EGL's, which such a build cannot name.
+    gpu: ?(if (wayland_present.gpu_present) presenter.Presenter else void) = null,
     gpu_settled: bool = false,
 
     size: Size = .{ .width = 0, .height = 0 },

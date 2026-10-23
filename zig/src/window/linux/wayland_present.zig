@@ -22,7 +22,8 @@ const Size = window.Size;
 /// build that merely *referenced* the presenter failed to link: `window-check` never
 /// presents through it, yet `WaylandWindow.close`'s `gpu.deinit()` alone left ten EGL/GL
 /// symbols undefined (measured 2026-10-18). Compiled out, every frame takes shared memory.
-pub const gpu_present = @import("build_options").native_render;
+/// A native build without EGL's headers has no presenter either (`have_egl`).
+pub const gpu_present = @import("build_options").native_render and @import("build_options").have_egl;
 
 /// One shared-memory buffer: a memfd mapped here and by the compositor, its pool and its
 /// `wl_buffer`, kept while the window keeps its size.
