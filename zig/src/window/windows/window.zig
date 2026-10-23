@@ -1,14 +1,15 @@
-//! The Win32 window a WebView2 controller is hosted in.
+//! The Win32 window: the one a WebView2 controller is hosted in, and the one the native
+//! render path draws into (Linux's counterpart is `window/linux/`).
 //!
-//! Windows draws the frame (title bar, borders, snap) itself; the controller fills the
-//! client area. The window procedure forwards what the view needs — size, activation,
+//! Windows draws the frame (title bar, borders, snap) itself; what is hosted fills the
+//! client area. The window procedure forwards what its owner needs — size, activation,
 //! close, moves — to an `Owner` stored in the window's user data, so the procedure stays
-//! a plain function and the view stays the one place that knows about WebView2.
+//! a plain function and knows nothing of what fills the window.
 
 const std = @import("std");
-const wv = @import("c.zig");
-const c = wv.c;
-const W = wv.W;
+const win32 = @import("win32.zig");
+const c = win32.c;
+const W = win32.W;
 
 /// What the window tells its owner. Every callback runs on the window's thread.
 pub const Owner = struct {

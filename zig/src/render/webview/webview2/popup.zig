@@ -10,7 +10,7 @@
 const std = @import("std");
 const wv = @import("c.zig");
 const c = wv.c;
-const window = @import("window.zig");
+const window = @import("../../../window/windows/window.zig");
 const request = @import("request.zig");
 const View = @import("view.zig").View;
 

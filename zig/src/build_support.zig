@@ -293,7 +293,7 @@ const header_needs = .{
     .{ "c_shm_posix", .{}, "" },
     .{ "c_process", .{}, "" },
     .{ "c_win_dialog", .{}, "" },
-    .{ "c_webview2", .{}, "webview2" },
+    .{ "c_windows", .{}, "webview2" },
     .{ "c_webview2_check", .{}, "webview2" },
 };
 

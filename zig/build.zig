@@ -83,7 +83,7 @@ const platform_module_name = "wpe-display-lepton";
 /// The headers under `src/c/` that the core's own files import.
 const core_c_headers = [_][]const u8{
     "c_shm_posix",   "c_process",   "c_wayland_probe", "c_xcb_probe", "c_win_dialog", "c_gles3",   "c_glyph",
-    "c_gl_renderer", "c_presenter", "c_cairo",         "c_servo",     "c_webview2",   "c_wayland", "c_x11",
+    "c_gl_renderer", "c_presenter", "c_cairo",         "c_servo",     "c_windows",    "c_wayland", "c_x11",
 };
 
 fn cHeaders(root: []const u8, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, protocols: ?ProtocolBindings) support.CHeaders {

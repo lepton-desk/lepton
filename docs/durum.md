@@ -157,6 +157,16 @@ Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Ch
 - **CI 39629060471'de düşen iki adım ölçümün hatasıydı, uygulamanın değil:** .NET'in `MainWindowHandle`'ı pencere bulunduktan 3 sn sonra 35×19'luk bir açılır pencereye döndü, betik çöktü ve kurulu uygulama açık kaldı; çerçevesiz adımın başlattığı uygulama (aynı kimlik) tek kopya kuralıyla argümanını ona verip çıktı, ölçülen pencere eski çerçeveli kopyaydı (`client top - window top = 31`). Düzeltildi (`8859993`): pencere başlatılan sürecin `LeptonWindow` sınıflı penceresi (`EnumWindows`), açılışta çalışan kopyalar kapatılıyor, betik düşerse uygulama da kapatılıyor. Bu makinede eski kopya açıkken çerçevesiz ölçüm baştan sona geçti. CI 39940123813 (`8859993`): üç adım da geçti — pencere, MSI kur/aç/kaldır (klasör kalmadı), çerçevesiz pencere.
 - **Linux: ölçülmedi.** `tools/ci/linux/window-controls.sh` (Servo X11, `_NET_WM_STATE`) yazıldı, hiç çalıştırılmadı ve hiçbir iş akışında yok. WPE'de `decorations: false` yok, sayfanın çubuğu bileşimcinin çubuğunun altında kalır; düğmeler yine çalışmalı, elle denenecek: çubuğun sağındaki üç düğme sırayla küçültmeli, büyütmeli, geri almalı, kapatmalı (çıkış 0).
 
+## Windows native yolu (2026-10-23 başladı)
+
+Kararlar `docs/plans/windows.md`: pencere Win32, metin DirectWrite; çizici Vulkan → D3D11 → OpenGL 3.3 (sahne çizicisi 0.2.0 betalarına).
+
+1. **CLI reddi** (yapıldı, aşağıda "Eksikler" Windows 1).
+2. **Win32 penceresi `window/windows/`'a taşındı** (yapıldı): `render/webview/webview2/window.zig` → `window/windows/window.zig`, WebView2 yolu ve gelecek native yol aynı pencereyi kullanacak. Windows başlıkları tek çeviri: `src/c/c_webview2.h` → `c_windows.h` (iki ayrı `<windows.h>` çevirisi iki ayrı `HWND` tipi verir); `window/windows/win32.zig` ve `webview2/c.zig` aynı modülü okuyor. WebView2.h yalnız tip, çalışma zamanı yüklenerek bulunuyor: native derlemeye bağlantı eklemez.
+   - Ölçüldü (Windows 10 22H2): `zig build test` (Windows kökü) 60/63 (3 atlandı, öncekiyle aynı). Yeni çekirdekle derlenen CI uygulaması `measure.ps1` ile çerçevesiz ve çerçeveli: bütün denetimler geçti (tema koyu/açık, yerel menü, sürükleme, sol kenar, sistemin ve sayfanın üç düğmesi, kapatma 0).
+   - `zig build test`'in yazdığı 10 satır `IO_REPARSE_TAG_NOT_HANDLED` (0xc0000279) bu değişiklikten önce de aynı (değişiklik kenara alınıp ölçüldü); derleme ve testler geçiyor. Kaynağı ölçülmedi.
+3. **Sırada:** `Window.Backend`'e `win32` kolu (`window/window.zig`), native yolun Windows'ta derlenmesi (bugün `root.zig` Linux pencere katmanına uzanıyor), kareyi pencereye basma, DirectWrite metni.
+
 ## Eksikler (2026-10-23; iki tarama, her madde kodda doğrulandı)
 
 Kanıt satırları tarama anındaki kod içindir. "Kayıtlı" = bu dosyada zaten vardı.

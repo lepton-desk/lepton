@@ -1,4 +1,5 @@
-//! Windows and WebView2, translated once for every file in this directory.
+//! Windows and WebView2, translated once (`src/c/c_windows.h`) for every file in this
+//! directory and for the window layer (`window/windows/`), so a window's handle is one type.
 //!
 //! `WebView2.h` is Microsoft's, vendored with its licence in `zig/webview2/`. Its COM
 //! interfaces come through `@cImport` as structs with an `lpVtbl`, so every vtable this
@@ -6,7 +7,7 @@
 //! lesson the Wayland listeners taught (`CLAUDE.md`: a hand-written table shifted every
 //! argument by one).
 
-pub const c = @import("c_webview2");
+pub const c = @import("c_windows");
 
 const std = @import("std");
 
