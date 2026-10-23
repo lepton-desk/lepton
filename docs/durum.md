@@ -237,15 +237,17 @@ Eksik:
 Kayıtlı (yukarıda): WPE'de `decorations: false`, `start_drag`, `window.menu` → `failed` (kendi WPE platformu, beta.3); başlık çubuğunun sayfayı izlemesi; Linux'tan Windows paketi ölçülmedi; Servo'da izinler, pano, diyaloglar.
 
 Yeni:
-1. **WPE'de pencere boyutu küçük ekrana sığdırılmıyor:** `wpe_view.zig` `resized` istenen boyutu çalışma alanına bakmadan veriyor (Windows `place`/`isSmall`, Servo ve Lepton'ın kendi pencereleri sığdırıyor). Ölçülmedi.
-2. **Servo penceresi uygulama kimliğini almıyor:** `servo/view.zig` `X11Window.open`'a `app_id` vermiyor, `WM_CLASS` varsayılan `dev.lepton.app`; masaüstü girdisinin `StartupWMClass=<identifier>`'ıyla eşleşmez, simge ve dock gruplaması kaçar. `_NET_WM_ICON` hiç yok.
-3. **`bundle.icon` Linux paketine gitmiyor:** yalnız `.ico`, yalnız Windows; Linux hep `src-lepton/icon.svg`.
-4. **CSS `app-region: drag` yalnız WebView2'de**; api README platform belirtmiyor.
-5. **Servo'da çerçevesiz pencere kenardan boyutlanmıyor:** yalnız taşıma isteniyor (`_NET_WM_MOVERESIZE` yön 8).
-6. **WPE'de `dragRegion` her basışta yakalanmamış bir ret bırakıyor** (`window.ts:111` `void startDragging()`, cevap `failed`).
-7. **Servo menüsünde `&` olduğu gibi çiziliyor** (Windows'ta erişim tuşu; README örneği `&Kopyala`).
+1. ~~**WPE'de pencere boyutu küçük ekrana sığdırılmıyor**~~ **Yazıldı (2026-10-23):** `View.resized` boyutu, eksen eksen, görünümün ekranına kırpıyor (`wpe_view_get_display` → `wpe_display_get_screen(0)` → `wpe_screen_get_width/height`, 2.54.1 başlıklarından; kural `placement.fit`). Çalışma alanı yok: WPE 2.54'ün Wayland toplevel'ı `configure_bounds`'u boş işleyiciyle yok sayıyor (`WPEToplevelWayland.cpp`), `WPEScreen`'de de çalışma alanı yok, paneller düşülmüyor. Linux hedefine tür denetimi Windows'tan geçti (dışa aktarılan bir çağrıyla; planlı bir tür hatası yakalandı, yani gövde analiz edildi). Linux'ta ölçülmedi.
+2. ~~**Servo penceresi uygulama kimliğini almıyor**~~ **Yazıldı:** `useApplicationDirectories(identifier)` kimliği saklıyor, `open` `WM_CLASS`'a yazıyor (`setAppId`). `_NET_WM_ICON` hâlâ yok. Servo derlemesi burada yapılamıyor (X11 başlıkları, Servo kitaplığı); `servo-bridge` iş akışında ya da Linux'ta ölçülecek.
+3. ~~**`bundle.icon` Linux paketine gitmiyor**~~ **Yazıldı:** `bundle.icon` bir yol ya da liste: `.ico` Windows'a, `.svg` Linux'a (masaüstü girdisi ve paket, `src-lepton/icon.svg`'nin önünde); `.png` gerekçesiyle reddediliyor (ölçeklenebilir simge klasörü); okunamayan ayarlı simge hata. Testler: liste, yalnız svg, iki `.ico`, png, proje dışı.
+4. ~~**CSS `app-region: drag` yalnız WebView2'de**~~ **Belgelendi:** api README "WebView2 (Windows) only".
+5. ~~**Servo'da çerçevesiz pencere kenardan boyutlanmıyor**~~ **Yazıldı:** çerçevesizken kenardaki 6 px'lik bantta birincil basış sayfaya gitmiyor, `_NET_WM_MOVERESIZE` yön 0–7 (`X11Window.startResize`, kenar hesabı `placement.edgeAt`, 10 durumlu test Windows'ta ayrı koşturuldu). Servo derlemesinde denenmedi.
+6. ~~**WPE'de `dragRegion` yakalanmamış ret bırakıyor**~~ **Düzeltildi:** `startDragging()`/`toggleMaximize()` reddi yakalanıyor (Biome temiz).
+7. ~~**Servo menüsünde `&` olduğu gibi çiziliyor**~~ **Düzeltildi:** erişim tuşu işareti düşülüyor, `&&` tek `&` (`menu_x11.zig` `shown`, testi Windows'ta ayrı koşturuldu).
 8. **`windowControls` Linux'ta ölçülmedi** (yukarıda).
-9. Belgeler: api README `start_drag`/`menu`/çerçevesiz için "(Windows)" diyor, Servo'yu anmıyor ve "Linux WPE'de henüz yok" demiyor; `window.ts` "Linux for now", `window_shape.rs`/`lepton-build.zig` "(Windows)" — Servo'da hepsi var.
-10. Küçük: Linux derlemesi de `-Dicon` alıp kullanılmayan `.ico` yazıyor; `wpe_view.zig`'de `map`'in belge yorumu `setDecorations`'ın üstüne kaymış.
+9. ~~Belgeler~~ **Düzeltildi:** api README `start_drag`/`menu`/çerçevesiz için "Windows, Servo; Linux WPE'de `failed`", `window.ts`, `window_shape.rs`, `lepton-build.zig` aynı.
+10. ~~Küçük~~ **Düzeltildi:** `-Dicon` (ve varsayılan `.ico`) yalnız Windows hedefli derlemeye (`targets_windows`, test); `map`'in belge yorumu yerinde.
+11. **CI'da native yol hiç derlenmiyordu (bulundu):** `zig` iş akışı yalnız webview testlerini koşuyordu ve runner'da EGL başlıkları yoktu: `have_egl` yanlış, sunucu (`presenter.zig`) derlenmiyordu; sınırsız karenin `eglSwapInterval` satırı ve bozulan `presenter.open` testi (`pacing` eklenmişti, test dört argümanla) hiçbir yerde derlenmedi. İş akışına EGL/GLES/FreeType/HarfBuzz/fontconfig/xkbcommon ve `zig build test -Drender=native` eklendi; test düzeltildi.
+12. **`LEPTON_GPU` Linux'ta:** `cpu` GPU sahnesini ve GPU sunumunu kapatıyor (`gles3.wanted`, `presenter.requested`), `gles` ya da boş GPU; Windows'a özgü bir ad uyarıyla GPU.
 
 **Windows değişiklikleri Linux'u bozdu mu?** Koddan: hayır. `program::resolve` Linux'ta adı değiştirmeden döndürüyor (test var); `invoke.zig`'in yeni 10/11 komutları geri çağrı yoksa `failed` (Linux testi var); `main.zig`'deki tek değişiklik `@hasDecl` korumalı. Davranış değişikliği: `bundle.targets`'taki `msi` artık `--windows` olmayan her derlemede (Linux'ta da) nedeniyle reddediliyor. Linux'ta derlenip koşturulmadı.

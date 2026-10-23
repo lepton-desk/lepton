@@ -88,7 +88,7 @@ export function onResized(
  * that draws its own title bar (`"window": { "decorations": false }`): call it from a
  * `mousedown` while the button is down. Needs `window.start_drag` under `permissions`.
  * Rejects with reason `failed` where the platform does not let a window start its own
- * move (Linux for now).
+ * move (Linux WPE for now; Windows and Servo move it).
  */
 export async function startDragging(): Promise<void> {
   await invoke("window.start_drag");
@@ -104,11 +104,13 @@ export function dragRegion(element: HTMLElement): () => void {
     "button, a, input, select, textarea, [contenteditable], [data-no-drag], [data-window-control]";
   const press = (event: MouseEvent): void => {
     if (event.button !== 0 || (event.target as Element | null)?.closest(interactive)) return;
+    // A window that cannot move or maximize from the page (WPE today) answers `failed`:
+    // a press there is a press and nothing more, not an unhandled rejection each time.
     if (event.detail === 2) {
-      void toggleMaximize();
+      toggleMaximize().catch(() => undefined);
       return;
     }
-    void startDragging();
+    startDragging().catch(() => undefined);
   };
   element.addEventListener("mousedown", press);
   return () => element.removeEventListener("mousedown", press);

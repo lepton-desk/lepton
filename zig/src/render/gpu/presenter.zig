@@ -73,6 +73,8 @@ pub fn choose(value: ?[]const u8) struct { choice: Choice, unknown: bool } {
 
 /// The choice this process was started with.
 pub fn requested() Choice {
+    // `LEPTON_GPU=cpu`, the name Windows reads too, is the CPU path whole: no GPU present.
+    if (getenv("LEPTON_GPU")) |gpu| if (std.mem.eql(u8, std.mem.span(gpu), "cpu")) return .shm;
     const raw = getenv(variable);
     const value: ?[]const u8 = if (raw) |text| std.mem.span(text) else null;
     const answer = choose(value);
@@ -268,5 +270,5 @@ test "LEPTON_PRESENT picks shm only when asked, and flags a value it does not kn
 }
 
 test "a window with no handles gets no presenter rather than a fault" {
-    try std.testing.expect(open(null, null, 640, 480) == null);
+    try std.testing.expect(open(null, null, 640, 480, .display) == null);
 }

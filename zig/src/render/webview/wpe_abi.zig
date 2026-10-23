@@ -155,6 +155,29 @@ pub const wpe_view_resized = @extern(
     .{ .name = "wpe_view_resized" },
 );
 
+/// The screen a window opens on, for fitting it (`View.resized`): `WPEView.h`,
+/// `WPEDisplay.h`, `WPEScreen.h` (2.54.1). Logical pixels; WPE has no work area.
+pub const wpe_view_get_display = @extern(
+    *const fn (*WPEView) callconv(.c) ?*anyopaque,
+    .{ .name = "wpe_view_get_display" },
+);
+pub const wpe_display_get_n_screens = @extern(
+    *const fn (*anyopaque) callconv(.c) c_uint,
+    .{ .name = "wpe_display_get_n_screens" },
+);
+pub const wpe_display_get_screen = @extern(
+    *const fn (*anyopaque, c_uint) callconv(.c) ?*anyopaque,
+    .{ .name = "wpe_display_get_screen" },
+);
+pub const wpe_screen_get_width = @extern(
+    *const fn (*anyopaque) callconv(.c) c_int,
+    .{ .name = "wpe_screen_get_width" },
+);
+pub const wpe_screen_get_height = @extern(
+    *const fn (*anyopaque) callconv(.c) c_int,
+    .{ .name = "wpe_screen_get_height" },
+);
+
 // ── WebKit: the view and the page ───────────────────────────────────────────────
 
 /// `WebKitWebView *webkit_web_view_new(WebKitWebViewBackend *backend)` — WebKitWebView.h:365

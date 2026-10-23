@@ -301,6 +301,16 @@ pub const X11Window = struct {
     /// The window manager takes the pointer, so this window never sees the button's
     /// release: it is recorded here, or the page would go on holding the button.
     pub fn startMove(self: *X11Window) bool {
+        return self.startMoveResize(8);
+    }
+
+    /// `startMove` for a resize from an edge or corner: `direction` 0 (top-left) to 7
+    /// (left), as `placement.edgeAt` names it.
+    pub fn startResize(self: *X11Window, direction: u32) bool {
+        return self.startMoveResize(direction);
+    }
+
+    fn startMoveResize(self: *X11Window, direction: u32) bool {
         const reply = xcb.xcb_query_pointer_reply(self.conn, xcb.xcb_query_pointer(self.conn, self.window_id), null) orelse return false;
         defer std.c.free(reply);
         if (reply.*.mask & xcb.XCB_BUTTON_MASK_1 == 0) return false;
@@ -310,8 +320,8 @@ pub const X11Window = struct {
         _ = xcb.xcb_ungrab_pointer(self.conn, xcb.XCB_CURRENT_TIME);
         const x: i32 = reply.*.root_x;
         const y: i32 = reply.*.root_y;
-        // x_root, y_root, direction 8 (_NET_WM_MOVERESIZE_MOVE), button 1, source 1.
-        const sent = self.toRoot(moveresize, .{ @bitCast(x), @bitCast(y), 8, 1, 1 });
+        // x_root, y_root, direction (8 is _NET_WM_MOVERESIZE_MOVE), button 1, source 1.
+        const sent = self.toRoot(moveresize, .{ @bitCast(x), @bitCast(y), direction, 1, 1 });
         if (sent) self.input.button(1 << 0, false, 0, 0);
         return sent;
     }

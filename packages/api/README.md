@@ -30,8 +30,8 @@ const protocol = await invoke("core.protocol"); // u32, little-endian
 | `window.close` | none | none; the application closes |
 | `window.minimize` / `window.maximize` / `window.unmaximize` | none | none |
 | `window.state` | none | state bits, `u32` LE |
-| `window.start_drag` | none | none; the window follows the mouse (Windows) |
-| `window.menu` | menu items (`encodeMenu`) | chosen id, `u16` LE, 0 dismissed (Windows) |
+| `window.start_drag` | none | none; the window follows the mouse (Windows, Servo; `failed` on Linux WPE for now) |
+| `window.menu` | menu items (`encodeMenu`) | chosen id, `u16` LE, 0 dismissed (Windows, Servo; `failed` on Linux WPE for now) |
 | `app.args` | none, or an `app.opened` number | arguments, each NUL-ended |
 
 Every command — built-in or the application's own — runs only if it is listed under
@@ -75,7 +75,8 @@ await toggleMaximize();
 `onStateChanged`, `onResized`, `startDragging`, `dragRegion`, `windowControls`, `popupMenu`.
 
 **Your own title bar.** `"window": { "decorations": false }` in `lepton.config.json`
-removes the system's (Windows; the window keeps its resize borders, shadow and snap):
+removes the system's (Windows, where the window keeps its resize borders, shadow and snap;
+Servo's X11 window, moved from the page; Linux WPE keeps its title bar for now):
 
 ```ts
 import { close, dragRegion, minimize, toggleMaximize } from "@lepton-desk/api/window";
@@ -83,7 +84,7 @@ dragRegion(document.querySelector("#titlebar")); // press to move, double-click 
 ```
 
 Buttons inside the bar stay clickable; mark anything else that should not drag with
-`data-no-drag`. CSS `app-region: drag` works too.
+`data-no-drag`. CSS `app-region: drag` works too, in WebView2 (Windows) only.
 
 The bar's three buttons — minimize, maximize/restore, close — are one call:
 
@@ -109,7 +110,9 @@ clicks: each button minimizes, maximizes and restores, and closes (exit 0); the 
 clicks the system's own three buttons in a decorated window.
 
 **Your own context menu.** A shipped application shows no browser menu: draw one in the
-page from a `contextmenu` handler, or ask for the system's (Windows):
+page from a `contextmenu` handler, or ask for the system's (Windows; Servo draws its own; Linux
+WPE answers `failed` for now). `&` marks the access key on Windows; elsewhere it is
+dropped, and `&&` is one `&`:
 
 ```ts
 addEventListener("contextmenu", async (event) => {

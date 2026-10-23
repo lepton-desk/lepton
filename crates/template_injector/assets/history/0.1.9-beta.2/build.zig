@@ -73,7 +73,7 @@ pub fn build(b: *std.Build) !void {
     // configuration's own defaults.
     const window_width = b.option(u32, "window-width", "Initial window width") orelse 1200;
     const window_height = b.option(u32, "window-height", "Initial window height") orelse 800;
-    // `window.decorations: false`: no title bar, the page draws its own (Windows).
+    // `window.decorations: false`: no title bar, the page draws its own (Windows, Servo).
     const window_decorations = b.option(bool, "window-decorations", "Draw the system title bar (default: true)") orelse true;
     // `window.frameRate`: `display` (the screen's refresh) or `unlimited` (native path).
     const frame_rate = b.option(enum { display, unlimited }, "frame-rate", "Native frames: display (default) or unlimited") orelse .display;

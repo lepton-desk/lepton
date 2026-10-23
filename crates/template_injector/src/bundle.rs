@@ -70,10 +70,13 @@ pub struct Bundle {
     /// (`libglib-2.0.so.0` is `libglib2.0-0t64` since the 64-bit time transition), so they
     /// are read from dpkg or written down — never guessed.
     pub deb_depends: Option<Vec<String>>,
-    /// `bundle.icon`: an `.ico` file, relative to the project, for the Windows installer's
+    /// The `.ico` in `bundle.icon`, relative to the project, for the Windows installer's
     /// Start menu shortcut and its Settings → Apps entry. Without it both show the
     /// program's own icon.
     pub icon: Option<String>,
+    /// The `.svg` in `bundle.icon`, relative to the project: the Linux desktop entry's and
+    /// package's icon (`icons/hicolor/scalable/apps`). Without it, `src-lepton/icon.svg`.
+    pub svg_icon: Option<String>,
 }
 
 impl Default for Bundle {
@@ -95,6 +98,7 @@ impl Bundle {
             maintainer: None,
             deb_depends: None,
             icon: None,
+            svg_icon: None,
         }
     }
 }
@@ -135,29 +139,41 @@ pub fn parse_bundle_for(text: &str, windows: bool) -> Result<Bundle, ManifestErr
         },
         Some(_) => return Err(invalid("\"bundle.deb\" must be an object")),
     };
-    let icon = match section.get("icon") {
-        None => None,
-        // Inside the project: the icon is copied into the installer, and a cloned project's
-        // configuration should not reach a file elsewhere on the machine.
-        Some(Value::String(text))
-            if text.trim().to_ascii_lowercase().ends_with(".ico")
-                && inside_project(text.trim()) =>
-        {
-            Some(text.trim().to_owned())
-        }
-        Some(_) => {
-            return Err(invalid(
-                "\"bundle.icon\" must be the path of an .ico file inside the project",
-            ));
-        }
+    // One path, or a list of them: an `.ico` for Windows, an `.svg` for Linux, one of each
+    // at most. Inside the project: the icon is copied into the package, and a cloned
+    // project's configuration should not reach a file elsewhere on the machine.
+    let paths = match section.get("icon") {
+        None => Vec::new(),
+        Some(Value::String(text)) => vec![text.trim().to_owned()],
+        Some(list @ Value::Array(_)) => strings(list, "bundle.icon")?,
+        Some(_) => return Err(invalid(ICON_RULE)),
     };
+    let mut icon = None;
+    let mut svg_icon = None;
+    for path in paths {
+        let lower = path.to_ascii_lowercase();
+        let slot = if lower.ends_with(".ico") {
+            &mut icon
+        } else if lower.ends_with(".svg") {
+            &mut svg_icon
+        } else {
+            return Err(invalid(ICON_RULE));
+        };
+        if !inside_project(&path) || slot.is_some() {
+            return Err(invalid(ICON_RULE));
+        }
+        *slot = Some(path);
+    }
     Ok(Bundle {
         targets,
         maintainer,
         deb_depends,
         icon,
+        svg_icon,
     })
 }
+
+const ICON_RULE: &str = "\"bundle.icon\" must be a path inside the project, or a list of them: an .ico for Windows and an .svg for Linux, one of each at most (Linux icons are scalable: a .png would need one file per size)";
 
 /// A relative path that stays below the project: no root, drive or `..`, with either
 /// separator.
@@ -235,6 +251,32 @@ mod tests {
             let text = format!(r#"{{"bundle":{{"icon":"{}"}}}}"#, bad.replace('\\', "\\\\"));
             assert_err!(parse_bundle(&text), "an icon outside the project");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn an_ico_and_an_svg_are_one_icon_each_system() -> Result<(), Failure> {
+        let both = assert_ok!(
+            parse_bundle(r#"{"bundle":{"icon":["assets/app.ico","assets/app.svg"]}}"#),
+            "a list"
+        );
+        assert_eq!(both.icon.as_deref(), Some("assets/app.ico"));
+        assert_eq!(both.svg_icon.as_deref(), Some("assets/app.svg"));
+        let svg = assert_ok!(
+            parse_bundle(r#"{"bundle":{"icon":"app.svg"}}"#),
+            "an svg alone"
+        );
+        assert_eq!(svg.icon, None::<String>);
+        assert_eq!(svg.svg_icon.as_deref(), Some("app.svg"));
+        assert_err!(
+            parse_bundle(r#"{"bundle":{"icon":["a.ico","b.ico"]}}"#),
+            "two .ico files"
+        );
+        assert_err!(parse_bundle(r#"{"bundle":{"icon":"app.png"}}"#), "a png");
+        assert_err!(
+            parse_bundle(r#"{"bundle":{"icon":["../x.svg"]}}"#),
+            "outside"
+        );
         Ok(())
     }
 

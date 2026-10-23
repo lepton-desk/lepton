@@ -133,12 +133,12 @@ pub const Menu = struct {
         var top: i32 = padding;
         var widest: i32 = 0;
         while (items.next()) |item| : (self.count += 1) {
-            @memcpy(self.labels[used..][0..item.label.len], item.label);
+            const label = shown(item.label, self.labels[used..][0..item.label.len]);
             const height = if (item.isSeparator()) separator_height else row_height;
-            self.rows[self.count] = .{ .id = item.id, .flags = item.flags, .label_at = @intCast(used), .label_len = @intCast(item.label.len), .top = top, .height = height };
-            used += item.label.len;
+            self.rows[self.count] = .{ .id = item.id, .flags = item.flags, .label_at = @intCast(used), .label_len = @intCast(label.len), .top = top, .height = height };
+            used += label.len;
             top += height;
-            if (!item.isSeparator()) widest = @max(widest, measure.widthOf(item.label));
+            if (!item.isSeparator()) widest = @max(widest, measure.widthOf(label));
         }
         self.width = @max(min_width, gutter + widest + trailing);
         self.height = top + padding;
@@ -387,3 +387,27 @@ pub const Menu = struct {
         self.* = .{};
     }
 };
+
+/// `label` as the menu shows it, written into `out` (as long as `label`): an access-key
+/// marker (`&Copy`, Windows' notation, which the API README's example uses) is dropped and
+/// `&&` is one `&`. X has no access keys to underline, and the marker was drawn as it was.
+fn shown(label: []const u8, out: []u8) []const u8 {
+    var length: usize = 0;
+    var at: usize = 0;
+    while (at < label.len) : (at += 1) {
+        if (label[at] == '&') {
+            if (at + 1 < label.len and label[at + 1] == '&') at += 1 else continue;
+        }
+        out[length] = label[at];
+        length += 1;
+    }
+    return out[0..length];
+}
+
+test "an access-key marker is dropped and a doubled one is an ampersand" {
+    var out: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("Copy", shown("&Copy", &out));
+    try std.testing.expectEqualStrings("Save & quit", shown("Save && quit", &out));
+    try std.testing.expectEqualStrings("Plain", shown("Plain", &out));
+    try std.testing.expectEqualStrings("Kopyala", shown("&Kopyala", &out));
+}

@@ -2,12 +2,13 @@
 //! `lepton.config.json`:
 //!
 //! - `window.decorations: false` → `-Dwindow-decorations=false`: no title bar, the page
-//!   draws its own (Windows; ignored where the engine cannot hide it).
+//!   draws its own (Windows and Servo; Linux WPE keeps its title bar for now).
 //! - `window.frameRate: "unlimited"` → `-Dframe-rate=unlimited`: the native path draws as
 //!   fast as the machine can instead of at the display's refresh (`"display"`, the default).
 //!   `LEPTON_FRAME_RATE` overrides it when the program runs.
-//! - `bundle.icon` → `-Dicon=<path>`: the Windows program's icon — its title bar, taskbar
-//!   button and Explorer icon. Without it, Lepton's own (written into the build cache).
+//! - `bundle.icon` → `-Dicon=<path>`, for a Windows build only: the Windows program's
+//!   icon — its title bar, taskbar button and Explorer icon. Without it, Lepton's own
+//!   (written into the build cache).
 //!
 //! A project whose `src-lepton/build.zig` predates an option keeps building without it
 //! and is told what it misses, as `size_window` does for the size.
@@ -97,19 +98,41 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
             );
         }
     }
-    if build.contains("\"icon\"") {
-        let icon = match &shape.icon {
+    // The icon is a Windows resource: a build for Linux was handed one, and the default
+    // `.ico` written, for a program that never read it.
+    let icon = if build.contains("\"icon\"")
+        && steps
+            .iter()
+            .any(|step| is_core_build(step) && targets_windows(step))
+    {
+        Some(match &shape.icon {
             Some(icon) => icon.clone(),
             None => default_icon(root)?,
-        };
-        args.push(format!("-Dicon={}", icon.display()));
-    }
+        })
+    } else {
+        None
+    };
     for step in steps.iter_mut() {
         if is_core_build(step) {
             step.args.extend(args.iter().cloned());
+            if let Some(icon) = icon.as_ref().filter(|_| targets_windows(step)) {
+                step.args.push(format!("-Dicon={}", icon.display()));
+            }
         }
     }
     Ok(())
+}
+
+/// Whether a core build makes a Windows program: its `-Dtarget`, or this machine without one.
+fn targets_windows(step: &Step) -> bool {
+    match step
+        .args
+        .iter()
+        .find_map(|arg| arg.strip_prefix("-Dtarget="))
+    {
+        Some(triple) => triple.contains("windows"),
+        None => cfg!(windows),
+    }
 }
 
 /// Lepton's own icon, written into the core's build cache (not into the project, which
@@ -130,7 +153,8 @@ fn default_icon(root: &Path) -> Result<std::path::PathBuf, CliError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Shape, read};
+    use super::{Shape, read, targets_windows};
+    use lepton_orchestrator::Step;
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{assert_eq, assert_err, assert_ok};
     use std::path::Path;
@@ -163,16 +187,37 @@ mod tests {
     }
 
     #[test]
+    fn only_a_windows_build_is_handed_the_icon() -> Result<(), Failure> {
+        let build = |target: Option<&str>| {
+            let mut step = Step::new("core", "zig").arg("build");
+            if let Some(triple) = target {
+                step = step.arg(format!("-Dtarget={triple}"));
+            }
+            step
+        };
+        assert_eq!(targets_windows(&build(Some("x86_64-windows-gnu"))), true);
+        assert_eq!(targets_windows(&build(Some("x86_64-linux-gnu"))), false);
+        assert_eq!(targets_windows(&build(None)), cfg!(windows));
+        Ok(())
+    }
+
+    #[test]
     fn frames_follow_the_display_unless_unlimited_is_asked_for() -> Result<(), Failure> {
         let root = Path::new("project");
         let read_rate = |text: &str| read(root, text).map(|shape| shape.unlimited);
         assert_eq!(assert_ok!(read_rate("{}"), "absent"), false);
         assert_eq!(
-            assert_ok!(read_rate(r#"{"window":{"frameRate":"display"}}"#), "display"),
+            assert_ok!(
+                read_rate(r#"{"window":{"frameRate":"display"}}"#),
+                "display"
+            ),
             false
         );
         assert_eq!(
-            assert_ok!(read_rate(r#"{"window":{"frameRate":"unlimited"}}"#), "unlimited"),
+            assert_ok!(
+                read_rate(r#"{"window":{"frameRate":"unlimited"}}"#),
+                "unlimited"
+            ),
             true
         );
         assert_err!(

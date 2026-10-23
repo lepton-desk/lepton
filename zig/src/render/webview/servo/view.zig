@@ -22,6 +22,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const c = @import("c.zig").c;
 const x11 = @import("../../../window/linux/x11_window.zig");
+const placement = @import("../../../window/linux/placement.zig");
+/// How close to an edge, in pixels, a press of a frameless window resizes it.
+const resize_band: f64 = 6;
 const input_state = @import("../../../window/linux/input.zig");
 const bridge_mod = @import("../bridge.zig");
 const transport = @import("../transport.zig");
@@ -59,13 +62,19 @@ pub fn loadedBackend() ?[]const u8 {
     return "Servo 0.6 (experimental)";
 }
 
-/// Servo keeps no profile here yet: storage lives for the run. Accepted and unused, so a
-/// template that asks for a data directory still builds.
+/// The application's identifier, kept by `useApplicationDirectories` for `open`: the window's
+/// `WM_CLASS`, which the desktop entry's `StartupWMClass` matches. Without it every Servo
+/// window was `dev.lepton.app`, so its icon and dock grouping missed (`docs/durum.md`).
+var application_id: [256]u8 = undefined;
+var application_id_len: usize = 0;
+
 /// Servo's web data (cookies, `localStorage`, IndexedDB, caches) for this application only:
 /// `$APPDATA/servo`, made 0700, given to the bridge before Servo starts. Every Lepton page
 /// has the origin `lepton://localhost`, so a shared directory would hand one application's
 /// storage to the next, as it did on WPE before (`wpe_view.zig`). Call before `open`.
 pub fn useApplicationDirectories(identifier: []const u8) bool {
+    application_id_len = @min(identifier.len, application_id.len);
+    @memcpy(application_id[0..application_id_len], identifier[0..application_id_len]);
     const paths = @import("../../../platform/linux/paths.zig");
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
     var scratch: [4096]u8 = undefined;
@@ -258,12 +267,15 @@ pub const View = struct {
     last_x: f64 = -1,
     last_y: f64 = -1,
     last_mask: u32 = 0,
+    /// `window.decorations: false`: no frame, so the edges resize (`forward`).
+    frameless: bool = false,
 
     /// Opens the core's X11 window and starts Servo drawing into it.
     pub fn open() Error!View {
         var window = x11.X11Window.open(.{ .title = "Lepton", .size = .{ .width = 800, .height = 600 }, .mapped = false }) catch
             return error.NoWindow;
         errdefer window.close();
+        if (application_id_len > 0) window.setAppId(application_id[0..application_id_len]);
         // Servo fills the window; the native path's title bar and right-press menu would
         // take the page's own right button.
         window.own_chrome = false;
@@ -356,6 +368,18 @@ pub const View = struct {
         if (scrolled.x != 0 or scrolled.y != 0) {
             c.lepton_servo_wheel(self.servo, -scrolled.x, -scrolled.y, input.x, input.y);
         }
+        // Frameless, the window manager draws no border to resize by: a primary press near
+        // an edge resizes from it instead of reaching the page (`placement.edgeAt`).
+        const primary: u32 = 1 << 0;
+        if (self.frameless and input.held_mask & primary != 0 and self.last_mask & primary == 0) {
+            const size = self.window.currentSize();
+            if (placement.edgeAt(input.x, input.y, size.width, size.height, resize_band)) |direction| {
+                if (self.window.startResize(direction)) {
+                    self.last_mask = input.held_mask;
+                    return;
+                }
+            }
+        }
         if (input.held_mask == self.last_mask) return;
         for (buttons) |b| {
             const bit: u32 = @intFromEnum(b.which);
@@ -402,6 +426,7 @@ pub const View = struct {
     /// `window.decorations: false`: the window manager draws no frame (`_MOTIF_WM_HINTS`)
     /// and the page's own title bar moves the window (`window.start_drag`).
     pub fn setDecorations(self: *View, decorated: bool) void {
+        self.frameless = !decorated;
         _ = self.window.setDecorated(decorated);
     }
 

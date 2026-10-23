@@ -468,7 +468,7 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
     // The GPU draws the screen as a command list when it can (Wayland, an ES 3 context,
     // the text libraries at build time); otherwise, or when the driver refuses, the CPU
     // paints the frame below and it is uploaded whole, as before.
-    var gpu_screen: GpuSlot = if (comptime core.gles3.available) (if (opened == .wayland) GpuScreen.init(allocator) catch null else null) else {{}};
+    var gpu_screen: GpuSlot = if (comptime core.gles3.available) (if (opened == .wayland and core.gles3.wanted()) GpuScreen.init(allocator) catch null else null) else {{}};
     defer if (comptime core.gles3.available) {{
         if (gpu_screen) |*screen| screen.deinit(allocator);
     }};

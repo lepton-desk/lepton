@@ -476,15 +476,17 @@ pub const View = struct {
     /// that `wpe_view_backend_dispatch_set_size` would reach belongs to a
     /// `wpe_view_backend` this framework does not hold, because the platform created
     /// it. See the note on `open` for why that is not a gap this path can close.
+    ///
+    /// The size is first cut, axis by axis, to the screen the window opens on (its first):
+    /// a 1200×800 window on a 1366×768 screen opened past its bottom edge. Only the screen:
+    /// WPE 2.54's Wayland toplevel ignores `configure_bounds` (an empty handler in
+    /// `WPEToplevelWayland.cpp`), and `WPEScreen` has no work area, so panels are not
+    /// subtracted as on Lepton's own windows (`window/linux/placement.zig`).
     pub fn resized(self: *View, width: i32, height: i32) void {
-        abi.wpe_view_resized(self.view, width, height);
+        const fitted = fitToScreen(self.view, width, height);
+        abi.wpe_view_resized(self.view, fitted.width, fitted.height);
     }
 
-    /// Makes the view visible and maps it.
-    ///
-    /// Separate from `open` because a view must be sized before it is mapped, and
-    /// because a caller that wants to inspect the engine before committing to a
-    /// visible surface needs a chance to.
     /// `window.decorations: false`. Not on WPE yet: its title bar is the compositor's
     /// (xdg-decoration), and WPE 2.54's `WPEToplevel` offers no call to decline it. The
     /// page can still draw its own bar inside; `window.start_drag` answers `failed`.
@@ -493,6 +495,11 @@ pub const View = struct {
         _ = decorated;
     }
 
+    /// Makes the view visible and maps it.
+    ///
+    /// Separate from `open` because a view must be sized before it is mapped, and
+    /// because a caller that wants to inspect the engine before committing to a
+    /// visible surface needs a chance to.
     pub fn map(self: *View) void {
         abi.wpe_view_set_visible(self.view, 1);
         abi.wpe_view_map(self.view);
@@ -561,6 +568,22 @@ pub const View = struct {
 pub fn is_available() bool {
     return @import("build_options").have_wpe;
 }
+
+/// `width` × `height` cut to the first screen of the view's display (`View.resized`); the
+/// request itself when WPE reports no screen.
+fn fitToScreen(view: *abi.WPEView, width: i32, height: i32) struct { width: i32, height: i32 } {
+    const requested: placement.Size = .{ .width = @intCast(@max(width, 1)), .height = @intCast(@max(height, 1)) };
+    const bounds: placement.Bounds = blk: {
+        const display = abi.wpe_view_get_display(view) orelse break :blk .{};
+        if (abi.wpe_display_get_n_screens(display) == 0) break :blk .{};
+        const screen = abi.wpe_display_get_screen(display, 0) orelse break :blk .{};
+        break :blk placement.Bounds.fromWire(abi.wpe_screen_get_width(screen), abi.wpe_screen_get_height(screen));
+    };
+    const fitted = placement.fit(requested, bounds);
+    return .{ .width = @intCast(fitted.width), .height = @intCast(fitted.height) };
+}
+
+const placement = @import("../../window/linux/placement.zig");
 
 test "the window commands and events path is compiled" {
     // Referenced so the test build analyses it: nothing in a test opens a view, and code

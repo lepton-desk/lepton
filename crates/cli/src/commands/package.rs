@@ -431,7 +431,7 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
         super::desktop_entry::install_icon(
             &bundle.join("share"),
             &spec.app_id,
-            &super::desktop_entry::project_icon(root),
+            &super::desktop_entry::project_icon(root)?,
         )?;
     }
 
@@ -674,6 +674,7 @@ mod tests {
             maintainer: Some(String::from("Ada <ada@example.org>")),
             deb_depends: Some(vec![String::from("libc6")]),
             icon: None,
+            svg_icon: None,
         };
         let (_, line) = assert_ok!(
             write_target(&spec, &bundle, BundleTarget::Deb, &[], &formats),

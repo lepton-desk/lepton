@@ -87,10 +87,28 @@ pub const DEFAULT_SVG: &str = include_str!("../../assets/icon.svg");
 /// The same mark for Windows installers, 16 to 256 px.
 pub const DEFAULT_ICO: &[u8] = include_bytes!("../../assets/icon.ico");
 
-/// The project's icon, `src-lepton/icon.svg`, or Lepton's own when the project has none.
-pub fn project_icon(root: &Path) -> String {
-    std::fs::read_to_string(root.join("src-lepton").join("icon.svg"))
-        .unwrap_or_else(|_| DEFAULT_SVG.to_owned())
+/// The project's Linux icon: the `.svg` in `bundle.icon`, else `src-lepton/icon.svg`, else
+/// Lepton's own. A configured icon that cannot be read is an error, not Lepton's mark in
+/// its place.
+pub fn project_icon(root: &Path) -> Result<String, CliError> {
+    let config =
+        std::fs::read_to_string(root.join(lepton_orchestrator::CONFIG_FILE)).unwrap_or_default();
+    let configured = lepton_template_injector::parse_bundle(&config)
+        .ok()
+        .and_then(|bundle| bundle.svg_icon);
+    if let Some(relative) = configured {
+        let path = root.join(&relative);
+        return std::fs::read_to_string(&path).map_err(|error| {
+            CliError::Invalid(format!(
+                "bundle.icon names {}, which could not be read: {error}",
+                path.display()
+            ))
+        });
+    }
+    Ok(
+        std::fs::read_to_string(root.join("src-lepton").join("icon.svg"))
+            .unwrap_or_else(|_| DEFAULT_SVG.to_owned()),
+    )
 }
 
 /// Writes `svg` as the `app_id` icon under `share` (`icons/hicolor/scalable/apps/`), the
@@ -121,7 +139,7 @@ pub fn register(root: &Path, app_id: &str, name: &str, exec: &Path) -> Result<Pa
     let schemes = super::deep_links::read(root)?;
     let entry = install(&dir, app_id, &entry_text(app_id, name, exec, &schemes))?;
     if let Some(share) = dir.parent() {
-        install_icon(share, app_id, &project_icon(root))?;
+        install_icon(share, app_id, &project_icon(root)?)?;
     }
     for line in super::deep_links::register_handlers(app_id, &schemes) {
         super::report::Report::new().fact("deep link", &line);

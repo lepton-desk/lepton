@@ -68,3 +68,37 @@ test "negative wire bounds read as unknown, not as a huge u32" {
     try std.testing.expectEqual(@as(u32, 0), bounds.width);
     try std.testing.expectEqual(Size{ .width = 1200, .height = 700 }, fit(.{ .width = 1200, .height = 800 }, bounds));
 }
+
+/// The EWMH `_NET_WM_MOVERESIZE` direction for a press at `x`, `y` within `band` pixels of
+/// a `width` × `height` window's edge (corners first, 0 top-left clockwise to 7 left); null
+/// inside. How a frameless window without the window manager's frame is resized.
+pub fn edgeAt(x: f64, y: f64, width: u32, height: u32, band: f64) ?u32 {
+    const w: f64 = @floatFromInt(width);
+    const h: f64 = @floatFromInt(height);
+    const left = x < band;
+    const right = x >= w - band;
+    const top = y < band;
+    const bottom = y >= h - band;
+    if (top and left) return 0;
+    if (top and right) return 2;
+    if (bottom and right) return 4;
+    if (bottom and left) return 6;
+    if (top) return 1;
+    if (right) return 3;
+    if (bottom) return 5;
+    if (left) return 7;
+    return null;
+}
+
+test "a press near an edge or corner names its resize direction, inside none" {
+    try std.testing.expectEqual(@as(?u32, 0), edgeAt(2, 2, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, 1), edgeAt(400, 1, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, 2), edgeAt(797, 3, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, 3), edgeAt(799, 300, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, 4), edgeAt(799, 599, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, 5), edgeAt(400, 595, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, 6), edgeAt(0, 599, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, 7), edgeAt(5, 300, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, null), edgeAt(400, 300, 800, 600, 6));
+    try std.testing.expectEqual(@as(?u32, null), edgeAt(6, 6, 800, 600, 6));
+}

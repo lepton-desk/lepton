@@ -18,6 +18,24 @@ pub const glyph_text = @import("glyph_text.zig");
 /// This build can draw the command list on the GPU (`core.gles3.available`).
 pub const available = true;
 
+/// `LEPTON_GPU` on Linux: `cpu` paints on the CPU; `gles`, or nothing, draws here. A Windows
+/// backend's name (`vulkan`, `d3d11`, `gl`) is not on Linux: the GPU draws here, said so.
+pub fn wanted() bool {
+    const raw = std.c.getenv("LEPTON_GPU") orelse return true;
+    return choose(std.mem.span(raw));
+}
+
+fn choose(name: []const u8) bool {
+    if (std.mem.eql(u8, name, "cpu")) return false;
+    if (!std.mem.eql(u8, name, "gles")) std.log.warn("LEPTON_GPU={s} is not gles or cpu on Linux; drawing with gles", .{name});
+    return true;
+}
+
+test "LEPTON_GPU=cpu turns the GPU scene off, anything else keeps it" {
+    try std.testing.expect(!choose("cpu"));
+    try std.testing.expect(choose("gles"));
+}
+
 const c = @import("c_gles3");
 
 /// `EGL_OPENGL_ES3_BIT` (EGL 1.5 / `EGL_KHR_create_context`), not in every `egl.h`.
