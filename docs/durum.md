@@ -164,9 +164,9 @@ Kanıt satırları tarama anındaki kod içindir. "Kayıtlı" = bu dosyada zaten
 ### Windows'ta (Linux'ta olup Windows'ta olmayan)
 
 Engelleyen:
-1. **Native çizim yolu Windows'ta yok, CLI yine de seçtiriyor.** `window/window.zig` yalnız Wayland/X11; `build.zig:645` "core does not build there yet". `lepton new --template …` hedef verilmezse `RenderMode::Native` (`commands/new.rs:129`), sihirbaz da sunuyor; `build/run --native` denetimsiz `-Drender=native`. Windows'ta reddedilmeli ya da varsayılan webview olmalı.
+1. ~~**Native çizim yolu Windows'ta yok, CLI yine de seçtiriyor.**~~ **Düzeltildi (2026-10-23):** gerekçe tek yerde (`platform::native_path`). Windows'ta `lepton new --template …` hedef verilmezse webview (sihirbaz sormuyor, "webview" yazıyor), `--target native` hiçbir şey yazılmadan reddediliyor; `build --native` (ve `--windows` için native, dry run dahil), `run --native`, `dev --native` gerekçesiyle reddediliyor; `build --linux --native` çalışıyor. Bu makinede sürüm ikilisiyle ölçüldü (çıkışlar 1/0/1/0/1/1, yeni projenin `renderPath`'i `webview`); etkileşimli sihirbaz yolu ayrıca denenmedi. Testler: `cargo test` 358, Clippy Windows ve Linux hedefi 0. Native yolun kendisi (Win32 + DirectWrite) yazılıyor: `docs/plans/windows.md`.
 2. **`window.open` açılır penceresi `webPermissions`'ı ve indirmeleri atlıyor.** `webview2/popup.zig` yalnız `WebResourceRequested`, `DocumentTitleChanged`, `WindowCloseRequested`, `NavigationStarting`, `NewWindowRequested` bağlıyor; `PermissionRequested`/`DownloadStarting` yok. Linux'ta açılır pencere de politikadan geçiyor (`features.zig`, `permissions.watchView`). Koddan okundu, ölçülmedi.
-3. **`lepton info` WebView2 yokken "native builds only" diyor** (`commands/info.rs:113`): Windows'ta native yol yok.
+3. ~~**`lepton info` WebView2 yokken "native builds only" diyor**~~ **Düzeltildi:** Windows'ta "nothing builds here until the engine is installed" (WebView2'siz makinede ölçülmedi; bu makinede WebView2 var).
 
 Eksik:
 4. Derin bağlantı `dev`/`run`'da ve `.zip`'te kaydolmuyor; yalnız MSI `HKCU\Software\Classes` yazıyor (`desktop_entry::announce` Linux dışında dönüyor).

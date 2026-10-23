@@ -123,10 +123,16 @@ impl Flags {
                 self.name = Some(name);
             }
         }
+        // A native project could not be built on this machine; said before anything is
+        // asked or written.
+        if self.target == Some(RenderMode::Native) {
+            crate::platform::native_path(crate::platform::System::host())
+                .map_err(|reason| CliError::Invalid(format!("--target native: {reason}")))?;
+        }
         let resolved = match self.template.clone() {
             Some(_) => Resolved {
                 template: self.template.clone().unwrap_or_default(),
-                target: self.target.unwrap_or(RenderMode::Native),
+                target: self.target.unwrap_or_else(default_target),
                 plugins: super::new_setup::plugins_from_flag(self.plugins.as_deref())?,
                 identifier: self.identifier.clone().unwrap_or_else(|| {
                     lepton_template_injector::manifest::reverse_dns(
@@ -405,6 +411,17 @@ fn scaffold(
     })
 }
 
+/// The render path when `--template` is given without `--target`: native, except where
+/// it does not run yet (Windows), which gets the webview. Native there once made a
+/// project that could not be built.
+fn default_target() -> RenderMode {
+    if crate::platform::native_path(crate::platform::System::host()).is_ok() {
+        RenderMode::Native
+    } else {
+        RenderMode::Webview
+    }
+}
+
 /// Asks for whatever the command line did not say.
 ///
 /// Two steps, in the order that decides the least: what to build the interface with, then
@@ -446,6 +463,11 @@ fn wizard(flags: &Flags, paint: crate::style::Painter) -> Result<Resolved, CliEr
         Some(target) => {
             println!("{}", paint.answered("Render", render_label(target)));
             target
+        }
+        // Nothing to choose where the native path does not run yet (Windows).
+        None if crate::platform::native_path(crate::platform::System::host()).is_err() => {
+            println!("{}", paint.answered("Render", render_label(RenderMode::Webview)));
+            RenderMode::Webview
         }
         None => {
             let choices = vec![

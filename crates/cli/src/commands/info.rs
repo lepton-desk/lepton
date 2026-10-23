@@ -110,10 +110,14 @@ fn engine_section() -> String {
     if engine.ready() {
         out.push_str(&format!("    {:<24} webview builds here\n", "consequence"));
     } else {
-        out.push_str(&format!(
-            "    {:<24} native builds only, for now\n",
-            "consequence"
-        ));
+        // Native builds are the way out only where the native path runs: not on Windows.
+        let consequence = if crate::platform::native_path(crate::platform::System::host()).is_ok()
+        {
+            "native builds only, for now"
+        } else {
+            "nothing builds here until the engine is installed"
+        };
+        out.push_str(&format!("    {:<24} {consequence}\n", "consequence"));
         for line in super::engine::advice(super::engine::offer().as_ref()) {
             out.push_str(&format!("      {line}\n"));
         }
