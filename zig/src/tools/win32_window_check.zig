@@ -45,9 +45,23 @@ fn screenAt(hwnd: c.HWND, x: i32, y: i32) u32 {
     _ = c.ClientToScreen(hwnd, &point);
     const dc = c.GetDC(null) orelse return 0xFFFF_FFFF;
     defer _ = c.ReleaseDC(null, dc);
+    // Another window over the point would be read as this one's pixel.
+    if (c.WindowFromPoint(point) != hwnd) return covered_point;
     const colour: u32 = c.GetPixel(dc, point.x, point.y); // 0x00BBGGRR
     return ((colour & 0xFF) << 16) | (colour & 0xFF00) | ((colour >> 16) & 0xFF);
 }
+
+/// What `screenAt` answers for a point another window covers: no 24-bit colour is this.
+const covered_point: u32 = 0xC0FFEE00;
+
+/// Puts the window above every other, so the screen read is its own: `SetForegroundWindow`
+/// is refused to a process that is not in front (measured in `windows-gpu-check`, behind
+/// the Claude desktop app). `HWND_TOPMOST` is `(HWND)-1`, which no Zig `HWND` may hold, so
+/// the call is declared with the handle as the integer it is.
+fn onTop(hwnd: c.HWND) void {
+    _ = SetWindowPos(hwnd, std.math.maxInt(usize), 0, 0, 0, 0, c.SWP_NOMOVE | c.SWP_NOSIZE | c.SWP_NOACTIVATE | c.SWP_SHOWWINDOW);
+}
+extern "user32" fn SetWindowPos(window: c.HWND, insert_after: usize, x: c_int, y: c_int, cx: c_int, cy: c_int, flags: c.UINT) callconv(.winapi) c.BOOL;
 
 fn pump(w: *native.NativeWindow, milliseconds: u64) !void {
     const until = c.GetTickCount64() + milliseconds;
@@ -60,7 +74,7 @@ pub fn main() !void {
     var w: native.NativeWindow = undefined;
     try w.open(.{ .title = "lepton win32 window check", .size = .{ .width = 480, .height = 320 } });
     defer w.close();
-    _ = c.SetForegroundWindow(w.hwnd);
+    onTop(w.hwnd);
 
     const first = w.takeConfigure() orelse {
         expect(false, "configure", "none after open", .{});

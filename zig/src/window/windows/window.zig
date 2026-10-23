@@ -266,6 +266,14 @@ fn procedure(window: c.HWND, message: c.UINT, wparam: c.WPARAM, lparam: c.LPARAM
             owner.close_requested(owner.context);
             return 0;
         },
+        // Signing out or shutting down: the session may end at any moment once this
+        // returns, and a release build has no console for `SetConsoleCtrlHandler`. The same
+        // close as the title bar's, so the loop ends and the core cleans up while it still
+        // can; nothing to refuse in `WM_QUERYENDSESSION`, which `DefWindowProcW` allows.
+        c.WM_ENDSESSION => {
+            if (wparam != 0) owner.close_requested(owner.context);
+            return 0;
+        },
         c.WM_DPICHANGED => {
             // Windows suggests the rectangle that keeps the window's logical size on the
             // new monitor; taking it is what per-monitor awareness asks of a window.

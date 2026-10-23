@@ -214,7 +214,7 @@ Kanıt satırları tarama anındaki kod içindir. "Kayıtlı" = bu dosyada zaten
 
 Engelleyen:
 1. ~~**Native çizim yolu Windows'ta yok, CLI yine de seçtiriyor.**~~ **Düzeltildi (2026-10-23):** gerekçe tek yerde (`platform::native_path`). Windows'ta `lepton new --template …` hedef verilmezse webview (sihirbaz sormuyor, "webview" yazıyor), `--target native` hiçbir şey yazılmadan reddediliyor; `build --native` (ve `--windows` için native, dry run dahil), `run --native`, `dev --native` gerekçesiyle reddediliyor; `build --linux --native` çalışıyor. Bu makinede sürüm ikilisiyle ölçüldü (çıkışlar 1/0/1/0/1/1, yeni projenin `renderPath`'i `webview`); etkileşimli sihirbaz yolu ayrıca denenmedi. Testler: `cargo test` 358, Clippy Windows ve Linux hedefi 0. Native yolun kendisi (Win32 + DirectWrite) yazılıyor: `docs/plans/windows.md`.
-2. **`window.open` açılır penceresi `webPermissions`'ı ve indirmeleri atlıyor.** `webview2/popup.zig` yalnız `WebResourceRequested`, `DocumentTitleChanged`, `WindowCloseRequested`, `NavigationStarting`, `NewWindowRequested` bağlıyor; `PermissionRequested`/`DownloadStarting` yok. Linux'ta açılır pencere de politikadan geçiyor (`features.zig`, `permissions.watchView`). Koddan okundu, ölçülmedi.
+2. ~~**`window.open` açılır penceresi `webPermissions`'ı ve indirmeleri atlıyor.**~~ **Düzeltildi (2026-10-23):** açılır pencerenin webview'ı ana görünümün izin ve indirme işleyicilerine bağlanıyor. Ölçüldü (açılır pencere `Notification.requestPermission()`, sonucu başlığında): düzeltmeden önce `notifications: allow` → `denied` (politika atlanıyordu; `deny` de `denied`, WebView2'nin işleyicisiz varsayılanı), sonra `allow` → `granted`, `deny` → `denied`.
 3. ~~**`lepton info` WebView2 yokken "native builds only" diyor**~~ **Düzeltildi:** Windows'ta "nothing builds here until the engine is installed" (WebView2'siz makinede ölçülmedi; bu makinede WebView2 var).
 
 Eksik:
@@ -222,15 +222,15 @@ Eksik:
 5. Sayfanın `console`'u terminale gelmiyor (Linux Debug'da `write_console_messages_to_stdout`; `webview2/view.zig`'de karşılığı yok).
 6. Bildirimler WebView2'nin kendi arayüzünde; `setApplication`'ın adı/kimliği kullanılmıyor, hangi uygulamaya atfedildiği (AUMID) ölçülmedi.
 7. İzin türleri: `webview2/permissions.zig` `kindOf` yalnız mikrofon, kamera, konum, bildirim; `pointer-lock`, `device-info`, `media-keys`, `storage-access`, `xr` için `allow` etkisiz. `navigator.permissions.query` politikadan cevaplanmıyor.
-8. Oturum kapanışı/kapatma: sürüm derlemesi Windows alt sisteminde; `termination.zig` `SetConsoleCtrlHandler`'a dayanıyor, pencere `WM_QUERYENDSESSION`/`WM_ENDSESSION`'ı işlemiyor. Ölçülmeli.
+8. ~~Oturum kapanışı~~ **Düzeltildi:** pencere `WM_ENDSESSION`'ı (wParam TRUE) başlık çubuğunun kapatmasıyla aynı yoldan işliyor; `WM_QUERYENDSESSION` `DefWindowProcW`'nin izniyle. Ölçüldü (iletiler sürece gönderilerek; gerçek oturum kapatma denenmedi): native uygulama önce 5 sn sonra hâlâ çalışıyordu, sonra 263 ms'de çıkış 0; WebView2 uygulaması önce çalışıyordu, sonra 61 ms'de çıkış 0.
 9. Motor kurulum önerisi yok (Linux paket yöneticisini öneriyor; Windows yalnız adres yazıyor).
 10. Yoklama araçları (`webview-check`, `engine-caps`, `platform-check`…) Linux'a özel; Windows'ta yalnız `webview2-check`.
 11. `windows_tests.zig` `record`, `replay`, `page_replay`, `bridge`, `transport`, `assets`, `single_instance`, `activation`, `webview2/permissions` (kendi testi var) dosyalarını kapsamıyor: uçtan uca ölçüldüler ama birim testleri Windows'ta koşmuyor.
 12. `lepton`'ın çocukları Windows'ta `taskkill /T /F` ile bitiyor (Linux'ta SIGTERM).
-13. Windows'ta yapılan `tar.gz`'de ikili `+x` almıyor (`archive.rs:254`, yorum da eski).
+13. ~~Windows'ta yapılan `tar.gz`'de ikili `+x` almıyor~~ **Düzeltildi:** Windows'ta yürütme biti yok; paketin programı her zaman `bin/<ad>`, o üye `+x` işaretleniyor (`marked_executable`, test).
+- ~~Eski yorum: `plugin-fs/zig/plugin.zig:280`~~ düzeltildi (inotify / `ReadDirectoryChangesW`).
 14. Dev sunucusu sayfasında çerezlerin kalıcılığı Windows'ta ölçülmedi.
 - Bilerek: Servo yalnız Linux; systemd scope/masaüstü girdisi Linux'a özel; MSIX/imza sertifika bekliyor; arm64 yok.
-- Eski yorum: `plugin-fs/zig/plugin.zig:280` "Windows answers `failed`" diyor, `fs.watch` Windows'ta var.
 
 ### Linux'ta (Windows'ta olup Linux'ta olmayan)
 

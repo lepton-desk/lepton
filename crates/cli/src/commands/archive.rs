@@ -229,11 +229,12 @@ fn collect(
             });
             collect(&source, &path, &[], into)?;
         } else if meta.is_file() {
+            let executable = executable(&meta, &path);
             into.push(Entry {
                 path,
                 source,
                 directory: false,
-                executable: executable(&meta),
+                executable,
             });
         } else {
             return Err(CliError::Invalid(format!(
@@ -246,15 +247,25 @@ fn collect(
 }
 
 #[cfg(unix)]
-fn executable(meta: &std::fs::Metadata) -> bool {
+fn executable(meta: &std::fs::Metadata, _: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt as _;
     meta.permissions().mode() & 0o111 != 0
 }
 
-/// Windows keeps no execute bit; `lepton package` refuses to run there (`package.rs`).
+/// Windows keeps no execute bit, so the archive's member is marked by where it sits: the
+/// program is `bin/<name>` in every bundle (`package.rs`). A `tar.gz` made on Windows
+/// otherwise unpacked on Linux with a program that would not start.
 #[cfg(not(unix))]
-fn executable(_: &std::fs::Metadata) -> bool {
-    false
+fn executable(_: &std::fs::Metadata, path: &Path) -> bool {
+    marked_executable(path)
+}
+
+/// Whether `path` (inside the bundle) is the program: a file directly under a `bin` folder.
+#[cfg_attr(unix, allow(dead_code))]
+fn marked_executable(path: &Path) -> bool {
+    path.parent()
+        .and_then(Path::file_name)
+        .is_some_and(|folder| folder == "bin")
 }
 
 pub(super) fn io(path: &Path, verb: &str, error: &std::io::Error) -> CliError {
@@ -426,6 +437,23 @@ mod tests {
             "link"
         );
         assert_contains!(&error.to_string(), "not a regular file");
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod marking {
+    use super::marked_executable;
+    use lepton_orchestrator::assert_eq;
+    use lepton_orchestrator::testing::Failure;
+    use std::path::Path;
+
+    #[test]
+    fn the_program_under_bin_is_executable_and_nothing_else() -> Result<(), Failure> {
+        assert_eq!(marked_executable(Path::new("notes-0.1.0/bin/notes")), true);
+        assert_eq!(marked_executable(Path::new("notes-0.1.0/bin/notes.exe")), true);
+        assert_eq!(marked_executable(Path::new("notes-0.1.0/share/notes/dist/index.html")), false);
+        assert_eq!(marked_executable(Path::new("notes-0.1.0/bin")), false);
         Ok(())
     }
 }

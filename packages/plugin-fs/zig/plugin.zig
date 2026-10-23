@@ -276,9 +276,9 @@ fn exists(argument: []const u8, out: []u8) Registry.HandlerError!usize {
 }
 
 /// `fs.watch`: the usual path request, `Flag.recursive` for every directory below it
-/// too; answers the watch's `u32` number (LE). Changes
-/// arrive as `fs.changed` events, read on every turn of the loop (`tick`). Linux only for
-/// now: Windows answers `failed`.
+/// too; answers the watch's `u32` number (LE). Changes arrive as `fs.changed` events, read
+/// on every turn of the loop (`tick`): inotify on Linux, `ReadDirectoryChangesW` on Windows
+/// (`fs_windows_watch.zig`).
 fn watchPath(argument: []const u8, out: []u8) Registry.HandlerError!usize {
     if (out.len < 4) return error.TooLarge;
     const request = try parse(argument);

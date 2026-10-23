@@ -13,6 +13,8 @@ const c = wv.c;
 const window = @import("../../../window/windows/window.zig");
 const request = @import("request.zig");
 const View = @import("view.zig").View;
+const permissions = @import("permissions.zig");
+const downloads = @import("downloads.zig");
 
 const Popup = struct {
     used: bool = false,
@@ -105,6 +107,11 @@ fn onCreated(
     // its arguments, so the main view's serves.
     _ = core.*.lpVtbl.*.add_NavigationStarting.?(core, &host.navigations, &token);
     _ = core.*.lpVtbl.*.add_NewWindowRequested.?(core, &host.new_windows, &token);
+    // `webPermissions` and downloads, as in the main window: a popup asked the engine for a
+    // camera or saved a file past the application's policy (`docs/durum.md`). Both
+    // handlers read only their arguments and the one bridge, so the main view's serve.
+    permissions.watch(core, &host.bridge, &host.permission_requests);
+    downloads.watch(core, &host.bridge, &host.downloads_starting);
     if (slot.args) |args| _ = args.lpVtbl.*.put_NewWindow.?(args, core);
     finishRequest(slot);
     window.show(slot.hwnd);

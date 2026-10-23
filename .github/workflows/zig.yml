@@ -27,7 +27,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libwayland-dev wayland-protocols libxcb1-dev \
             libxcb-randr0-dev libxcb-image0-dev libcairo2-dev \
-            libegl-dev libgles-dev libfreetype-dev libharfbuzz-dev libfontconfig-dev libxkbcommon-dev
+            libegl-dev libgles-dev libfreetype-dev libharfbuzz-dev libfontconfig-dev libxkbcommon-dev \
+            libegl-mesa0 libgl1-mesa-dri fonts-noto-core
 
       - name: Zig ${{ matrix.zig }}
         run: |
@@ -50,8 +51,12 @@ jobs:
       # The native render path's own tests (presenter, GLES 3 renderer, window layers):
       # with EGL's headers above, the GPU presenter is compiled too (`have_egl`); without
       # them it was compiled out and a change to it reached no compiler here.
+      # The GPU tests draw off screen and read the pixels back: with no display here,
+      # Mesa's surfaceless platform gives EGL a device (llvmpipe), so they run, not skip.
       - name: Native core tests
         working-directory: zig
+        env:
+          EGL_PLATFORM: surfaceless
         run: zig build test -Drender=native --summary all
 
       - name: Plugin tests
