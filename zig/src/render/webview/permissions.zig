@@ -137,6 +137,12 @@ pub fn setApplication(identifier: [*:0]const u8, product: [*:0]const u8) void {
     desktop_entry = identifier;
     app_name = product;
 }
+
+/// What `setApplication` was given: the identifier and the product's name (Windows'
+/// notifications, `webview2/notifications.zig`).
+pub fn application() struct { identifier: [*:0]const u8, product: [*:0]const u8 } {
+    return .{ .identifier = desktop_entry, .product = app_name };
+}
 var bridge: ?*Bridge = null;
 
 /// One request the page was asked about. A static table: its address is timeout data.

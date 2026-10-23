@@ -36,6 +36,7 @@ const features = @import("../features.zig");
 const permissions = @import("permissions.zig");
 const downloads = @import("downloads.zig");
 const console = @import("console.zig");
+const notifications = @import("notifications.zig");
 const popup = @import("popup.zig");
 const chrome_mod = @import("chrome.zig");
 
@@ -237,6 +238,8 @@ pub const View = struct {
     /// The page's `console` in the terminal, Debug builds only (`console.zig`).
     console_messages: c.ICoreWebView2DevToolsProtocolEventReceivedEventHandler = console.Received.make(),
     console_enabled: c.ICoreWebView2CallDevToolsProtocolMethodCompletedHandler = console.Enabled.make(),
+    /// The page's notifications as Windows ones, from the application (`notifications.zig`).
+    notifications_received: c.ICoreWebView2NotificationReceivedEventHandler = notifications.Handler.make(),
     downloads_starting: c.ICoreWebView2DownloadStartingEventHandler = downloads.Handler.make(),
 
     /// Finds the runtime, opens a hidden window and brings the engine up in it.
@@ -368,6 +371,7 @@ pub const View = struct {
         permissions.watch(self.webview, &self.bridge, &self.permission_requests);
         downloads.watch(self.webview, &self.bridge, &self.downloads_starting);
         console.watch(self.webview, &self.console_messages, &self.console_enabled);
+        notifications.watch(self.webview, &self.notifications_received);
         self.bridge.window = .{ .context = self, .act = &windowAct, .state = &windowState, .permission = &permissions.answer, .start_drag = &windowDrag, .menu = &windowMenu };
         self.last_state = self.stateBits();
     }

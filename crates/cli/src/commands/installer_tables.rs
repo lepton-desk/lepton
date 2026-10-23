@@ -417,9 +417,20 @@ pub(super) fn rows(
             text("shortcut"),
         ]);
     }
-    if !scheme_rows.is_empty() {
-        db.rows("Registry", scheme_rows)?;
-    }
+    // The name Windows shows on the program's notifications: the core writes it at run time
+    // (`webview2/notifications.zig`); written here as well, it is removed with the program.
+    scheme_rows.push(vec![
+        text("notification_name"),
+        Cell::Int(1),
+        text(&format!(
+            "Software\\Classes\\AppUserModelId\\{}",
+            spec.identifier
+        )),
+        text("DisplayName"),
+        text(spec.product),
+        text("shortcut"),
+    ]);
+    db.rows("Registry", scheme_rows)?;
     // The shortcut belongs to its target's component (ICE69): it comes and goes with the
     // program, whose key path is an HKCU value (ICE43).
     let program_component = files
