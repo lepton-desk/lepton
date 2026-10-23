@@ -2,6 +2,12 @@
 
 Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Windows dahil) `git pull` ile okunabilir kılmak için var. Yayın adımları `docs/yayin.md`'de; burası neyin yapıldığını, neyin ölçüldüğünü ve neyin açık kaldığını söyler. Sürüm çıkınca güncellenir.
 
+## İlk iş (kullanıcı, 2026-10-23)
+
+1. `9cd52ac`'ın CI sonucunu oku (`windows`: gölgelendirici eşitliği ve runner'da D3D11 ilk kez; `zig`).
+2. `windows-gpu-check`'e dikey senkronsuz ölçüm: aynı sahne `Present(0, 0)` ile, saniyedeki kare ve kare başına GPU süresi (D3D11 zaman damgası sorgusu); Linux'taki 2001 şekillik sahne (R7 240'ta 0,65 ms) karşılaştırma için.
+3. CPU yolunu ekranın tazelemesine bağla (`DwmFlush`): bugün 16 ms zamanlayıcıyla 61,2 kare/sn çiziyor, 60 Hz ekran fazlasını göstermiyor.
+
 ## Yayın durumu
 
 - Bütün paketler `0.1.9-beta.2`'de, commit `f4e8fec` (trunk). Hiçbiri yayımlanmadı.
