@@ -196,7 +196,7 @@ Kararlar `docs/plans/windows.md`: pencere Win32, metin DirectWrite; çizici Vulk
    - Şablon uygulaması uçtan uca (`lepton build`, `-Dframe-rate=unlimited` planda; 5 sn, sayaç ekrandan): GPU ekran 59,8/sn, 156 ms CPU; **GPU sınırsız 2881/sn**, 3016 ms; CPU ekran (`DwmFlush`) 59,8/sn (önce 61,2), 1594 ms; CPU sınırsız 271/sn, 4594 ms.
    - **Bulundu, düzeltildi:** `windows-gpu-check` pencere başka bir pencerenin (Claude uygulaması, "Chrome Legacy Window") altındayken her noktada öne alıp 300 ms uyuyordu: 11 200 noktalık metin denetimi neredeyse bir saat askıda, Windows "Yanıt Vermiyor" hayaleti koydu (ölçüldü, her nokta örtülü). `SetForegroundWindow` önde olmayan sürece reddediliyor; denetim pencereleri artık `HWND_TOPMOST` (ön plan hakkı gerekmiyor), metin bölgesi tek `BitBlt`'le okunuyor. Claude uygulaması öndeyken hepsi geçti.
    - **Ölçülmedi (Linux makinesi ya da CI gerekiyor):** Linux'ta sınırsızın kare hızı. Kod Windows'tan derlenemiyor (Wayland/EGL başlıkları); Linux CI derler.
-   - `x11_window.zig` 840 satır (değişiklikten önce 836): 800 sınırının üstünde, bölünmeli.
+   - `x11_window.zig` 840 satırdı (değişiklikten önce 836, 800 sınırının üstünde): olay çevirisi, başlık çubuğu ve menü `x11_input.zig`'e taşındı (695 + 160), `takeAction` yeniden dışa aktarılıyor. Windows'tan yalnız sözdizimi denetlenebildi (`zig ast-check`); Linux CI derler.
 9. **Sırada:** Vulkan (bu kart Windows'ta 1.2, eşiğin altında → D3D11 doğru seçim; eşiği geçen makinede Vulkan), OpenGL 3.3, eski Windows (FL 10_0, flip-model olmayan takas zinciri).
 
 ## Eksikler (2026-10-23; iki tarama, her madde kodda doğrulandı)
