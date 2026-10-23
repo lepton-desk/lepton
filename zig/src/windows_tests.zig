@@ -12,6 +12,7 @@ test {
     _ = @import("window/window.zig");
     _ = @import("render/text_windows.zig");
     _ = @import("render/webview/webview2/chrome.zig");
+    _ = @import("render/webview/webview2/console.zig");
     _ = @import("render/webview/menu.zig");
     _ = @import("ipc/shm.zig");
     _ = @import("ipc/ring.zig");

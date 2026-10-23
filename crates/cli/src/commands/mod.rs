@@ -13,6 +13,7 @@ pub mod build;
 pub mod command_types;
 pub mod deb;
 pub mod deep_links;
+pub mod deep_links_windows;
 pub mod depends;
 pub mod desktop_entry;
 pub mod dev;

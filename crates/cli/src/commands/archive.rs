@@ -451,8 +451,14 @@ mod marking {
     #[test]
     fn the_program_under_bin_is_executable_and_nothing_else() -> Result<(), Failure> {
         assert_eq!(marked_executable(Path::new("notes-0.1.0/bin/notes")), true);
-        assert_eq!(marked_executable(Path::new("notes-0.1.0/bin/notes.exe")), true);
-        assert_eq!(marked_executable(Path::new("notes-0.1.0/share/notes/dist/index.html")), false);
+        assert_eq!(
+            marked_executable(Path::new("notes-0.1.0/bin/notes.exe")),
+            true
+        );
+        assert_eq!(
+            marked_executable(Path::new("notes-0.1.0/share/notes/dist/index.html")),
+            false
+        );
         assert_eq!(marked_executable(Path::new("notes-0.1.0/bin")), false);
         Ok(())
     }

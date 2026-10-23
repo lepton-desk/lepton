@@ -152,7 +152,12 @@ pub fn register(root: &Path, app_id: &str, name: &str, exec: &Path) -> Result<Pa
 /// A missing entry costs the application its name in the dock, not its window, so a
 /// failure is reported and the command carries on.
 pub fn announce(root: &Path, app_id: &str, name: &str, exec: &Path) {
-    // XDG desktop entries are a Linux desktop's; Windows and macOS find applications otherwise.
+    // Windows finds applications otherwise; its part is the `deepLinks` schemes.
+    if cfg!(windows) {
+        announce_schemes(root, name, exec);
+        return;
+    }
+    // XDG desktop entries are a Linux desktop's.
     if !cfg!(target_os = "linux") {
         return;
     }
@@ -162,6 +167,41 @@ pub fn announce(root: &Path, app_id: &str, name: &str, exec: &Path) {
         }
         Err(error) => {
             super::report::Report::new().warn("desktop entry", &format!("not written: {error}"))
+        }
+    }
+}
+
+/// `deepLinks` on Windows: each scheme to the program just built, unless another
+/// program's (`deep_links_windows.rs`), said for each.
+fn announce_schemes(root: &Path, name: &str, exec: &Path) {
+    let report = super::report::Report::new();
+    let schemes = match super::deep_links::read(root) {
+        Ok(schemes) => schemes,
+        Err(error) => {
+            report.warn("deep links", &format!("not registered: {error}"));
+            return;
+        }
+    };
+    // The program's file as Windows names it: `run` and `dev` pass the core's path without
+    // `.exe` (which Windows appends when it opens a link, measured), the installer with it.
+    let exec = if exec.extension().is_none() {
+        exec.with_extension("exe")
+    } else {
+        exec.to_path_buf()
+    };
+    for (scheme, outcome) in super::deep_links_windows::register(&schemes, name, &exec) {
+        match outcome {
+            super::deep_links_windows::Outcome::Registered => {
+                report.fact("deep link", &format!("{scheme}:// opens this build"))
+            }
+            super::deep_links_windows::Outcome::Taken(command) => report.warn(
+                "deep link",
+                &format!("{scheme}:// is another program's ({command}); left to it"),
+            ),
+            super::deep_links_windows::Outcome::Failed(reason) => report.warn(
+                "deep link",
+                &format!("{scheme}:// not registered: {reason}"),
+            ),
         }
     }
 }
