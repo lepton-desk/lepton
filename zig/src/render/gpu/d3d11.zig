@@ -58,6 +58,9 @@ pub const Renderer = struct {
     /// Unlimited frames on a system that lets a windowed flip-model chain tear: presents are
     /// shown the moment they are made, instead of the next composition taking the newest.
     tearing: bool,
+    /// The swap model the system accepted (`Swap`), and the flags it was made with.
+    swap: Swap,
+    flags: c.UINT,
     width: u32,
     height: u32,
     /// Bytes handed to the GPU by `draw`, all frames: the instances, and the atlas regions
@@ -68,6 +71,11 @@ pub const Renderer = struct {
     /// physical pixels, paced by `pacing`. Any refusal is an error, and the caller draws on the
     /// CPU instead.
     pub fn open(window: c.HWND, width: u32, height: u32, pacing: Pacing) Error!Renderer {
+        return openWith(window, width, height, pacing, firstSwap());
+    }
+
+    /// `open`, trying swap models from `first` down (`windows-gpu-check` measures each).
+    pub fn openWith(window: c.HWND, width: u32, height: u32, pacing: Pacing, first: Swap) Error!Renderer {
         var device: ?*c.ID3D11Device = null;
         var context: ?*c.ID3D11DeviceContext = null;
         var level: c.D3D_FEATURE_LEVEL = 0;
@@ -80,11 +88,12 @@ pub const Renderer = struct {
         errdefer release(context);
 
         const tearing = pacing == .unlimited and allowsTearing(device.?);
-        const chain = try swapChain(device.?, window, width, height, swapFlags(tearing));
+        const made = try swapChain(device.?, window, width, height, tearing, first);
+        const chain = made.chain;
         errdefer release(chain);
         var latency: c.HANDLE = null;
         var chain2: ?*c.IDXGISwapChain2 = null;
-        if (chain.lpVtbl.*.QueryInterface.?(chain, &iid_swap_chain2, @ptrCast(&chain2)) >= 0) {
+        if (made.flags & latency_flag != 0 and chain.lpVtbl.*.QueryInterface.?(chain, &iid_swap_chain2, @ptrCast(&chain2)) >= 0) {
             _ = chain2.?.lpVtbl.*.SetMaximumFrameLatency.?(chain2.?, 1);
             latency = chain2.?.lpVtbl.*.GetFrameLatencyWaitableObject.?(chain2.?);
             release(chain2);
@@ -106,7 +115,9 @@ pub const Renderer = struct {
             .atlas_view = undefined,
             .level = level,
             .pacing = pacing,
-            .tearing = tearing,
+            .tearing = made.flags & c.DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING != 0,
+            .swap = made.swap,
+            .flags = made.flags,
             .width = width,
             .height = height,
         };
@@ -133,6 +144,12 @@ pub const Renderer = struct {
         release(self.context);
         release(self.device);
         self.* = undefined;
+    }
+
+    /// Whether `present` itself waits for the display (no frame-latency object: DXGI below
+    /// 1.3, or the blt model), so the window must not wait a frame period as well.
+    pub fn pacesItself(self: *const Renderer) bool {
+        return self.latency == null;
     }
 
     /// What the window waits on between frames (`NativeWindow.frame_wait`).
@@ -203,7 +220,7 @@ pub const Renderer = struct {
         self.context.lpVtbl.*.OMSetRenderTargets.?(self.context, 0, null, null);
         release(self.target);
         self.target = null;
-        if (self.chain.lpVtbl.*.ResizeBuffers.?(self.chain, 0, size.width, size.height, c.DXGI_FORMAT_UNKNOWN, swapFlags(self.tearing)) < 0) return error.NoSwapChain;
+        if (self.chain.lpVtbl.*.ResizeBuffers.?(self.chain, 0, size.width, size.height, c.DXGI_FORMAT_UNKNOWN, self.flags) < 0) return error.NoSwapChain;
         self.width = size.width;
         self.height = size.height;
         try self.makeTarget();
@@ -344,11 +361,6 @@ fn element(comptime semantic: [*:0]const u8, offset: usize) c.D3D11_INPUT_ELEMEN
     };
 }
 
-/// The swap chain's flags: always the frame-latency object, tearing when it was granted.
-fn swapFlags(tearing: bool) c.UINT {
-    return latency_flag | if (tearing) @as(c.UINT, @intCast(c.DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING)) else 0;
-}
-
 /// Whether the device's DXGI lets a windowed flip-model swap chain tear (Windows 10 1607+,
 /// a driver and display that allow it). Without it, unlimited presents still run free and
 /// the compositor shows the newest at each refresh.
@@ -367,8 +379,23 @@ fn allowsTearing(device: *c.ID3D11Device) bool {
     return allowed != c.FALSE;
 }
 
-/// A flip-model swap chain on `window` from the device's own adapter's factory.
-fn swapChain(device: *c.ID3D11Device, window: c.HWND, width: u32, height: u32, flags: c.UINT) Error!*c.IDXGISwapChain1 {
+/// How the swap chain hands frames to the compositor, newest first. The flip models need
+/// Windows 10 (`flip_discard`) or 8 (`flip_sequential`); the blt model (`discard`) is
+/// Windows 7's, copied by the compositor, with no frame-latency object or tearing.
+pub const Swap = enum { flip_discard, flip_sequential, discard };
+
+const Made = struct { chain: *c.IDXGISwapChain1, swap: Swap, flags: c.UINT };
+
+/// The first model `LEPTON_D3D11_SWAP` names (to measure an older system's path on a
+/// new one), else the newest.
+fn firstSwap() Swap {
+    const name = std.c.getenv("LEPTON_D3D11_SWAP") orelse return .flip_discard;
+    return std.meta.stringToEnum(Swap, std.mem.span(name)) orelse .flip_discard;
+}
+
+/// A swap chain on `window` from the device's own adapter's factory: the newest model the
+/// system accepts, from `first` down.
+fn swapChain(device: *c.ID3D11Device, window: c.HWND, width: u32, height: u32, tearing: bool, first: Swap) Error!Made {
     var dxgi_device: ?*c.IDXGIDevice = null;
     if (device.lpVtbl.*.QueryInterface.?(device, &iid_dxgi_device, @ptrCast(&dxgi_device)) < 0) return error.NoFactory;
     defer release(dxgi_device);
@@ -378,22 +405,35 @@ fn swapChain(device: *c.ID3D11Device, window: c.HWND, width: u32, height: u32, f
     var factory: ?*c.IDXGIFactory2 = null;
     if (adapter.?.lpVtbl.*.GetParent.?(adapter.?, &iid_dxgi_factory2, @ptrCast(&factory)) < 0) return error.NoFactory;
     defer release(factory);
-    const description: c.DXGI_SWAP_CHAIN_DESC1 = .{
-        .Width = width,
-        .Height = height,
-        .Format = c.DXGI_FORMAT_B8G8R8A8_UNORM,
-        .Stereo = c.FALSE,
-        .SampleDesc = .{ .Count = 1, .Quality = 0 },
-        .BufferUsage = c.DXGI_USAGE_RENDER_TARGET_OUTPUT,
-        .BufferCount = 2,
-        .Scaling = c.DXGI_SCALING_STRETCH,
-        .SwapEffect = c.DXGI_SWAP_EFFECT_FLIP_DISCARD,
-        .AlphaMode = c.DXGI_ALPHA_MODE_UNSPECIFIED,
-        .Flags = flags,
-    };
-    var chain: ?*c.IDXGISwapChain1 = null;
-    if (factory.?.lpVtbl.*.CreateSwapChainForHwnd.?(factory.?, @ptrCast(device), window, &description, null, null, &chain) < 0) return error.NoSwapChain;
-    return chain.?;
+    const models = std.enums.values(Swap);
+    for (models[@intFromEnum(first)..]) |swap| {
+        const flip = swap != .discard;
+        // The frame-latency object and tearing are flip-model only.
+        const flags: c.UINT = if (flip) latency_flag | if (tearing) @as(c.UINT, @intCast(c.DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING)) else 0 else 0;
+        const description: c.DXGI_SWAP_CHAIN_DESC1 = .{
+            .Width = width,
+            .Height = height,
+            .Format = c.DXGI_FORMAT_B8G8R8A8_UNORM,
+            .Stereo = c.FALSE,
+            .SampleDesc = .{ .Count = 1, .Quality = 0 },
+            .BufferUsage = c.DXGI_USAGE_RENDER_TARGET_OUTPUT,
+            // The flip models need two buffers; the blt model draws into one.
+            .BufferCount = if (flip) 2 else 1,
+            .Scaling = c.DXGI_SCALING_STRETCH,
+            .SwapEffect = switch (swap) {
+                .flip_discard => c.DXGI_SWAP_EFFECT_FLIP_DISCARD,
+                .flip_sequential => c.DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+                .discard => c.DXGI_SWAP_EFFECT_DISCARD,
+            },
+            .AlphaMode = c.DXGI_ALPHA_MODE_UNSPECIFIED,
+            .Flags = flags,
+        };
+        var chain: ?*c.IDXGISwapChain1 = null;
+        if (factory.?.lpVtbl.*.CreateSwapChainForHwnd.?(factory.?, @ptrCast(device), window, &description, null, null, &chain) >= 0) {
+            return .{ .chain = chain.?, .swap = swap, .flags = flags };
+        }
+    }
+    return error.NoSwapChain;
 }
 
 fn release(object: anytype) void {

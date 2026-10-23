@@ -55,16 +55,16 @@ pub const atlas = @import("render/atlas.zig");
 pub const gles3 = if (@import("build_options").gpu_scene) @import("render/gles3.zig") else struct {
     pub const available = false;
 };
-/// The native path's GPU drawing on Windows: the command list on Direct3D 11 and its text
-/// (DirectWrite into the atlas). Only in a native build for Windows.
-pub const d3d11 = if (@import("builtin").os.tag == .windows and @import("build_options").native_render) struct {
+/// The native path's GPU drawing on Windows: the command list on Direct3D 11 or OpenGL 3.3
+/// (`render/gpu/windows_gpu.zig` picks; `LEPTON_GPU` forces) and its text (DirectWrite into
+/// the atlas). Only in a native build for Windows.
+pub const windowsGpu = if (@import("builtin").os.tag == .windows and @import("build_options").native_render) struct {
     pub const available = true;
-    pub const Renderer = @import("render/gpu/d3d11.zig").Renderer;
+    pub const Renderer = @import("render/gpu/windows_gpu.zig").Renderer;
     pub const glyph_text = @import("render/glyph_text_windows.zig");
     /// False when `LEPTON_GPU=cpu`: the CPU path, to test it or to compare with it.
     pub fn wanted() bool {
-        const choice = std.c.getenv("LEPTON_GPU") orelse return true;
-        return !std.mem.eql(u8, std.mem.span(choice), "cpu");
+        return @import("render/gpu/windows_gpu.zig").choice() != .cpu;
     }
 } else struct {
     pub const available = false;

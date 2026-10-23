@@ -20,4 +20,5 @@ test {
     _ = @import("render/webview/invoke.zig");
     _ = @import("render/webview/registry.zig");
     _ = @import("render/webview/events.zig");
+    _ = @import("render/gpu/windows_gpu.zig");
 }

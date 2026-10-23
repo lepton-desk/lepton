@@ -32,14 +32,14 @@ fn ticks() i64 {
     return now.QuadPart;
 }
 
-fn frequency() i64 {
+pub fn frequency() i64 {
     var value: c.LARGE_INTEGER = undefined;
     _ = c.QueryPerformanceFrequency(&value);
     return value.QuadPart;
 }
 
 /// The process's user and kernel time, microseconds.
-fn processorUs() i64 {
+pub fn processorUs() i64 {
     var created: c.FILETIME = undefined;
     var exited: c.FILETIME = undefined;
     var kernel: c.FILETIME = undefined;
@@ -51,7 +51,7 @@ fn processorUs() i64 {
 }
 
 /// The scene `tools/scene_check.zig` draws, moved a pixel a frame so no frame repeats.
-fn cards(list: *scene.List, allocator: std.mem.Allocator, frame: usize) !void {
+pub fn cards(list: *scene.List, allocator: std.mem.Allocator, frame: usize) !void {
     list.clear();
     try list.rect(allocator, .{ .x = 0, .y = 0, .width = width, .height = 48 }, .{ .fill = scene.rgba(0x2b2d42ff) });
     const columns = 40;
@@ -84,6 +84,7 @@ pub fn measure(allocator: std.mem.Allocator, pacing: d3d11.Pacing) !Result {
     var renderer = try d3d11.Renderer.open(w.hwnd, size.width, size.height, pacing);
     defer renderer.deinit();
     w.setFrameWait(renderer.frameWait());
+    w.setPresentPaces(renderer.pacesItself());
 
     var glyphs = try atlas.Atlas.init(allocator);
     defer glyphs.deinit(allocator);

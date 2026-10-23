@@ -6,3 +6,4 @@
 zig/webview2/WebView2.h -text
 # Compiled shaders (tools/d3d11-shaders.mjs): bytes, never line endings.
 *.dxbc binary
+*.spv binary

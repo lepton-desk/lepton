@@ -53,10 +53,18 @@ pub const NativeWindow = struct {
     frame_wait: ?c.HANDLE = null,
     /// `unlimited`: `wait` only handles what is queued, and the next frame starts at once.
     pacing: layer.Pacing = .display,
+    /// The GPU path's present waits for the display itself (`Renderer.pacesItself`): `wait`
+    /// then only handles what is queued, or frames would wait twice.
+    present_paces: bool = false,
 
     /// Paces `wait` by the swap chain's frame-latency object (null: the timer again).
     pub fn setFrameWait(self: *NativeWindow, handle: ?*anyopaque) void {
         self.frame_wait = handle;
+    }
+
+    /// Whether the present paces the frames (`present_paces`).
+    pub fn setPresentPaces(self: *NativeWindow, paces: bool) void {
+        self.present_paces = paces;
     }
 
     /// Opens the window in place: `self` is the owner the window procedure reaches, so it
@@ -120,7 +128,8 @@ pub const NativeWindow = struct {
         // Unlimited: a frame period is no reason to sleep; only "forever" (nothing to draw)
         // still blocks. The GPU path keeps waiting on its swap chain, which then signals
         // when the GPU has room for a frame rather than at the refresh.
-        const timeout_ms = if (self.pacing == .unlimited and requested_ms > 0 and self.frame_wait == null) 0 else requested_ms;
+        const free = (self.pacing == .unlimited and self.frame_wait == null) or self.present_paces;
+        const timeout_ms = if (free and requested_ms > 0) 0 else requested_ms;
         // The CPU path at the display's refresh: `DwmFlush` returns once the compositor has
         // shown the next frame — 16.4–16.7 ms on a 60 Hz screen after a frame, idle and
         // minimised alike, never at once and never stuck (`win32-window-check`, measured).

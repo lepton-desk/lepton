@@ -16,6 +16,8 @@ on:
       - "crates/**"
       - "packages/api/**"
       - "tools/ci/windows/**"
+      - "tools/d3d11-shaders.mjs"
+      - "tools/vulkan-shaders.mjs"
       - ".github/workflows/windows.yml"
   workflow_dispatch:
 
@@ -39,10 +41,22 @@ jobs:
       - name: Shaders match their source
         run: node tools/d3d11-shaders.mjs --check
 
+      # The Vulkan backend's SPIR-V, compiled again with the glslang release it was made
+      # with (16.6.0: another version may emit other bytes), checked against its digest.
+      - name: Vulkan shaders match their source
+        run: |
+          $zip = "$env:RUNNER_TEMP\glslang.zip"
+          Invoke-WebRequest -Uri https://github.com/KhronosGroup/glslang/releases/download/16.6.0/glslang-16.6.0-windows-x86_64-release.zip -OutFile $zip
+          $digest = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($digest -ne "82bf434e69b9bb4829de7e2b4bc2c5e7a7861e53d66cf75e5cc70f5f694a8d9b") { throw "glslang digest $digest" }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\glslang"
+          $env:GLSLANG = "$env:RUNNER_TEMP\glslang\bin\glslang.exe"
+          node tools/vulkan-shaders.mjs --check
+
       # The native path's GPU half: a Direct3D 11 device and swap chain on the native window,
       # the draw command list read back from the screen. The runner has no GPU of its own;
       # what it does have is measured, not assumed.
-      - name: Direct3D 11
+      - name: GPU backends (Direct3D 11, OpenGL 3.3, Vulkan)
         if: ${{ !cancelled() }}
         working-directory: zig
         run: |

@@ -285,7 +285,7 @@ const Translated = struct { key: []const u8, module: *std.Build.Module };
 var translated: std.ArrayList(Translated) = .empty;
 
 /// The libraries whose `pkg-config --cflags` each header needs, and whether it reads the
-/// generated protocol headers or a vendored header directory (`servo`, `webview2`).
+/// generated protocol headers or vendored header directories (`servo`, `webview2`, `vulkan`).
 const header_needs = .{
     .{ "c_cairo", .{"cairo"}, "" },
     .{ "c_glyph", .{ "freetype2", "harfbuzz", "fontconfig" }, "" },
@@ -304,7 +304,7 @@ const header_needs = .{
     .{ "c_shm_posix", .{}, "" },
     .{ "c_process", .{}, "" },
     .{ "c_win_dialog", .{}, "" },
-    .{ "c_windows", .{}, "webview2" },
+    .{ "c_windows", .{}, "webview2,vulkan" },
     .{ "c_win_text", .{}, "" },
     .{ "c_webview2_check", .{}, "webview2" },
 };
@@ -337,7 +337,9 @@ pub fn addCModules(b: *std.Build, module: *std.Build.Module, headers: CHeaders, 
                             step.step.dependOn(generated.step);
                         }
                     } else if (comptime need[2].len > 0) {
-                        step.addIncludePath(b.path(b.pathJoin(&.{ headers.root, need[2] })));
+                        // Vendored directories, comma-separated (`c_windows` reads two).
+                        var dirs = std.mem.splitScalar(u8, need[2], ',');
+                        while (dirs.next()) |dir| step.addIncludePath(b.path(b.pathJoin(&.{ headers.root, dir })));
                     }
                 }
             }

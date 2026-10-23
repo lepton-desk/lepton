@@ -42,4 +42,19 @@
 #if __has_include(<dxgi1_5.h>)
 #include <dxgi1_5.h>
 #endif
+/* The OpenGL 3.3 backend (`render/gpu/gl33.zig`): core-profile names and WGL's context
+   creation. Function pointers only (no prototypes): opengl32.dll exports GL 1.1 alone,
+   the rest is asked for with `wglGetProcAddress`. */
+#if __has_include(<GL/glcorearb.h>)
+#include <GL/glcorearb.h>
+#include <GL/wglext.h>
+#endif
+/* The Vulkan backend (`render/gpu/vulkan.zig`), from Khronos's headers in `zig/vulkan/`:
+   no prototypes, every function is loaded from vulkan-1.dll at run time (no import
+   library is needed, and a machine without Vulkan still starts). */
+#if __has_include(<vulkan/vulkan.h>)
+#define VK_NO_PROTOTYPES 1
+#define VK_USE_PLATFORM_WIN32_KHR 1
+#include <vulkan/vulkan.h>
+#endif
 #endif

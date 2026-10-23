@@ -29,12 +29,12 @@ const levels = [_]c.D3D_FEATURE_LEVEL{ c.D3D_FEATURE_LEVEL_11_1, c.D3D_FEATURE_L
 
 var failed = false;
 
-fn expect(ok: bool, comptime label: []const u8, comptime format: []const u8, args: anytype) void {
+pub fn expect(ok: bool, comptime label: []const u8, comptime format: []const u8, args: anytype) void {
     if (!ok) failed = true;
     std.debug.print("{s} {s:<14} " ++ format ++ "\n", .{ if (ok) "ok  " else "FAIL", label } ++ args);
 }
 
-fn fact(comptime label: []const u8, comptime format: []const u8, args: anytype) void {
+pub fn fact(comptime label: []const u8, comptime format: []const u8, args: anytype) void {
     std.debug.print("     {s:<14} " ++ format ++ "\n", .{label} ++ args);
 }
 
@@ -80,7 +80,7 @@ fn levelName(level: c.D3D_FEATURE_LEVEL) []const u8 {
 /// covered, the colour is `covered_point`, and the check fails saying so rather than reporting
 /// another window's pixel as this one's (a run once read #2073ab for #2180bf, and two
 /// reruns read #2180bf).
-fn screenAt(hwnd: c.HWND, x: i32, y: i32) u32 {
+pub fn screenAt(hwnd: c.HWND, x: i32, y: i32) u32 {
     var point: c.POINT = .{ .x = x, .y = y };
     _ = c.ClientToScreen(hwnd, &point);
     if (c.WindowFromPoint(point) != hwnd) {
@@ -136,7 +136,7 @@ fn screenRegion(hwnd: c.HWND, comptime w: usize, comptime h: usize, out: *[h][w]
 /// What `screenAt` answers for a point another window covers: no 24-bit colour is this.
 const covered_point: u32 = 0xC0FFEE00;
 
-fn ticks() i64 {
+pub fn ticks() i64 {
     var now: c.LARGE_INTEGER = undefined;
     _ = c.QueryPerformanceCounter(&now);
     return now.QuadPart;
@@ -146,6 +146,9 @@ pub fn main() !void {
     try rawSwapChain();
     try sceneOnWindow();
     try uncapped();
+    try swapModels();
+    try @import("windows_gl_check.zig").run();
+    try @import("windows_vulkan_check.zig").run();
     if (failed) std.process.exit(1);
     std.debug.print("all checks passed\n", .{});
 }
@@ -167,6 +170,7 @@ fn sceneOnWindow() !void {
     };
     defer renderer.deinit();
     w.setFrameWait(renderer.frameWait());
+    w.setPresentPaces(renderer.pacesItself());
     expect(renderer.frameWait() != null, "renderer", "level {s}, frame-latency object {s}", .{ levelName(renderer.level), if (renderer.frameWait() != null) "yes" else "no" });
 
     var glyphs = try atlas.Atlas.init(allocator);
@@ -370,7 +374,7 @@ fn rawSwapChain() !void {
 }
 
 /// The display's refresh rate, Hz; 0 when Windows does not say.
-fn displayHz() i64 {
+pub fn displayHz() i64 {
     var mode: c.DEVMODEW = std.mem.zeroes(c.DEVMODEW);
     mode.dmSize = @sizeOf(c.DEVMODEW);
     return if (c.EnumDisplaySettingsW(null, c.ENUM_CURRENT_SETTINGS, &mode) != 0) mode.dmDisplayFrequency else 0;
@@ -392,4 +396,48 @@ fn uncapped() !void {
         return;
     };
     expect(free.per_second > paced.per_second, "unlimited", "2001 shapes, {d}/s, CPU {d} us/frame, GPU {d} us/frame, tearing {s}", .{ free.per_second, free.cpu_us, free.gpu_us, if (free.tearing) "yes" else "no" });
+}
+
+/// Each swap model the renderer falls back through (`d3d11.Swap`), forced in turn: the
+/// older systems' paths (Windows 8's flip-sequential, Windows 7's blt model) measured on
+/// this one — accepted, drawn on the screen, and paced at the display's refresh.
+fn swapModels() !void {
+    const allocator = std.heap.page_allocator;
+    const refresh = displayHz();
+    var frequency: c.LARGE_INTEGER = undefined;
+    _ = c.QueryPerformanceFrequency(&frequency);
+    for (std.enums.values(d3d11.Swap)) |model| {
+        var w: native.NativeWindow = undefined;
+        try w.open(.{ .title = "lepton d3d11 swap model", .size = .{ .width = 320, .height = 240 } });
+        defer w.close();
+        rate.onTop(@ptrCast(w.hwnd));
+        const size = (w.takeConfigure() orelse return error.NoConfigure).size;
+        var renderer = d3d11.Renderer.openWith(w.hwnd, size.width, size.height, .display, model) catch |err| {
+            expect(false, "swap model", "{t}: {t}", .{ model, err });
+            continue;
+        };
+        defer renderer.deinit();
+        w.setFrameWait(renderer.frameWait());
+        w.setPresentPaces(renderer.pacesItself());
+        var glyphs = try atlas.Atlas.init(allocator);
+        defer glyphs.deinit(allocator);
+        var list: scene.List = .{};
+        defer list.deinit(allocator);
+        try list.rect(allocator, .{ .x = 0, .y = 0, .width = 320, .height = 240 }, .{ .fill = scene.rgba(0x3090c0ff) });
+        const at: d3d11.Renderer.Size = .{ .width = size.width, .height = size.height };
+        for (0..20) |_| {
+            try renderer.draw(&list, &glyphs, scene.rgba(0x000000ff), at);
+            try w.wait(16);
+        }
+        const frames = 60;
+        const started = ticks();
+        for (0..frames) |_| {
+            try renderer.draw(&list, &glyphs, scene.rgba(0x000000ff), at);
+            try w.wait(16);
+        }
+        const per_second = @divTrunc(@as(i64, frames) * frequency.QuadPart, @max(ticks() - started, 1));
+        const shown = screenAt(@ptrCast(w.hwnd), @intCast(size.width / 2), @intCast(size.height / 2));
+        const paced = refresh == 0 or @abs(per_second - refresh) <= 3;
+        expect(renderer.swap == model and shown == 0x3090c0 and paced, "swap model", "{t}: made {t}, #{x:0>6} on screen, {d}/s, frame-latency object {s}", .{ model, renderer.swap, shown, per_second, if (renderer.frameWait() != null) "yes" else "no" });
+    }
 }

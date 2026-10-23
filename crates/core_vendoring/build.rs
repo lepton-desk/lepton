@@ -11,8 +11,8 @@
 //!
 //! ## What is carried
 //!
-//! Five roots: the build file, `src`, `protocols`, `webview2` (Microsoft's header) and
-//! `servo` (the Servo bridge's header). Anything else in the core's
+//! Six roots: the build file, `src`, `protocols`, `webview2` (Microsoft's header), `vulkan`
+//! (Khronos's headers) and `servo` (the Servo bridge's header). Anything else in the core's
 //! directory is a build artefact or an editor's scratch file, and shipping one would
 //! mean every project's vendor directory grows with the size of the repository's
 //! cache.
@@ -47,6 +47,9 @@ const ROOTS: &[(&str, Root)] = &[
     // Microsoft's WebView2 header and its licence: the Windows webview path compiles
     // against it (`src/render/webview/webview2/c.zig`).
     ("webview2", Root::Tree),
+    // Khronos's Vulkan headers: the Windows Vulkan renderer compiles against them (Linux
+    // reads the system's, `src/c/c_vulkan_windows.h`).
+    ("vulkan", Root::Tree),
     // The Servo bridge's C ABI, imported by the experimental Servo engine
     // (`src/render/webview/servo/c.zig`) when a project builds with `-Dservo-lib`.
     ("servo", Root::Tree),
