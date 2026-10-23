@@ -3,6 +3,9 @@
 //!
 //! - `window.decorations: false` → `-Dwindow-decorations=false`: no title bar, the page
 //!   draws its own (Windows; ignored where the engine cannot hide it).
+//! - `window.frameRate: "unlimited"` → `-Dframe-rate=unlimited`: the native path draws as
+//!   fast as the machine can instead of at the display's refresh (`"display"`, the default).
+//!   `LEPTON_FRAME_RATE` overrides it when the program runs.
 //! - `bundle.icon` → `-Dicon=<path>`: the Windows program's icon — its title bar, taskbar
 //!   button and Explorer icon. Without it, Lepton's own (written into the build cache).
 //!
@@ -21,6 +24,8 @@ use lepton_orchestrator::Step;
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Shape {
     pub decorated: bool,
+    /// `window.frameRate` is `"unlimited"`.
+    pub unlimited: bool,
     /// The project's `.ico`, absolute.
     pub icon: Option<std::path::PathBuf>,
 }
@@ -42,10 +47,24 @@ pub fn read(root: &Path, text: &str) -> Result<Shape, CliError> {
             ));
         }
     };
+    let unlimited = match config
+        .get("window")
+        .and_then(|window| window.get("frameRate"))
+    {
+        None => false,
+        Some(Value::String(value)) if value == "display" => false,
+        Some(Value::String(value)) if value == "unlimited" => true,
+        Some(_) => {
+            return Err(CliError::Invalid(
+                "\"window.frameRate\" must be \"display\" or \"unlimited\"".to_owned(),
+            ));
+        }
+    };
     let bundle = lepton_template_injector::parse_bundle(text)
         .map_err(|error| CliError::Invalid(error.reason))?;
     Ok(Shape {
         decorated,
+        unlimited,
         icon: bundle.icon.map(|icon| root.join(icon)),
     })
 }
@@ -66,6 +85,15 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
         } else {
             eprintln!(
                 "lepton: src-lepton/build.zig predates window.decorations; the window keeps its title bar (recreate the project with a current `lepton new`)"
+            );
+        }
+    }
+    if shape.unlimited {
+        if build.contains("\"frame-rate\"") {
+            args.push("-Dframe-rate=unlimited".to_owned());
+        } else {
+            eprintln!(
+                "lepton: src-lepton/build.zig predates window.frameRate; frames stay at the display's refresh (recreate the project with a current `lepton new`)"
             );
         }
     }
@@ -114,6 +142,7 @@ mod tests {
             assert_ok!(read(root, "{}"), "an empty configuration"),
             Shape {
                 decorated: true,
+                unlimited: false,
                 icon: None
             }
         );
@@ -129,6 +158,30 @@ mod tests {
         assert_err!(
             read(root, r#"{"window":{"decorations":"no"}}"#),
             "a string is not a boolean"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn frames_follow_the_display_unless_unlimited_is_asked_for() -> Result<(), Failure> {
+        let root = Path::new("project");
+        let read_rate = |text: &str| read(root, text).map(|shape| shape.unlimited);
+        assert_eq!(assert_ok!(read_rate("{}"), "absent"), false);
+        assert_eq!(
+            assert_ok!(read_rate(r#"{"window":{"frameRate":"display"}}"#), "display"),
+            false
+        );
+        assert_eq!(
+            assert_ok!(read_rate(r#"{"window":{"frameRate":"unlimited"}}"#), "unlimited"),
+            true
+        );
+        assert_err!(
+            read_rate(r#"{"window":{"frameRate":144}}"#),
+            "a number is not a pacing"
+        );
+        assert_err!(
+            read_rate(r#"{"window":{"frameRate":"fast"}}"#),
+            "an unknown name is refused"
         );
         Ok(())
     }

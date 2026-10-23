@@ -434,6 +434,8 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
         .size = configuredSize(),
         // The masthead's colour (`Palette.rail`): the system title bar takes it (Windows).
         .title_colour = .{{ 0x1b, 0x20, 0x26 }},
+        // `lepton.config.json`'s `window.frameRate` (`-Dframe-rate`), or `LEPTON_FRAME_RATE`.
+        .pacing = core.window.Pacing.chosen(comptime std.meta.stringToEnum(core.window.Pacing, @import("build_options").frame_rate) orelse .display),
     }};
 
     var opened = try openWindow(allocator, request);
@@ -483,6 +485,7 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
     std.debug.print("render       native, no engine\n", .{{}});
     std.debug.print("requested    {{d}}x{{d}}\n", .{{ request.size.width, request.size.height }});
     std.debug.print("channel      {{s}}\n", .{{"{channel}"}});
+    std.debug.print("frames       {{t}}\n", .{{request.pacing}});
 
     var frames: u32 = 0;
     while (!core.termination.requested()) {{
@@ -693,7 +696,7 @@ const WinGpuScreen = if (core.d3d11.available) struct {{
     list: core.scene.List = .{{}},
 
     fn init(allocator: std.mem.Allocator, window: *core.window.win32.NativeWindow) !@This() {{
-        var renderer = try core.d3d11.Renderer.open(window.hwnd, window.size.width, window.size.height);
+        var renderer = try core.d3d11.Renderer.open(window.hwnd, window.size.width, window.size.height, window.pacing);
         errdefer renderer.deinit();
         var heading = try core.d3d11.glyph_text.Font.open(allocator, "sans", 20, 0);
         errdefer heading.deinit();

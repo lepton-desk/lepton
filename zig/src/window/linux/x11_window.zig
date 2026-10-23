@@ -61,6 +61,8 @@ pub const X11Window = struct {
     graphics: xcb.xcb_gcontext_t = 0,
     /// The size the server last reported through a configure event.
     size: Size = .{ .width = 0, .height = 0 },
+    /// `unlimited`: `wait` sleeps for no frame period (`window.Pacing`).
+    pacing: window.Pacing = .display,
     /// The root visual's depth, which every window created on it inherits and which
     /// an image must match to be accepted.
     root_depth: u8 = 24,
@@ -180,6 +182,7 @@ pub const X11Window = struct {
             .window_id = window_id,
             .graphics = graphics,
             .size = request.size,
+            .pacing = request.pacing,
             // From the server's own setup rather than a constant: see `min_keycode`.
             .min_keycode = setup.*.min_keycode,
             // Read from the screen rather than assumed: a server with a depth-30 or
@@ -478,7 +481,9 @@ pub const X11Window = struct {
     /// The timeout is honoured by polling the connection's file descriptor rather
     /// than by blocking in the library, so a caller that has work of its own does
     /// not have to choose between the two.
-    pub fn wait(self: *X11Window, timeout_ms: i32) Error!void {
+    pub fn wait(self: *X11Window, requested_ms: i32) Error!void {
+        // Unlimited: a frame period is no reason to sleep; only "forever" still blocks.
+        const timeout_ms = if (self.pacing == .unlimited and requested_ms > 0) 0 else requested_ms;
         const fd: posix.fd_t = @intCast(xcb.xcb_get_file_descriptor(self.conn));
         var fds = [_]posix.pollfd{
             .{ .fd = fd, .events = posix.POLL.IN, .revents = 0 },

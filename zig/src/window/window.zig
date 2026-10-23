@@ -276,6 +276,24 @@ pub const Request = struct {
     /// draws (Windows): dark or light to match on Windows 10, this colour on Windows 11.
     /// Null keeps the system's. Linux's native windows draw their own bar and ignore it.
     title_colour: ?[3]u8 = null,
+    /// How often frames are drawn (`Pacing`).
+    pacing: Pacing = .display,
+};
+
+/// How often the native path draws a frame. `display` follows the screen's refresh (every
+/// frame drawn is shown); `unlimited` draws as fast as the machine can, for those who want
+/// the number — frames the screen cannot show are dropped or torn, and the CPU or GPU runs
+/// flat out. Chosen in `lepton.config.json` (`window.frameRate`), overridden at run time by
+/// `LEPTON_FRAME_RATE=display|unlimited` (`Pacing.chosen`).
+pub const Pacing = enum {
+    display,
+    unlimited,
+
+    /// `built` unless `LEPTON_FRAME_RATE` names the other one; an unknown value keeps `built`.
+    pub fn chosen(built: Pacing) Pacing {
+        const name = std.c.getenv("LEPTON_FRAME_RATE") orelse return built;
+        return std.meta.stringToEnum(Pacing, std.mem.span(name)) orelse built;
+    }
 };
 
 test {

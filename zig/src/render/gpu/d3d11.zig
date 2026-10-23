@@ -7,7 +7,8 @@
 //! Frames are paced by the swap chain itself: it is made with a frame-latency waitable
 //! object (DXGI 1.3, Windows 8.1+), signalled when the next frame may be drawn — at the
 //! display's refresh. `frameWait` hands it to the window, whose `wait` sleeps on it with
-//! messages still handled.
+//! messages still handled. With `unlimited` pacing (`window.Pacing`) presents carry no sync
+//! interval and tear where DXGI allows it; the object then signals when the GPU has room.
 
 const std = @import("std");
 const scene = @import("../scene.zig");
@@ -28,7 +29,10 @@ const iid_texture2d: c.GUID = .{ .Data1 = 0x6f15aaf2, .Data2 = 0xd208, .Data3 = 
 /// From the highest down to 10_0, the floor the shaders are compiled for (shader model 4.0).
 const levels = [_]c.D3D_FEATURE_LEVEL{ c.D3D_FEATURE_LEVEL_11_1, c.D3D_FEATURE_LEVEL_11_0, c.D3D_FEATURE_LEVEL_10_1, c.D3D_FEATURE_LEVEL_10_0 };
 
-const swap_flags: c.UINT = c.DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+const latency_flag: c.UINT = c.DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+const iid_dxgi_factory5: c.GUID = .{ .Data1 = 0x7632e1f5, .Data2 = 0xee65, .Data3 = 0x4dca, .Data4 = .{ 0x87, 0xfd, 0x84, 0xcd, 0x75, 0xf8, 0x83, 0x8d } };
+
+pub const Pacing = @import("../../window/window.zig").Pacing;
 
 pub const Renderer = struct {
     device: *c.ID3D11Device,
@@ -50,6 +54,10 @@ pub const Renderer = struct {
     atlas_texture: *c.ID3D11Texture2D,
     atlas_view: *c.ID3D11ShaderResourceView,
     level: c.D3D_FEATURE_LEVEL,
+    pacing: Pacing,
+    /// Unlimited frames on a system that lets a windowed flip-model chain tear: presents are
+    /// shown the moment they are made, instead of the next composition taking the newest.
+    tearing: bool,
     width: u32,
     height: u32,
     /// Bytes handed to the GPU by `draw`, all frames: the instances, and the atlas regions
@@ -57,8 +65,9 @@ pub const Renderer = struct {
     uploaded: u64 = 0,
 
     /// A device on the default adapter and a swap chain on `window`, `width` × `height`
-    /// physical pixels. Any refusal is an error, and the caller draws on the CPU instead.
-    pub fn open(window: c.HWND, width: u32, height: u32) Error!Renderer {
+    /// physical pixels, paced by `pacing`. Any refusal is an error, and the caller draws on the
+    /// CPU instead.
+    pub fn open(window: c.HWND, width: u32, height: u32, pacing: Pacing) Error!Renderer {
         var device: ?*c.ID3D11Device = null;
         var context: ?*c.ID3D11DeviceContext = null;
         var level: c.D3D_FEATURE_LEVEL = 0;
@@ -70,7 +79,8 @@ pub const Renderer = struct {
         errdefer release(device);
         errdefer release(context);
 
-        const chain = try swapChain(device.?, window, width, height);
+        const tearing = pacing == .unlimited and allowsTearing(device.?);
+        const chain = try swapChain(device.?, window, width, height, swapFlags(tearing));
         errdefer release(chain);
         var latency: c.HANDLE = null;
         var chain2: ?*c.IDXGISwapChain2 = null;
@@ -95,6 +105,8 @@ pub const Renderer = struct {
             .atlas_texture = undefined,
             .atlas_view = undefined,
             .level = level,
+            .pacing = pacing,
+            .tearing = tearing,
             .width = width,
             .height = height,
         };
@@ -130,6 +142,13 @@ pub const Renderer = struct {
 
     /// Draws `list` over `clear` at `size` and presents it, synchronised to the display.
     pub fn draw(self: *Renderer, list: *const scene.List, glyphs: *atlas.Atlas, clear: [4]f32, size: Size) Error!void {
+        try self.record(list, glyphs, clear, size);
+        try self.present();
+    }
+
+    /// `draw` up to the present: the frame's commands, queued. Apart so a measurement can
+    /// time the drawing without the present's wait for the display (`tools/windows_gpu_rate.zig`).
+    pub fn record(self: *Renderer, list: *const scene.List, glyphs: *atlas.Atlas, clear: [4]f32, size: Size) Error!void {
         if (size.width != self.width or size.height != self.height) try self.resize(size);
         self.syncAtlas(glyphs);
 
@@ -163,7 +182,16 @@ pub const Renderer = struct {
             context.lpVtbl.*.RSSetState.?(context, self.raster);
             context.lpVtbl.*.DrawInstanced.?(context, 4, @intCast(list.instances.items.len), 0, 0);
         }
-        const presented = self.chain.lpVtbl.*.Present.?(self.chain, 1, 0);
+    }
+
+    /// Shows the frame `record` queued, as `pacing` says.
+    pub fn present(self: *Renderer) Error!void {
+        // Unlimited: no sync interval, so a present waits for no refresh; the window still waits
+        // on the frame-latency object, which now signals when the GPU has room for a frame.
+        const presented = switch (self.pacing) {
+            .display => self.chain.lpVtbl.*.Present.?(self.chain, 1, 0),
+            .unlimited => self.chain.lpVtbl.*.Present.?(self.chain, 0, if (self.tearing) c.DXGI_PRESENT_ALLOW_TEARING else 0),
+        };
         if (presented == c.DXGI_ERROR_DEVICE_REMOVED or presented == c.DXGI_ERROR_DEVICE_RESET) return error.DeviceLost;
         if (presented < 0) return error.DeviceLost;
     }
@@ -175,7 +203,7 @@ pub const Renderer = struct {
         self.context.lpVtbl.*.OMSetRenderTargets.?(self.context, 0, null, null);
         release(self.target);
         self.target = null;
-        if (self.chain.lpVtbl.*.ResizeBuffers.?(self.chain, 0, size.width, size.height, c.DXGI_FORMAT_UNKNOWN, swap_flags) < 0) return error.NoSwapChain;
+        if (self.chain.lpVtbl.*.ResizeBuffers.?(self.chain, 0, size.width, size.height, c.DXGI_FORMAT_UNKNOWN, swapFlags(self.tearing)) < 0) return error.NoSwapChain;
         self.width = size.width;
         self.height = size.height;
         try self.makeTarget();
@@ -316,8 +344,31 @@ fn element(comptime semantic: [*:0]const u8, offset: usize) c.D3D11_INPUT_ELEMEN
     };
 }
 
+/// The swap chain's flags: always the frame-latency object, tearing when it was granted.
+fn swapFlags(tearing: bool) c.UINT {
+    return latency_flag | if (tearing) @as(c.UINT, @intCast(c.DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING)) else 0;
+}
+
+/// Whether the device's DXGI lets a windowed flip-model swap chain tear (Windows 10 1607+,
+/// a driver and display that allow it). Without it, unlimited presents still run free and
+/// the compositor shows the newest at each refresh.
+fn allowsTearing(device: *c.ID3D11Device) bool {
+    var dxgi_device: ?*c.IDXGIDevice = null;
+    if (device.lpVtbl.*.QueryInterface.?(device, &iid_dxgi_device, @ptrCast(&dxgi_device)) < 0) return false;
+    defer release(dxgi_device);
+    var adapter: ?*c.IDXGIAdapter = null;
+    if (dxgi_device.?.lpVtbl.*.GetAdapter.?(dxgi_device.?, &adapter) < 0) return false;
+    defer release(adapter);
+    var factory: ?*c.IDXGIFactory5 = null;
+    if (adapter.?.lpVtbl.*.GetParent.?(adapter.?, &iid_dxgi_factory5, @ptrCast(&factory)) < 0) return false;
+    defer release(factory);
+    var allowed: c.BOOL = c.FALSE;
+    if (factory.?.lpVtbl.*.CheckFeatureSupport.?(factory.?, c.DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowed, @sizeOf(c.BOOL)) < 0) return false;
+    return allowed != c.FALSE;
+}
+
 /// A flip-model swap chain on `window` from the device's own adapter's factory.
-fn swapChain(device: *c.ID3D11Device, window: c.HWND, width: u32, height: u32) Error!*c.IDXGISwapChain1 {
+fn swapChain(device: *c.ID3D11Device, window: c.HWND, width: u32, height: u32, flags: c.UINT) Error!*c.IDXGISwapChain1 {
     var dxgi_device: ?*c.IDXGIDevice = null;
     if (device.lpVtbl.*.QueryInterface.?(device, &iid_dxgi_device, @ptrCast(&dxgi_device)) < 0) return error.NoFactory;
     defer release(dxgi_device);
@@ -338,7 +389,7 @@ fn swapChain(device: *c.ID3D11Device, window: c.HWND, width: u32, height: u32) E
         .Scaling = c.DXGI_SCALING_STRETCH,
         .SwapEffect = c.DXGI_SWAP_EFFECT_FLIP_DISCARD,
         .AlphaMode = c.DXGI_ALPHA_MODE_UNSPECIFIED,
-        .Flags = swap_flags,
+        .Flags = flags,
     };
     var chain: ?*c.IDXGISwapChain1 = null;
     if (factory.?.lpVtbl.*.CreateSwapChainForHwnd.?(factory.?, @ptrCast(device), window, &description, null, null, &chain) < 0) return error.NoSwapChain;

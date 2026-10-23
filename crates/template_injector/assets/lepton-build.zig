@@ -75,6 +75,8 @@ pub fn build(b: *std.Build) !void {
     const window_height = b.option(u32, "window-height", "Initial window height") orelse 800;
     // `window.decorations: false`: no title bar, the page draws its own (Windows).
     const window_decorations = b.option(bool, "window-decorations", "Draw the system title bar (default: true)") orelse true;
+    // `window.frameRate`: `display` (the screen's refresh) or `unlimited` (native path).
+    const frame_rate = b.option(enum { display, unlimited }, "frame-rate", "Native frames: display (default) or unlimited") orelse .display;
     // The Windows program's icon (`.ico`): `bundle.icon`, or Lepton's own, named by the CLI.
     const icon = b.option([]const u8, "icon", "The program's icon, an .ico file (Windows)");
 
@@ -103,6 +105,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(u32, "window_width", window_width);
     options.addOption(u32, "window_height", window_height);
     options.addOption(bool, "window_decorations", window_decorations);
+    options.addOption([]const u8, "frame_rate", @tagName(frame_rate));
 
     const root = b.createModule(.{
         .root_source_file = b.path("main.zig"),

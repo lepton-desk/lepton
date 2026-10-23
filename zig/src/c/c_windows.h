@@ -38,4 +38,8 @@
 #if __has_include(<dxgi1_3.h>)
 #include <dxgi1_3.h>
 #endif
+/* Tearing for unlimited frames (`IDXGIFactory5::CheckFeatureSupport`, Windows 10 1607+). */
+#if __has_include(<dxgi1_5.h>)
+#include <dxgi1_5.h>
+#endif
 #endif

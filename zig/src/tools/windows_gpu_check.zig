@@ -17,6 +17,7 @@ const d3d11 = core.d3d11;
 const scene = core.scene;
 const atlas = core.atlas;
 const glyph_text = core.glyph_text;
+const rate = @import("windows_gpu_rate.zig");
 const c = @import("c_windows");
 
 const iid_dxgi_device: c.GUID = .{ .Data1 = 0x54ec77fa, .Data2 = 0x1377, .Data3 = 0x44e6, .Data4 = .{ 0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c } };
@@ -83,7 +84,7 @@ fn screenAt(hwnd: c.HWND, x: i32, y: i32) u32 {
     var point: c.POINT = .{ .x = x, .y = y };
     _ = c.ClientToScreen(hwnd, &point);
     if (c.WindowFromPoint(point) != hwnd) {
-        _ = c.SetForegroundWindow(hwnd);
+        rate.onTop(hwnd);
         c.Sleep(300);
         if (c.WindowFromPoint(point) != hwnd) return covered_point;
     }
@@ -91,6 +92,45 @@ fn screenAt(hwnd: c.HWND, x: i32, y: i32) u32 {
     defer _ = c.ReleaseDC(null, dc);
     const colour: u32 = c.GetPixel(dc, point.x, point.y);
     return ((colour & 0xFF) << 16) | (colour & 0xFF00) | ((colour >> 16) & 0xFF);
+}
+
+/// The screen under a client rectangle, `0xRRGGBB` row by row, read with one `BitBlt`. The
+/// text check once read its 11 200 points with `screenAt`, which brings the window forward
+/// and sleeps 300 ms for each covered point: with the window behind another, it hung for
+/// most of an hour, and Windows swapped in its "Not Responding" ghost, which covered the
+/// rest (measured, every point `covered_point`). Here the window is brought forward once;
+/// points still covered are `covered_point`.
+fn screenRegion(hwnd: c.HWND, comptime w: usize, comptime h: usize, out: *[h][w]u32) !void {
+    var origin: c.POINT = .{ .x = 0, .y = 0 };
+    _ = c.ClientToScreen(hwnd, &origin);
+    var corner: c.POINT = .{ .x = origin.x + @as(i32, w) - 1, .y = origin.y + @as(i32, h) - 1 };
+    if (c.WindowFromPoint(origin) != hwnd or c.WindowFromPoint(corner) != hwnd) {
+        rate.onTop(hwnd);
+        c.Sleep(300);
+    }
+    const screen = c.GetDC(null) orelse return error.NoScreen;
+    defer _ = c.ReleaseDC(null, screen);
+    const memory = c.CreateCompatibleDC(screen) orelse return error.NoScreen;
+    defer _ = c.DeleteDC(memory);
+    var info = std.mem.zeroes(c.BITMAPINFO);
+    info.bmiHeader.biSize = @sizeOf(c.BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = @intCast(w);
+    info.bmiHeader.biHeight = -@as(i32, @intCast(h));
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = c.BI_RGB;
+    var bits: ?*anyopaque = null;
+    const bitmap = c.CreateDIBSection(memory, &info, c.DIB_RGB_COLORS, &bits, null, 0) orelse return error.NoScreen;
+    defer _ = c.DeleteObject(bitmap);
+    const previous = c.SelectObject(memory, bitmap);
+    defer _ = c.SelectObject(memory, previous);
+    if (c.BitBlt(memory, 0, 0, @intCast(w), @intCast(h), screen, origin.x, origin.y, c.SRCCOPY) == 0) return error.NoScreen;
+    const pixels: [*]const u32 = @ptrCast(@alignCast(bits.?));
+    for (0..h) |y| for (0..w) |x| {
+        corner = .{ .x = origin.x + @as(i32, @intCast(x)), .y = origin.y + @as(i32, @intCast(y)) };
+        // A DIB pixel is 0x00RRGGBB already (blue in the low byte).
+        out[y][x] = if (c.WindowFromPoint(corner) != hwnd) covered_point else pixels[y * w + x] & 0xFF_FFFF;
+    };
 }
 
 /// What `screenAt` answers for a point another window covers: no 24-bit colour is this.
@@ -105,6 +145,7 @@ fn ticks() i64 {
 pub fn main() !void {
     try rawSwapChain();
     try sceneOnWindow();
+    try uncapped();
     if (failed) std.process.exit(1);
     std.debug.print("all checks passed\n", .{});
 }
@@ -116,11 +157,11 @@ fn sceneOnWindow() !void {
     var w: native.NativeWindow = undefined;
     try w.open(.{ .title = "lepton d3d11 scene check", .size = .{ .width = 480, .height = 320 } });
     defer w.close();
-    _ = c.SetForegroundWindow(@ptrCast(w.hwnd));
+    rate.onTop(@ptrCast(w.hwnd));
     var size = (w.takeConfigure() orelse return error.NoConfigure).size;
     const hwnd: c.HWND = @ptrCast(w.hwnd);
 
-    var renderer = d3d11.Renderer.open(w.hwnd, size.width, size.height) catch |err| {
+    var renderer = d3d11.Renderer.open(w.hwnd, size.width, size.height, .display) catch |err| {
         expect(false, "renderer", "{t}", .{err});
         return;
     };
@@ -178,7 +219,8 @@ fn sceneOnWindow() !void {
     }
     const elapsed_ms = @divTrunc((ticks() - started) * 1000, frequency.QuadPart);
     const per_second = @divTrunc(@as(i64, frames) * 1000, @max(elapsed_ms, 1));
-    expect(per_second >= 57 and per_second <= 63, "paced", "{d} frames in {d} ms = {d}/s", .{ frames, elapsed_ms, per_second });
+    const refresh = displayHz();
+    expect(if (refresh == 0) per_second >= 57 and per_second <= 63 else @abs(per_second - refresh) <= 3, "paced", "{d} frames in {d} ms = {d}/s, display {d} Hz", .{ frames, elapsed_ms, per_second, refresh });
 
     // Text (`render/glyph_text_windows.zig`), as the GLES 3 test draws it: ink between the
     // pen's start and its advance, above the baseline down to the descender; none outside.
@@ -195,8 +237,10 @@ fn sceneOnWindow() !void {
     }
     var ink: usize = 0;
     var stray: usize = 0;
+    var region: [70][160]u32 = undefined;
+    try screenRegion(hwnd, 160, 70, &region);
     for (0..70) |y| for (0..160) |x| {
-        const shown = screenAt(hwnd, @intCast(x), @intCast(y));
+        const shown = region[y][x];
         const dark = shown != covered_point and (shown >> 16) < 128;
         const in_box = x >= 6 and x <= 6 + @as(usize, @intFromFloat(advance)) and y >= 40 - 20 and y <= 40 + 6;
         if (dark and in_box) ink += 1;
@@ -225,7 +269,7 @@ fn rawSwapChain() !void {
     var w: native.NativeWindow = undefined;
     try w.open(.{ .title = "lepton windows gpu check", .size = .{ .width = 480, .height = 320 } });
     defer w.close();
-    _ = c.SetForegroundWindow(@ptrCast(w.hwnd));
+    rate.onTop(@ptrCast(w.hwnd));
     const size = (w.takeConfigure() orelse return error.NoConfigure).size;
     const hwnd: c.HWND = @ptrCast(w.hwnd);
 
@@ -314,9 +358,7 @@ fn rawSwapChain() !void {
     }
     const elapsed_ms = @divTrunc((ticks() - started) * 1000, frequency.QuadPart);
     const per_second = @divTrunc(@as(i64, frames) * 1000, @max(elapsed_ms, 1));
-    var mode: c.DEVMODEW = std.mem.zeroes(c.DEVMODEW);
-    mode.dmSize = @sizeOf(c.DEVMODEW);
-    const refresh: i64 = if (c.EnumDisplaySettingsW(null, c.ENUM_CURRENT_SETTINGS, &mode) != 0) mode.dmDisplayFrequency else 0;
+    const refresh = displayHz();
     expect(refresh == 0 or @abs(per_second - refresh) <= 3, "vsync", "{d} presents in {d} ms = {d}/s, display {d} Hz", .{ frames, elapsed_ms, per_second, refresh });
 
     const warp = createDevice(c.D3D_DRIVER_TYPE_WARP);
@@ -325,4 +367,29 @@ fn rawSwapChain() !void {
         release(software.context);
         release(software.device);
     } else expect(false, "warp", "no WARP device", .{});
+}
+
+/// The display's refresh rate, Hz; 0 when Windows does not say.
+fn displayHz() i64 {
+    var mode: c.DEVMODEW = std.mem.zeroes(c.DEVMODEW);
+    mode.dmSize = @sizeOf(c.DEVMODEW);
+    return if (c.EnumDisplaySettingsW(null, c.ENUM_CURRENT_SETTINGS, &mode) != 0) mode.dmDisplayFrequency else 0;
+}
+
+/// Linux's 2001-shape scene, paced by the display and unlimited (`windows_gpu_rate.zig`).
+fn uncapped() !void {
+    const allocator = std.heap.page_allocator;
+    const paced = rate.measure(allocator, .display) catch |err| {
+        expect(false, "scene paced", "{t}", .{err});
+        return;
+    };
+    // No GPU time for the paced frames: their timeline holds the wait for a back buffer the
+    // display still shows (15.5 ms a frame, measured), not drawing. The drawing costs what
+    // the unlimited frames say.
+    fact("scene paced", "2001 shapes, {d}/s, CPU {d} us/frame", .{ paced.per_second, paced.cpu_us });
+    const free = rate.measure(allocator, .unlimited) catch |err| {
+        expect(false, "unlimited", "{t}", .{err});
+        return;
+    };
+    expect(free.per_second > paced.per_second, "unlimited", "2001 shapes, {d}/s, CPU {d} us/frame, GPU {d} us/frame, tearing {s}", .{ free.per_second, free.cpu_us, free.gpu_us, if (free.tearing) "yes" else "no" });
 }

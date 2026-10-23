@@ -51,6 +51,8 @@ pub const NativeWindow = struct {
     /// The GPU path's swap chain signal (`render/gpu/d3d11.zig`, `frameWait`): set, `wait`
     /// sleeps on it instead of the timer, and frames follow the display's refresh.
     frame_wait: ?c.HANDLE = null,
+    /// `unlimited`: `wait` only handles what is queued, and the next frame starts at once.
+    pacing: layer.Pacing = .display,
 
     /// Paces `wait` by the swap chain's frame-latency object (null: the timer again).
     pub fn setFrameWait(self: *NativeWindow, handle: ?*anyopaque) void {
@@ -72,6 +74,7 @@ pub const NativeWindow = struct {
                 .moved = &ignore,
             },
             .size = clientSize(hwnd),
+            .pacing = request.pacing,
             .timer = c.CreateWaitableTimerExW(null, null, create_waitable_timer_high_resolution, c.TIMER_ALL_ACCESS) orelse
                 c.CreateWaitableTimerExW(null, null, 0, c.TIMER_ALL_ACCESS),
         };
@@ -113,7 +116,20 @@ pub const NativeWindow = struct {
     /// Handles what Windows has queued, waiting up to `timeout_ms` (negative: forever) for
     /// something to arrive first. Messages already in the queue end the wait at once
     /// (`MWMO_INPUTAVAILABLE`).
-    pub fn wait(self: *NativeWindow, timeout_ms: i32) layer.Error!void {
+    pub fn wait(self: *NativeWindow, requested_ms: i32) layer.Error!void {
+        // Unlimited: a frame period is no reason to sleep; only "forever" (nothing to draw)
+        // still blocks. The GPU path keeps waiting on its swap chain, which then signals
+        // when the GPU has room for a frame rather than at the refresh.
+        const timeout_ms = if (self.pacing == .unlimited and requested_ms > 0 and self.frame_wait == null) 0 else requested_ms;
+        // The CPU path at the display's refresh: `DwmFlush` returns once the compositor has
+        // shown the next frame — 16.4–16.7 ms on a 60 Hz screen after a frame, idle and
+        // minimised alike, never at once and never stuck (`win32-window-check`, measured).
+        // The 16 ms timer drew 61.2 frames a second for 60 shown. Messages that arrive
+        // meanwhile wait at most that refresh; they are handled below. Refused (no
+        // composition), the timer paces as before.
+        if (timeout_ms > 0 and self.frame_wait == null and self.pacing == .display and c.DwmFlush() >= 0) {
+            return self.handleQueued();
+        }
         const woke = if (timeout_ms > 0 and self.frame_wait != null)
             // The swap chain says when the next frame may be drawn; `timeout_ms` is only
             // the longest this waits if it never does.
@@ -140,6 +156,10 @@ pub const NativeWindow = struct {
             break :timed c.MsgWaitForMultipleObjectsEx(1, &self.timer.?, c.INFINITE, c.QS_ALLINPUT, c.MWMO_INPUTAVAILABLE);
         } else c.MsgWaitForMultipleObjectsEx(0, null, if (timeout_ms < 0) c.INFINITE else 0, c.QS_ALLINPUT, c.MWMO_INPUTAVAILABLE);
         if (woke == c.WAIT_FAILED) return error.DisplayLost;
+        self.handleQueued();
+    }
+
+    fn handleQueued(_: *NativeWindow) void {
         var message: c.MSG = undefined;
         while (c.PeekMessageW(&message, null, 0, 0, c.PM_REMOVE) != 0) {
             _ = c.TranslateMessage(&message);

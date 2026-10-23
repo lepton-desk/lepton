@@ -2,13 +2,6 @@
 
 Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Windows dahil) `git pull` ile okunabilir kılmak için var. Yayın adımları `docs/yayin.md`'de; burası neyin yapıldığını, neyin ölçüldüğünü ve neyin açık kaldığını söyler. Sürüm çıkınca güncellenir.
 
-## İlk iş (kullanıcı, 2026-10-23)
-
-1. `9cd52ac`'ın CI sonucunu oku (`windows`: gölgelendirici eşitliği ve runner'da D3D11 ilk kez; `zig`).
-2. `windows-gpu-check`'e dikey senkronsuz ölçüm: aynı sahne `Present(0, 0)` ile, saniyedeki kare ve kare başına GPU süresi (D3D11 zaman damgası sorgusu); Linux'taki 2001 şekillik sahne (R7 240'ta 0,65 ms) karşılaştırma için.
-3. CPU yolunu ekranın tazelemesine bağla (`DwmFlush`): bugün 16 ms zamanlayıcıyla 61,2 kare/sn çiziyor, 60 Hz ekran fazlasını göstermiyor.
-4. Sınırsız kare hızı seçeneği, iki platformda ve iki yolda (GPU ve CPU). Varsayılan ekranın tazelemesine bağlı kalır; isteyen açıkça seçer (`lepton.config.json` ayarı → çekirdeğe derleme seçeneği, ölçüm için ortam değişkeni de olabilir). Windows GPU: `Present(0, DXGI_PRESENT_ALLOW_TEARING)` (destek `CheckFeatureSupport` ile sorulur, yoksa `Present(0, 0)`); Windows CPU: beklemesiz çizim. Linux GLES: `eglSwapInterval(0)` ve kare geri çağrısını beklememe; Linux shm: kare geri çağrısını beklememe. Her yolda ölç: saniyedeki kare, CPU süresi; Linux tarafı CI'da veya kullanıcının makinesinde.
-
 ## Yayın durumu
 
 - Bütün paketler `0.1.9-beta.2`'de, commit `f4e8fec` (trunk). Hiçbiri yayımlanmadı.
@@ -196,7 +189,15 @@ Kararlar `docs/plans/windows.md`: pencere Win32, metin DirectWrite; çizici Vulk
    - Şablon: native Windows uygulaması önce D3D11'i deniyor (`core.d3d11`), olmazsa ya da `LEPTON_GPU=cpu` ile CPU yolu. `lepton run` ölçüldü: `present d3d11`, ekranda "drawn on the GPU" (Segoe UI), saniyede 59,8 kare, 5 sn'de 250 ms CPU; aynı uygulama `LEPTON_GPU=cpu` ile `present gdi`, 61,2 kare, 1672 ms CPU.
    - **Bulundu, düzeltildi:** çekirdeğin gömülmesi her dosyayı `include_str!` ile alıyordu; DXBC UTF-8 değil, CI'da CLI derlenmedi. Artık `include_bytes!` (`lepton update`'in vendor karşılaştırması da bayt).
    - **Linux'ta eksik (bulundu):** plandaki `LEPTON_GPU=…` zorlaması Linux'ta hiç yazılmamış (yalnız belgede); Windows'ta `cpu` için var.
-8. **Sırada:** Vulkan (bu kart Windows'ta 1.2, eşiğin altında → D3D11 doğru seçim; eşiği geçen makinede Vulkan), OpenGL 3.3, eski Windows (FL 10_0, flip-model olmayan takas zinciri).
+8. **Kare temposu: ekran ya da sınırsız** (yapıldı, 2026-10-23; kullanıcı: "sınırsız FPS isteyenler için de bir çözüm, iki platform ve iki modda"). `window.Pacing` (`display` varsayılan, `unlimited`), `window.Request.pacing`; `lepton.config.json` → `window.frameRate: "display" | "unlimited"` (`window_shape.rs`, başka değer reddedilir, test) → `-Dframe-rate` (şablonun `build.zig`'i; eski bir `build.zig` uyarı alır, ekrana bağlı kalır) → `main.zig`; çalışırken `LEPTON_FRAME_RATE` ezer. Program `frames display|unlimited` yazar.
+   - Windows GPU: sınırsızda `Present(0, DXGI_PRESENT_ALLOW_TEARING)` (destek `IDXGIFactory5::CheckFeatureSupport`, takas zinciri `ALLOW_TEARING` ile), yoksa `Present(0, 0)`; pencere kare gecikmesi nesnesini beklemeye devam ediyor (GPU'da yer açılınca sinyal veriyor). Windows CPU: sınırsızda bekleme yok; ekrana bağlıyken **`DwmFlush`** (16 ms zamanlayıcı yerine; ret olursa zamanlayıcı kalır). Linux GLES: `eglSwapInterval(0)`; Linux shm: kare geri çağrısı beklenmiyor (tampon serbest bırakma beklemesi `waitEvents`'te, kırpılmıyor); Wayland ve X11 `wait` sınırsızda uyumuyor.
+   - `win32-window-check`, `DwmFlush` ne bekliyor: kareden sonra ortalama 16 733 µs, boşta 16 714 µs, küçültülmüşken 16 726 µs; en uzun 17 227 µs — hiç anında dönmüyor, takılmıyor.
+   - `windows-gpu-check`'e `tools/windows_gpu_rate.zig`: Linux `scene-check`'in sahnesi (1200×800, 2001 şekil). R7 240: ekrana bağlı 59/sn; **sınırsız 1046–1188/sn, kare başına GPU 699–709 µs** (zaman damgası sorgusu, yalnız çizim; Linux'ta aynı sahne 652 µs), tearing var. Ekrana bağlı karelerin GPU süresi yazılmıyor: zaman çizelgesi ekranın hâlâ gösterdiği arka tamponu beklemeyi de içeriyor (15,5 ms ölçüldü). Runner (Microsoft Basic Render Driver, 64 Hz) `9cd52ac`'de: sahne 63/sn, hepsi geçti; "paced" sınırı artık ekranın Hz'ine göre (57–63 sabitiyle 64 Hz'de düşerdi).
+   - Şablon uygulaması uçtan uca (`lepton build`, `-Dframe-rate=unlimited` planda; 5 sn, sayaç ekrandan): GPU ekran 59,8/sn, 156 ms CPU; **GPU sınırsız 2881/sn**, 3016 ms; CPU ekran (`DwmFlush`) 59,8/sn (önce 61,2), 1594 ms; CPU sınırsız 271/sn, 4594 ms.
+   - **Bulundu, düzeltildi:** `windows-gpu-check` pencere başka bir pencerenin (Claude uygulaması, "Chrome Legacy Window") altındayken her noktada öne alıp 300 ms uyuyordu: 11 200 noktalık metin denetimi neredeyse bir saat askıda, Windows "Yanıt Vermiyor" hayaleti koydu (ölçüldü, her nokta örtülü). `SetForegroundWindow` önde olmayan sürece reddediliyor; denetim pencereleri artık `HWND_TOPMOST` (ön plan hakkı gerekmiyor), metin bölgesi tek `BitBlt`'le okunuyor. Claude uygulaması öndeyken hepsi geçti.
+   - **Ölçülmedi (Linux makinesi ya da CI gerekiyor):** Linux'ta sınırsızın kare hızı. Kod Windows'tan derlenemiyor (Wayland/EGL başlıkları); Linux CI derler.
+   - `x11_window.zig` 840 satır (değişiklikten önce 836): 800 sınırının üstünde, bölünmeli.
+9. **Sırada:** Vulkan (bu kart Windows'ta 1.2, eşiğin altında → D3D11 doğru seçim; eşiği geçen makinede Vulkan), OpenGL 3.3, eski Windows (FL 10_0, flip-model olmayan takas zinciri).
 
 ## Eksikler (2026-10-23; iki tarama, her madde kodda doğrulandı)
 

@@ -82,7 +82,7 @@ fn waitUntil(self: *WaylandWindow, comptime done: fn (*WaylandWindow) bool) Erro
         const waited = started.durationTo(now()).raw.nanoseconds;
         const left = pace_limit_ms - @divTrunc(@max(waited, 0), std.time.ns_per_ms);
         if (left <= 0) return;
-        try self.wait(@intCast(left));
+        try self.waitEvents(@intCast(left));
     }
 }
 
@@ -148,7 +148,9 @@ pub fn present(self: *WaylandWindow, size: Size) Error!void {
     const buffer = frame.buffer orelse return error.BufferRefused;
     if (frame.size.width != size.width or frame.size.height != size.height) return error.BufferRefused;
 
-    if (!frameShown(self)) try waitUntil(self, frameShown);
+    // Unlimited: the next frame does not wait for this one to be shown; a frame the
+    // compositor never showed is replaced (its buffer released) by the next commit.
+    if (self.pacing == .display and !frameShown(self)) try waitUntil(self, frameShown);
     // A callback still outstanding past the limit is dropped; a new one is asked for.
     if (self.frame_callback) |stale| wl.wl_callback_destroy(stale);
     self.frame_callback = wl.wl_surface_frame(surface);
@@ -181,6 +183,7 @@ pub fn presentPixels(self: *WaylandWindow, pixels: []const u8, frame: Size, form
                 @ptrCast(self.surface),
                 frame.width,
                 frame.height,
+                self.pacing,
             );
             self.gpu_settled = true;
         }
@@ -228,7 +231,7 @@ pub fn presentScene(
         return error.GpuRefused;
     }
     if (!self.gpu_settled) {
-        self.gpu = presenter.open(@ptrCast(self.display), @ptrCast(self.surface), frame.width, frame.height);
+        self.gpu = presenter.open(@ptrCast(self.display), @ptrCast(self.surface), frame.width, frame.height, self.pacing);
         self.gpu_settled = true;
     }
     const gpu = if (self.gpu) |*gpu| gpu else return error.GpuRefused;

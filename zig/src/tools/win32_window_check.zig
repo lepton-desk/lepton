@@ -111,8 +111,8 @@ pub fn main() !void {
     try pump(&w, 300);
     _ = w.takeConfigure();
 
-    // `wait(16)` with nothing to handle sleeps 16 ms, not the system tick rounded up: the
-    // loop it paces draws at 60 frames a second, not 32.
+    // `wait(16)` with nothing to handle sleeps one refresh (`DwmFlush`), not the system tick
+    // rounded up: the loop it paces draws at the display's rate, not 32 frames a second.
     try pump(&w, 300);
     var frequency: c.LARGE_INTEGER = undefined;
     var started: c.LARGE_INTEGER = undefined;
@@ -124,6 +124,30 @@ pub fn main() !void {
     _ = c.QueryPerformanceCounter(&ended);
     const average_us = @divTrunc((ended.QuadPart - started.QuadPart) * 1_000_000, frequency.QuadPart * waits);
     expect(average_us >= 15_000 and average_us <= 24_000, "wait(16)", "{d} us on average over {d}", .{ average_us, waits });
+
+    // What `DwmFlush` waits for: after a frame, idle, and minimised — the CPU path's pacing
+    // follows it only where it waits about one refresh and never hangs.
+    inline for (.{ .{ "dwm frame", true, false }, .{ "dwm idle", false, false }, .{ "dwm hidden", true, true } }) |case| {
+        if (case[2]) _ = c.ShowWindow(w.hwnd, c.SW_MINIMIZE);
+        try pump(&w, 300);
+        var longest: i64 = 0;
+        _ = c.QueryPerformanceCounter(&started);
+        for (0..waits) |_| {
+            if (case[1]) try w.presentPixels(pixels, size, .argb8888);
+            var before: c.LARGE_INTEGER = undefined;
+            var after: c.LARGE_INTEGER = undefined;
+            _ = c.QueryPerformanceCounter(&before);
+            _ = c.DwmFlush();
+            _ = c.QueryPerformanceCounter(&after);
+            longest = @max(longest, @divTrunc((after.QuadPart - before.QuadPart) * 1_000_000, frequency.QuadPart));
+        }
+        _ = c.QueryPerformanceCounter(&ended);
+        const each = @divTrunc((ended.QuadPart - started.QuadPart) * 1_000_000, frequency.QuadPart * waits);
+        fact(case[0], "{d} us a frame on average, longest DwmFlush {d} us", .{ each, longest });
+        if (case[2]) _ = c.ShowWindow(w.hwnd, c.SW_RESTORE);
+    }
+    try pump(&w, 300);
+    _ = w.takeConfigure();
 
     _ = c.PostMessageW(w.hwnd, c.WM_CLOSE, 0, 0);
     try pump(&w, 200);

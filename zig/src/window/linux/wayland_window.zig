@@ -135,6 +135,8 @@ pub const WaylandWindow = struct {
     /// holds EGL's, which such a build cannot name.
     gpu: ?(if (wayland_present.gpu_present) presenter.Presenter else void) = null,
     gpu_settled: bool = false,
+    /// `unlimited`: presents wait for no frame callback, `wait` for no frame period.
+    pacing: window.Pacing = .display,
 
     size: Size = .{ .width = 0, .height = 0 },
     title: [256]u8 = @splat(0),
@@ -199,6 +201,7 @@ pub const WaylandWindow = struct {
             .shm = shm,
             .allocator = allocator,
             .size = request.size,
+            .pacing = request.pacing,
             .wl_format = wayland_present.formatConstant(request.format),
             .seat = state.globals.seat,
             .input = .{
@@ -341,7 +344,13 @@ pub const WaylandWindow = struct {
     /// knows the caller is about to read, so a dispatch from another thread cannot read those
     /// bytes first. Skipping it is only safe while this process is the sole reader, which is
     /// an accident of the current design rather than a property of it.
-    pub fn wait(self: *WaylandWindow, timeout_ms: i32) Error!void {
+    pub fn wait(self: *WaylandWindow, requested_ms: i32) Error!void {
+        // Unlimited: a frame period is no reason to sleep; only "forever" still blocks.
+        return self.waitEvents(if (self.pacing == .unlimited and requested_ms > 0) 0 else requested_ms);
+    }
+
+    /// `wait` without the pacing: for waits on the compositor itself (a buffer released).
+    pub fn waitEvents(self: *WaylandWindow, timeout_ms: i32) Error!void {
         _ = wl.wl_display_flush(self.display);
         while (wl.wl_display_dispatch_pending(self.display) > 0) {}
 

@@ -174,6 +174,7 @@ pub fn open(
     wl_surface: ?*c.wl_surface,
     width: u32,
     height: u32,
+    pacing: @import("../../window/window.zig").Pacing,
 ) ?Presenter {
     // Asked before any EGL call: `eglGetPlatformDisplay` is what loads the driver, and the
     // driver's mappings are the memory this switch exists to avoid.
@@ -237,6 +238,11 @@ pub fn open(
         _ = c.eglTerminate(display);
         return null;
     };
+
+    // Unlimited: swaps wait for no refresh. On Wayland, Mesa's interval 1 is a wait for the
+    // frame callback inside `eglSwapBuffers`; 0 skips it (EGL 1.4, `eglSwapInterval`). The
+    // context is current here (`gl.attach`), which the call needs.
+    if (pacing == .unlimited) _ = c.eglSwapInterval(display, 0);
 
     owned = false;
     return Presenter{
