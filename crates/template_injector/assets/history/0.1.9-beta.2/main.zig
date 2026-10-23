@@ -470,6 +470,15 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
     defer if (comptime core.gles3.available) {{
         if (gpu_screen) |*screen| screen.deinit(allocator);
     }};
+    // Windows: Direct3D 11 when the machine gives a device and a swap chain (and
+    // `LEPTON_GPU=cpu` is not set); otherwise the CPU paints the frame below, as before.
+    var win_gpu: WinGpuSlot = if (comptime core.d3d11.available) (if (core.d3d11.wanted()) WinGpuScreen.init(allocator, opened.win32) catch |err| blk: {{
+        core.report.fact("gpu", .warn, "{{t}}; drawing with the CPU", .{{err}});
+        break :blk null;
+    }} else null) else {{}};
+    defer if (comptime core.d3d11.available) {{
+        if (win_gpu) |*screen| screen.deinit(allocator, opened.win32);
+    }};
 
     std.debug.print("render       native, no engine\n", .{{}});
     std.debug.print("requested    {{d}}x{{d}}\n", .{{ request.size.width, request.size.height }});
@@ -515,6 +524,20 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
                 }},
                 .x11 => {{}},
             }};
+        }}
+
+        if (comptime core.d3d11.available) {{
+            if (win_gpu) |*screen| {{
+                if (screen.draw(allocator, frame.size, frames, &state)) |_| {{
+                    if (frames == 1) std.debug.print("present      d3d11\n", .{{}});
+                    opened.wait(16) catch break;
+                    continue;
+                }} else |err| {{
+                    core.report.fact("gpu", .warn, "{{t}}; drawing with the CPU", .{{err}});
+                    screen.deinit(allocator, opened.win32);
+                    win_gpu = null;
+                }}
+            }}
         }}
 
         paint(&frame, if (subject) |*t| t else null, frames, &state);
@@ -659,6 +682,62 @@ const GpuScreen = if (core.gles3.available) struct {{
 
 /// `?GpuScreen` where the build can draw on the GPU, nothing where it cannot.
 const GpuSlot = if (core.gles3.available) ?GpuScreen else void;
+
+/// Windows: the same screen on Direct3D 11 (`core.d3d11`), with DirectWrite's text; the
+/// swap chain paces the frames. Windows draws the title bar, so the masthead starts at 0.
+const WinGpuScreen = if (core.d3d11.available) struct {{
+    renderer: core.d3d11.Renderer,
+    heading: core.d3d11.glyph_text.Font,
+    body: core.d3d11.glyph_text.Font,
+    glyphs: core.atlas.Atlas,
+    list: core.scene.List = .{{}},
+
+    fn init(allocator: std.mem.Allocator, window: *core.window.win32.NativeWindow) !@This() {{
+        var renderer = try core.d3d11.Renderer.open(window.hwnd, window.size.width, window.size.height);
+        errdefer renderer.deinit();
+        var heading = try core.d3d11.glyph_text.Font.open(allocator, "sans", 20, 0);
+        errdefer heading.deinit();
+        var body = try core.d3d11.glyph_text.Font.open(allocator, "sans", 13, 1);
+        errdefer body.deinit();
+        window.setFrameWait(renderer.frameWait());
+        return .{{ .renderer = renderer, .heading = heading, .body = body, .glyphs = try core.atlas.Atlas.init(allocator) }};
+    }}
+
+    fn deinit(self: *@This(), allocator: std.mem.Allocator, window: *core.window.win32.NativeWindow) void {{
+        window.setFrameWait(null);
+        self.list.deinit(allocator);
+        self.glyphs.deinit(allocator);
+        self.body.deinit();
+        self.heading.deinit();
+        self.renderer.deinit();
+    }}
+
+    fn draw(self: *@This(), allocator: std.mem.Allocator, size: core.window.Size, frames: u32, state: *const State) !void {{
+        const scene = core.scene;
+        self.list.clear();
+        const w: f32 = @floatFromInt(size.width);
+        const h: f32 = @floatFromInt(size.height);
+        const b: f32 = baseline;
+        try self.list.rect(allocator, .{{ .x = 0, .y = 0, .width = w, .height = b * 4 }}, .{{ .fill = scene.rgba(0x1b2026ff) }});
+        try self.list.rect(allocator, .{{ .x = 0, .y = b * 4, .width = w, .height = 1 }}, .{{ .fill = scene.rgba(0x2c343dff) }});
+        _ = try self.heading.draw(allocator, &self.glyphs, &self.list, "{product}", b, b * 2, scene.rgba(0xe6eaefff));
+        _ = try self.body.draw(allocator, &self.glyphs, &self.list, "native render, drawn on the GPU", b, b * 3, scene.rgba(0x9da7b2ff));
+
+        var line: [64]u8 = undefined;
+        _ = try self.body.draw(allocator, &self.glyphs, &self.list, try std.fmt.bufPrint(&line, "frames {{d}}", .{{frames}}), b, b * 6, scene.rgba(0x9da7b2ff));
+        if (state.resident_bytes) |bytes| {{
+            _ = try self.body.draw(allocator, &self.glyphs, &self.list, try std.fmt.bufPrint(&line, "resident set {{d}} KiB", .{{bytes / 1024}}), b, b * 7, scene.rgba(0x9da7b2ff));
+        }}
+        var y: f32 = b * 9;
+        while (y < h - b) : (y += b * 3) {{
+            try self.list.rect(allocator, .{{ .x = b, .y = y, .width = w - b * 2, .height = 1 }}, .{{ .fill = scene.rgba(0x1f252bff) }});
+        }}
+        try self.renderer.draw(&self.list, &self.glyphs, scene.rgba(0x14181cff), .{{ .width = size.width, .height = size.height }});
+    }}
+}} else void;
+
+/// `?WinGpuScreen` in a native Windows build, nothing elsewhere.
+const WinGpuSlot = if (core.d3d11.available) ?WinGpuScreen else void;
 
 /// What the screen shows about this process, read rather than assumed.
 const State = struct {{

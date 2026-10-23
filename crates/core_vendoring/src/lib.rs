@@ -110,7 +110,7 @@ pub fn write_into(package_root: &Path) -> Result<Vec<PathBuf>, Error> {
 ///
 /// Exposed for the same reason the table is sorted: a caller that wants to describe
 /// what a project now contains should see the same list in the same order every time.
-pub fn files() -> Vec<(&'static str, &'static str)> {
+pub fn files() -> Vec<(&'static str, &'static [u8])> {
     CARRIED.to_vec()
 }
 
@@ -255,7 +255,10 @@ mod tests {
 
         for (relative, contents) in CARRIED {
             let original = core_root().join(relative);
-            let actual = scratch.read(relative)?;
+            let actual = std::fs::read(scratch.path().join(relative)).map_err(|error| Failure {
+                claim: format!("{relative} should be readable"),
+                actual: format!("{error}"),
+            })?;
 
             ensure!(
                 original.is_file(),
@@ -266,7 +269,7 @@ mod tests {
             // The bytes are compared, not the length. A table that carried a
             // truncated copy has the right length on the first line and is still
             // wrong, and a length check would pass it.
-            assert_eq!(actual.as_bytes(), contents.as_bytes());
+            assert_eq!(actual.as_slice(), *contents);
         }
         Ok(())
     }
@@ -281,9 +284,9 @@ mod tests {
         );
 
         let first = assert_ok!(write_into(scratch.path()), "the first write should succeed");
-        let before: Vec<String> = first
+        let before: Vec<Vec<u8>> = first
             .iter()
-            .map(|path| std::fs::read_to_string(path).unwrap_or_default())
+            .map(|path| std::fs::read(path).unwrap_or_default())
             .collect();
 
         assert_ok!(
@@ -292,7 +295,7 @@ mod tests {
         );
 
         for (path, original) in first.iter().zip(&before) {
-            let again = std::fs::read_to_string(path).map_err(|error| Failure {
+            let again = std::fs::read(path).map_err(|error| Failure {
                 claim: format!("{} should still be readable", path.display()),
                 actual: format!("{error}"),
             })?;

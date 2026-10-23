@@ -223,10 +223,10 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
         }
     }
     // The native path on Windows: its window (`window/windows/native_window.zig`, Win32 and
-    // GDI's `SetDIBitsToDevice`) and its type (`render/text_windows.zig`, DirectWrite drawn
-    // by Direct2D). All system DLLs.
+    // GDI's `SetDIBitsToDevice`), its type (`render/text_windows.zig`, DirectWrite drawn by
+    // Direct2D) and its GPU half (`render/gpu/d3d11.zig`). All system DLLs.
     if (windows and !want_webview) {
-        for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d2d1", "dwrite" }) |library| {
+        for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d2d1", "dwrite", "d3d11", "dxgi" }) |library| {
             core.linkSystemLibrary(library, .{});
         }
     }
@@ -724,7 +724,7 @@ pub fn build(b: *std.Build) void {
             }),
         }));
         support.addCModules(b, windows_gpu_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_windows"});
-        for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d3d11", "dxgi" }) |name| {
+        for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d3d11", "dxgi", "dwrite" }) |name| {
             windows_gpu_check.root_module.linkSystemLibrary(name, .{});
         }
         b.step(

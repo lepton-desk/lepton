@@ -150,10 +150,7 @@ fn vendor_decision(vendor: &Path) -> Result<Vendor, CliError> {
     let changed = carried
         .iter()
         .filter(|(relative, contents)| {
-            std::fs::read_to_string(vendor.join(relative))
-                .ok()
-                .as_deref()
-                != Some(*contents)
+            std::fs::read(vendor.join(relative)).ok().as_deref() != Some(*contents)
         })
         .count();
     let mut present = Vec::new();

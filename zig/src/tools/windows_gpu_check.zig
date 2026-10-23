@@ -16,6 +16,7 @@ const native = layer.win32;
 const d3d11 = core.d3d11;
 const scene = core.scene;
 const atlas = core.atlas;
+const glyph_text = core.glyph_text;
 const c = @import("c_windows");
 
 const iid_dxgi_device: c.GUID = .{ .Data1 = 0x54ec77fa, .Data2 = 0x1377, .Data3 = 0x44e6, .Data4 = .{ 0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c } };
@@ -178,6 +179,35 @@ fn sceneOnWindow() !void {
     const elapsed_ms = @divTrunc((ticks() - started) * 1000, frequency.QuadPart);
     const per_second = @divTrunc(@as(i64, frames) * 1000, @max(elapsed_ms, 1));
     expect(per_second >= 57 and per_second <= 63, "paced", "{d} frames in {d} ms = {d}/s", .{ frames, elapsed_ms, per_second });
+
+    // Text (`render/glyph_text_windows.zig`), as the GLES 3 test draws it: ink between the
+    // pen's start and its advance, above the baseline down to the descender; none outside.
+    var font = try glyph_text.Font.open(allocator, "sans", 20, 0);
+    defer font.deinit();
+    var words: scene.List = .{};
+    defer words.deinit(allocator);
+    const advance = try font.draw(allocator, &glyphs, &words, "Lepton", 6, 40, scene.rgba(0x000000ff));
+    expect(words.instances.items.len == 6 and advance > 40 and advance < 90, "text laid out", "{d} glyphs, advance {d:.0} px", .{ words.instances.items.len, advance });
+    const before = renderer.uploaded;
+    for (0..10) |_| {
+        try renderer.draw(&words, &glyphs, scene.rgba(0xffffffff), .{ .width = size.width, .height = size.height });
+        try w.wait(16);
+    }
+    var ink: usize = 0;
+    var stray: usize = 0;
+    for (0..70) |y| for (0..160) |x| {
+        const shown = screenAt(hwnd, @intCast(x), @intCast(y));
+        const dark = shown != covered_point and (shown >> 16) < 128;
+        const in_box = x >= 6 and x <= 6 + @as(usize, @intFromFloat(advance)) and y >= 40 - 20 and y <= 40 + 6;
+        if (dark and in_box) ink += 1;
+        if (dark and !in_box) stray += 1;
+    };
+    expect(ink > 80 and stray == 0, "text on screen", "{d} dark pixels in its box, {d} outside", .{ ink, stray });
+    words.clear();
+    _ = try font.draw(allocator, &glyphs, &words, "Lepton", 6, 40, scene.rgba(0x000000ff));
+    const sent = renderer.uploaded;
+    try renderer.draw(&words, &glyphs, scene.rgba(0xffffffff), .{ .width = size.width, .height = size.height });
+    expect(renderer.uploaded - sent == words.bytes().len, "glyphs once", "second frame sent {d} bytes (its instances), first {d}", .{ renderer.uploaded - sent, sent - before });
 
     // A resize: the swap chain follows, the new corner is drawn.
     try w.resize(.{ .width = size.width + 100, .height = size.height + 60 });

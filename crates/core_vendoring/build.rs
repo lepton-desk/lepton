@@ -6,7 +6,7 @@
 //! find nothing on exactly the machines that need it most.
 //!
 //! So the tree is walked here, at compile time, and the result is emitted as a table
-//! of `include_str!`s. The binary carries the core; the project it creates does not
+//! of `include_bytes!`s. The binary carries the core; the project it creates does not
 //! depend on anything outside itself.
 //!
 //! ## What is carried
@@ -204,12 +204,14 @@ fn emit(core: &Path, carried: &[(String, PathBuf)]) {
     source.push_str(
         "/// Every file of the Zig core, paired with its path inside a vendored package.\n",
     );
-    source.push_str("pub const CARRIED: &[(&str, &str)] = &[\n");
+    // Bytes, not text: the core carries files that are not UTF-8 (the Direct3D 11 shaders'
+    // DXBC), and `include_str!` refused them (measured on CI).
+    source.push_str("pub const CARRIED: &[(&str, &[u8])] = &[\n");
 
     for (relative, absolute) in carried {
         let _ = writeln!(
             source,
-            "    ({relative:?}, include_str!({:?})),",
+            "    ({relative:?}, include_bytes!({:?})),",
             absolute.display().to_string()
         );
     }

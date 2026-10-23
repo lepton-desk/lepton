@@ -8,3 +8,5 @@ pub const window = @import("window/window.zig");
 pub const scene = @import("render/scene.zig");
 pub const atlas = @import("render/atlas.zig");
 pub const d3d11 = @import("render/gpu/d3d11.zig");
+/// Text for the command list, laid out and rasterised by DirectWrite.
+pub const glyph_text = @import("render/glyph_text_windows.zig");
