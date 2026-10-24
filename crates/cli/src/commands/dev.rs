@@ -168,6 +168,7 @@ impl Flags {
 
         let report = super::report::Report::new();
         for step in &rebuilds {
+            super::launch::clear_installed_frontend(step)?;
             report.run(step).map_err(CliError::from)?;
         }
 
@@ -202,6 +203,7 @@ impl Flags {
         let mut core_build_time = std::time::Duration::ZERO;
         for step in &foreground {
             let began = std::time::Instant::now();
+            super::launch::clear_installed_frontend(step)?;
             report.run(step).map_err(CliError::from)?;
             if step.program == "zig" {
                 core_builds += 1;

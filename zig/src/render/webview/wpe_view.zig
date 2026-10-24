@@ -185,6 +185,7 @@ var directories_set = false;
 /// origin, `lepton://localhost`. Returns false when the directories cannot be named
 /// (no `HOME`); the engine then uses its own default.
 pub fn useApplicationDirectories(identifier: []const u8) bool {
+    nameProgram(identifier);
     const paths = @import("../../platform/linux/paths.zig");
     var scratch: [4096]u8 = undefined;
     const data = paths.resolve(.app_data, identifier, data_directory[0 .. data_directory.len - 1], &scratch) catch return false;
@@ -193,8 +194,8 @@ pub fn useApplicationDirectories(identifier: []const u8) bool {
     cache_directory[cache.len] = 0;
     // Made here, 0700, before the engine makes them 0755 (measured: it does). Web storage
     // and cookies are the user's private data.
-    if (!paths.makePrivate(data_directory[0..data.len :0])) return false;
-    if (!paths.makePrivate(cache_directory[0..cache.len :0])) return false;
+    if (!paths.makeOwnPrivate(data_directory[0..data.len :0])) return false;
+    if (!paths.makeOwnPrivate(cache_directory[0..cache.len :0])) return false;
     directories_set = true;
     if (!comptime @import("build_options").wpe_platform_abi) {
         // The legacy engine has no session object; its only handle is the environment.
@@ -202,6 +203,25 @@ pub fn useApplicationDirectories(identifier: []const u8) bool {
         _ = setenv("XDG_DATA_HOME", data_directory[0..data.len :0].ptr, 1);
     }
     return true;
+}
+
+/// `void g_set_prgname(const gchar *)` — glib/gutils.h; GLib keeps its own copy.
+const e_set_prgname = @extern(*const fn (?[*:0]const u8) callconv(.c) void, .{ .name = "g_set_prgname" });
+const e_get_prgname = @extern(*const fn () callconv(.c) ?[*:0]const u8, .{ .name = "g_get_prgname" });
+
+/// Names the program `identifier` for GLib before the engine first asks. WPE's window
+/// takes its Wayland `app_id` from `WTF::applicationID()`: the default `GApplication`'s
+/// id, else `g_get_prgname()` when it is a valid application id, else
+/// `org.webkit.app-<SHA-256 of the executable's path>` (`wtf/glib/Application.cpp`,
+/// 2.54). The program's own name has no dot and is not one, so every window was
+/// `org.webkit.app-…` and the dock matched no desktop entry: no icon, that id for a name
+/// (measured on COSMIC). The identifier is the desktop entry's name (`desktop_entry.rs`).
+fn nameProgram(identifier: []const u8) void {
+    var name: [256:0]u8 = undefined;
+    if (identifier.len == 0 or identifier.len >= name.len) return;
+    @memcpy(name[0..identifier.len], identifier);
+    name[identifier.len] = 0;
+    e_set_prgname(name[0..identifier.len :0]);
 }
 
 pub fn setDataDirectory(path: [*:0]const u8) void {
@@ -600,7 +620,19 @@ test "the window commands and events path is compiled" {
 test "each application's web data is named after it, under the user's data directory" {
     if (comptime !(@import("build_options").wpe_platform_abi and @import("root.zig").is_available())) return error.SkipZigTest;
     _ = &View.platformOpen;
+    // The program is named after the identifier (`nameProgram`); put back afterwards, or
+    // every later test's view keeps its default data in this directory (measured: a
+    // `mediakeys` folder appeared in it, 0755, after the test had removed it).
+    var before: [256:0]u8 = @splat(0);
+    const named = e_get_prgname();
+    if (named) |name| {
+        const kept = std.mem.span(name);
+        if (kept.len < before.len) @memcpy(before[0..kept.len], kept);
+    }
+    // Unset before (no toolkit named it) is put back as unset.
+    defer e_set_prgname(if (named != null) &before else null);
     try std.testing.expect(useApplicationDirectories("style.lepton.directory-test"));
+    try std.testing.expectEqualStrings("style.lepton.directory-test", std.mem.span(e_get_prgname().?));
     const data = std.mem.sliceTo(&data_directory, 0);
     const cache = std.mem.sliceTo(&cache_directory, 0);
     try std.testing.expect(std.mem.endsWith(u8, data, "/style.lepton.directory-test"));

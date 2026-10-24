@@ -220,6 +220,26 @@ pub fn makePrivate(path: [:0]const u8) bool {
     return true;
 }
 
+/// `makePrivate` for a directory that is this application's own (its data, cache and
+/// state directories): one that already existed with a wider mode — made by an earlier
+/// Lepton, or by the engine, which makes them 0755 (measured) — is narrowed to 0700, so
+/// the page's cookies and storage are not readable by other users. Only that directory,
+/// never a parent (`~/.local/share` is everyone's), and only when it is this user's: it
+/// is opened without following a link. Not for a directory the user owns as a place
+/// (Downloads), which keeps `makePrivate`.
+pub fn makeOwnPrivate(path: [:0]const u8) bool {
+    if (!makePrivate(path)) return false;
+    const opened = linux.open(path.ptr, .{ .ACCMODE = .RDONLY, .DIRECTORY = true, .NOFOLLOW = true, .CLOEXEC = true }, 0);
+    if (linux.errno(opened) != .SUCCESS) return false;
+    const fd: i32 = @intCast(opened);
+    defer _ = linux.close(fd);
+    var info: linux.Statx = undefined;
+    if (linux.errno(linux.statx(fd, "", linux.AT.EMPTY_PATH, .{ .UID = true, .MODE = true }, &info)) != .SUCCESS) return false;
+    if (info.uid != linux.getuid()) return false;
+    if (info.mode & 0o777 == 0o700) return true;
+    return linux.errno(linux.fchmod(fd, 0o700)) == .SUCCESS;
+}
+
 /// The value of `KEY="..."` in a `user-dirs.dirs` text; `#` lines are comments.
 pub fn userDir(text: []const u8, key: []const u8) ?[]const u8 {
     var lines = std.mem.splitScalar(u8, text, '\n');
@@ -343,6 +363,25 @@ test "missing directories are made 0700, existing ones keep their mode" {
     _ = linux.statx(linux.AT.FDCWD, target, 0, .{ .MODE = true }, &info);
     try std.testing.expectEqual(@as(u16, 0o755), info.mode & 0o777);
     try std.testing.expect(!makePrivate("relative/path"));
+    // The application's own directory is narrowed; its parent keeps its mode.
+    _ = linux.fchmodat(linux.AT.FDCWD, base, 0o755);
+    try std.testing.expect(makeOwnPrivate(target));
+    _ = linux.statx(linux.AT.FDCWD, target, 0, .{ .MODE = true }, &info);
+    try std.testing.expectEqual(@as(u16, 0o700), info.mode & 0o777);
+    var parent_buffer: [160]u8 = undefined;
+    const parent_dir = try std.fmt.bufPrintSentinel(&parent_buffer, "{s}/a", .{base}, 0);
+    _ = linux.fchmodat(linux.AT.FDCWD, parent_dir, 0o755);
+    try std.testing.expect(makeOwnPrivate(target));
+    _ = linux.statx(linux.AT.FDCWD, parent_dir, 0, .{ .MODE = true }, &info);
+    try std.testing.expectEqual(@as(u16, 0o755), info.mode & 0o777);
+    // A link in its place is not followed.
+    var link_path: [160]u8 = undefined;
+    const link = try std.fmt.bufPrintSentinel(&link_path, "{s}/link", .{base}, 0);
+    _ = linux.symlinkat(parent_dir, linux.AT.FDCWD, link);
+    try std.testing.expect(!makeOwnPrivate(link));
+    _ = linux.statx(linux.AT.FDCWD, parent_dir, 0, .{ .MODE = true }, &info);
+    try std.testing.expectEqual(@as(u16, 0o755), info.mode & 0o777);
+    _ = linux.unlinkat(linux.AT.FDCWD, link, 0);
     var middle: [128]u8 = undefined;
     _ = linux.unlinkat(linux.AT.FDCWD, target, linux.AT.REMOVEDIR);
     _ = linux.unlinkat(linux.AT.FDCWD, try std.fmt.bufPrintSentinel(&middle, "{s}/a", .{base}, 0), linux.AT.REMOVEDIR);

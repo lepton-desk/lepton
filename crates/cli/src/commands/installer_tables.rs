@@ -622,7 +622,10 @@ mod tests {
             file("f2", "share/notes/dist/icon.ico"),
             file("f3", "share/notes/icon.ico"),
         ];
-        assert_eq!(notification_icon(&files).map(|icon| icon.key.as_str()), Some("f3"));
+        assert_eq!(
+            notification_icon(&files).map(|icon| icon.key.as_str()),
+            Some("f3")
+        );
         assert!(notification_icon(&files[..2]).is_none());
     }
 }

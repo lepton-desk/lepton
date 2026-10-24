@@ -46,6 +46,9 @@ url = "2.5"
 [patch.crates-io]
 servo-url = { path = "../patches/servo-url" }
 servo = { path = "../patches/servo" }
+# servo-script 0.6.0 with a module that awaits at its top level no longer reported as an
+# "uncaught exception: undefined" (`modules/script_module.rs`, marked `Lepton:`).
+servo-script = { path = "../patches/servo-script" }
 
 [lints.rust]
 # Denied, not forbidden: the C boundary (`src/abi.rs`) is the one module allowed it,

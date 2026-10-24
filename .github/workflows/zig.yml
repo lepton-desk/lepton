@@ -61,9 +61,9 @@ jobs:
 
       - name: Plugin tests
         run: |
-          zig test packages/plugin-fs/zig/fs.zig -lc
-          zig test packages/plugin-os/zig/os.zig -lc
-          zig test packages/plugin-dialog/zig/request.zig
+          zig test packages/plugin-fs/zig/fs.zig -lc -fllvm -flld
+          zig test packages/plugin-os/zig/os.zig -lc -fllvm -flld
+          zig test packages/plugin-dialog/zig/request.zig -fllvm -flld
 
       - name: Cookie shim
         run: node --test zig/src/render/webview/cookie_shim.test.mjs

@@ -199,6 +199,36 @@ pub fn hand_over_frontend(steps: &mut [Step], root: &Path, dist: &str) {
     }
 }
 
+/// Empties the frontend a previous build installed, before a core build that is handed a
+/// new one installs it.
+///
+/// The bundler empties `dist/` each time, but the core's build copies it to
+/// `zig-out/share/<name>/dist` and Zig's directory install only adds and replaces: files
+/// of earlier bundles stayed and went into every package (measured: an older build's
+/// `index-*.js` beside the current one in a Windows `.zip`). Only that directory, which
+/// the core's build made, and only for a step that installs a bundle.
+pub fn clear_installed_frontend(step: &Step) -> Result<(), CliError> {
+    let installs = step
+        .args
+        .iter()
+        .any(|arg| arg.starts_with("-Dfrontend-dist="));
+    let name = step.args.iter().find_map(|arg| arg.strip_prefix("-Dname="));
+    let (true, Some(name), Some(core)) = (installs && is_core_build(step), name, step.cwd.as_ref())
+    else {
+        return Ok(());
+    };
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
+        return Ok(());
+    }
+    let installed = core.join("zig-out").join("share").join(name).join("dist");
+    match std::fs::remove_dir_all(&installed) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(CliError::Invalid(
+            format!("could not empty {}: {error}", installed.display()),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// The one executable the core's build installed under `bin`.
 ///
 /// Refuses rather than picks when there is more than one: a stale binary from a
@@ -435,6 +465,41 @@ mod naming_tests {
                 .cloned(),
             Some(format!("-Dfrontend-dist={}", root.join("out").display()))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_core_build_handed_a_bundle_empties_the_one_installed_before() -> Result<(), Failure> {
+        let scratch = lepton_orchestrator::testing::Scratch::new("installed-frontend")?;
+        let installed = format!("{CORE_DIR}/zig-out/share/notes/dist/assets/index-old.js");
+        scratch.write(&installed, "old")?;
+        scratch.write(&format!("{CORE_DIR}/zig-out/share/notes/icon.ico"), "icon")?;
+        let core = Step::new("run", "zig")
+            .args(["build", "-Dname=notes"])
+            .in_dir(scratch.path().join(CORE_DIR));
+
+        // No bundle handed over (a native build, `lepton dev`): nothing is touched.
+        lepton_orchestrator::assert_ok!(super::clear_installed_frontend(&core), "no bundle");
+        ensure!(
+            scratch.path().join(&installed).exists(),
+            "kept without a bundle"
+        );
+
+        let handed = core.clone().arg("-Dfrontend-dist=/project/dist");
+        lepton_orchestrator::assert_ok!(super::clear_installed_frontend(&handed), "cleared");
+        ensure!(
+            !scratch.path().join(&installed).exists(),
+            "the old bundle must go"
+        );
+        ensure!(
+            scratch
+                .path()
+                .join(format!("{CORE_DIR}/zig-out/share/notes/icon.ico"))
+                .exists(),
+            "only the bundle's directory goes"
+        );
+        // Already gone is fine.
+        lepton_orchestrator::assert_ok!(super::clear_installed_frontend(&handed), "again");
         Ok(())
     }
 

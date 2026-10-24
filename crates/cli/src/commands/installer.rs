@@ -650,7 +650,10 @@ mod tests {
         let three = scratch.path().join("three.msi");
         assert_ok!(write(&make(&three)), "rebuilt");
         let (before, after) = (product_of(&one)?, product_of(&three)?);
-        ensure!(before.is_some() && before != after, "a rebuild has its own ProductCode");
+        ensure!(
+            before.is_some() && before != after,
+            "a rebuild has its own ProductCode"
+        );
         assert_eq!(product_of(&two)?, before);
         let upgrade = assert_ok!(
             package.select_rows(::msi::Select::table("Upgrade")),

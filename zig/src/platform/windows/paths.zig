@@ -118,6 +118,12 @@ pub fn stateDirectory(identifier: []const u8, out: []u8) Error![]const u8 {
 /// Creates `path` and any missing parents. A folder under the user's profile is the
 /// user's alone by its inherited permissions, so nothing more is set. False when one
 /// cannot be made.
+/// The application's own directory: on Windows the same as `makePrivate` (its folders
+/// inherit the user profile's access list).
+pub fn makeOwnPrivate(path: [:0]const u8) bool {
+    return makePrivate(path);
+}
+
 pub fn makePrivate(path: [:0]const u8) bool {
     var wide: [4096:0]u16 = undefined;
     if (path.len >= wide.len) return false;

@@ -148,6 +148,7 @@ impl Flags {
 
         let report = super::report::Report::new();
         for step in &steps {
+            super::launch::clear_installed_frontend(step)?;
             report.run(step).map_err(CliError::from)?;
             // After every core build, the declarations step included: the frontend step
             // that follows type-checks against them.

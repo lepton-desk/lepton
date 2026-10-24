@@ -15,7 +15,7 @@ use keyboard_types::{Code, Key, KeyState, Location, Modifiers};
 use raw_window_handle::{DisplayHandle, WindowHandle};
 use servo::protocol_handler::ProtocolRegistry;
 use servo::{
-    ConsoleLogLevel, DevicePoint, EventLoopWaker, InputEvent, KeyboardEvent, LoadStatus,
+    ConsoleLogLevel, Cursor, DevicePoint, EventLoopWaker, InputEvent, KeyboardEvent, LoadStatus,
     MouseButton, MouseButtonAction, MouseButtonEvent, MouseLeftViewportEvent, MouseMoveEvent,
     NavigationRequest, Opts, RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript,
     WebView, WebViewBuilder, WebViewDelegate, WheelDelta, WheelEvent, WheelMode,
@@ -34,6 +34,9 @@ pub trait Host {
     fn loaded(&self);
     /// Whether the view's document may become `url`.
     fn navigation(&self, url: &str) -> bool;
+    /// The page's cursor, by its CSS name (`pointer`, `text`, `e-resize`…), which is also
+    /// the name the freedesktop cursor themes give it.
+    fn cursor(&self, name: &str);
 }
 
 /// Where Servo keeps the application's web data, set before the engine starts.
@@ -73,6 +76,10 @@ impl WebViewDelegate for Page {
 
     fn notify_page_title_changed(&self, _webview: WebView, title: Option<String>) {
         self.host.title(title.as_deref());
+    }
+
+    fn notify_cursor_changed(&self, _webview: WebView, cursor: Cursor) {
+        self.host.cursor(css_cursor(cursor));
     }
 
     /// Every navigation asks the core first: a page that sent the window to the web would
@@ -359,6 +366,48 @@ impl Engine {
             Err(error) => host.console(4, &format!("lepton-servo: screenshot: {error:?}")),
         });
         Ok(())
+    }
+}
+
+
+/// The CSS name of `cursor` (CSS UI 4 `cursor`), which freedesktop cursor themes use too.
+fn css_cursor(cursor: Cursor) -> &'static str {
+    match cursor {
+        Cursor::None => "none",
+        Cursor::Default => "default",
+        Cursor::Pointer => "pointer",
+        Cursor::ContextMenu => "context-menu",
+        Cursor::Help => "help",
+        Cursor::Progress => "progress",
+        Cursor::Wait => "wait",
+        Cursor::Cell => "cell",
+        Cursor::Crosshair => "crosshair",
+        Cursor::Text => "text",
+        Cursor::VerticalText => "vertical-text",
+        Cursor::Alias => "alias",
+        Cursor::Copy => "copy",
+        Cursor::Move => "move",
+        Cursor::NoDrop => "no-drop",
+        Cursor::NotAllowed => "not-allowed",
+        Cursor::Grab => "grab",
+        Cursor::Grabbing => "grabbing",
+        Cursor::EResize => "e-resize",
+        Cursor::NResize => "n-resize",
+        Cursor::NeResize => "ne-resize",
+        Cursor::NwResize => "nw-resize",
+        Cursor::SResize => "s-resize",
+        Cursor::SeResize => "se-resize",
+        Cursor::SwResize => "sw-resize",
+        Cursor::WResize => "w-resize",
+        Cursor::EwResize => "ew-resize",
+        Cursor::NsResize => "ns-resize",
+        Cursor::NeswResize => "nesw-resize",
+        Cursor::NwseResize => "nwse-resize",
+        Cursor::ColResize => "col-resize",
+        Cursor::RowResize => "row-resize",
+        Cursor::AllScroll => "all-scroll",
+        Cursor::ZoomIn => "zoom-in",
+        Cursor::ZoomOut => "zoom-out",
     }
 }
 

@@ -31,6 +31,7 @@ const transport = @import("../transport.zig");
 const request = @import("request.zig");
 const keymap = @import("keymap.zig");
 const menu_x11 = @import("menu_x11.zig");
+const cursor_x11 = @import("cursor_x11.zig");
 const invoke = @import("../invoke.zig");
 const events = @import("../events.zig");
 
@@ -84,6 +85,11 @@ pub fn useApplicationDirectories(identifier: []const u8) bool {
     buffer[data.len + suffix.len] = 0;
     const directory = buffer[0 .. data.len + suffix.len :0];
     if (!paths.makePrivate(directory)) return false;
+    // The application's own directory and Servo's inside it.
+    buffer[data.len] = 0;
+    if (!paths.makeOwnPrivate(buffer[0..data.len :0])) return false;
+    buffer[data.len] = '/';
+    if (!paths.makeOwnPrivate(directory)) return false;
     return c.lepton_servo_set_data_directory(directory.ptr, directory.len) == 0;
 }
 
@@ -228,6 +234,12 @@ fn onConsole(_: ?*anyopaque, level: u32, utf8: [*c]const u8, len: usize) callcon
 
 fn onLoaded(_: ?*anyopaque) callconv(.c) void {}
 
+fn onCursor(_: ?*anyopaque, name: [*c]const u8, len: usize) callconv(.c) void {
+    const view = host.view orelse return;
+    if (name == null or len == 0) return;
+    view.cursors.setPage(view.xdisplay, view.window.window_id, name[0..len], view.over_edge);
+}
+
 /// The view's document may only be the application's own page (`features.isOwnPage`).
 /// Another address is refused, and not opened elsewhere yet: handing it to the desktop
 /// goes through the OpenURI portal, which a Servo build does not link.
@@ -269,6 +281,9 @@ pub const View = struct {
     last_mask: u32 = 0,
     /// `window.decorations: false`: no frame, so the edges resize (`forward`).
     frameless: bool = false,
+    /// The pointer's shape (`cursor_x11.zig`), and whether it is over a resizing edge.
+    cursors: cursor_x11.Cursors = .{},
+    over_edge: bool = false,
 
     /// Opens the core's X11 window and starts Servo drawing into it.
     pub fn open() Error!View {
@@ -310,6 +325,7 @@ pub const View = struct {
             .console = onConsole,
             .loaded = onLoaded,
             .navigation = onNavigation,
+            .cursor = onCursor,
         };
         var reason: [512]u8 = @splat(0);
         const scheme = "lepton";
@@ -353,12 +369,26 @@ pub const View = struct {
         }
     }
 
+    /// Over the band a frameless window resizes from, the edge's resize shape; off it,
+    /// the page's again.
+    fn showEdge(self: *View) void {
+        const size = self.window.currentSize();
+        const edge = placement.edgeAt(self.last_x, self.last_y, size.width, size.height, resize_band);
+        if (edge) |direction| {
+            self.cursors.show(self.xdisplay, self.window.window_id, cursor_x11.edge_names[direction]);
+        } else if (self.over_edge) {
+            self.cursors.restorePage(self.xdisplay, self.window.window_id);
+        }
+        self.over_edge = edge != null;
+    }
+
     fn forward(self: *View) void {
         const input = &self.window.input;
         if (input.x != self.last_x or input.y != self.last_y) {
             self.last_x = input.x;
             self.last_y = input.y;
             c.lepton_servo_pointer_move(self.servo, input.x, input.y);
+            if (self.frameless) self.showEdge();
         }
         var raw: [32]x11.X11Window.RawKey = undefined;
         for (self.window.takeKeys(&raw)) |key| self.forwardKey(key);

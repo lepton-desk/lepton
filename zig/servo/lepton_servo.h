@@ -58,7 +58,7 @@ typedef struct LeptonServoSurface {
     float scale;      /* offset 36, device pixels per CSS pixel */
 } LeptonServoSurface;
 
-/* What the bridge tells the core. Any member may be null. 56 bytes. */
+/* What the bridge tells the core. Any member may be null. 64 bytes. */
 typedef struct LeptonServoCallbacks {
     void *context; /* offset 0, passed back to each callback */
     /* offset 8. Any thread: Servo has work; call `lepton_servo_spin` soon. */
@@ -74,6 +74,9 @@ typedef struct LeptonServoCallbacks {
     /* offset 48. The view's document is about to become `url`: nonzero lets it, zero
      * stops it. Null lets every navigation through. */
     int32_t (*navigation)(void *context, const uint8_t *url, size_t len);
+    /* offset 56. The page's cursor by its CSS name ("pointer", "text", "e-resize"…), the
+     * name freedesktop cursor themes use; UTF-8, not terminated. */
+    void (*cursor)(void *context, const uint8_t *name, size_t len);
 } LeptonServoCallbacks;
 
 /* The application's directory for cookies, `localStorage`, IndexedDB and caches, before

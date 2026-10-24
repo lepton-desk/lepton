@@ -198,7 +198,7 @@ fn fileOf(identifier: []const u8, out: []u8) ?[:0]const u8 {
     if (directory.len + 1 > made.len) return null;
     @memcpy(made[0..directory.len], directory);
     made[directory.len] = 0;
-    _ = paths.makePrivate(made[0..directory.len :0]);
+    _ = paths.makeOwnPrivate(made[0..directory.len :0]);
     return std.fmt.bufPrintSentinel(out, "{s}{c}lepton-grants", .{ directory, @as(u8, if (windows) '\\' else '/') }, 0) catch null;
 }
 

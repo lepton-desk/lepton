@@ -14,4 +14,8 @@
 #if __has_include(<X11/Xutil.h>)
 #include <X11/Xutil.h>
 #endif
+/* The pointer's shapes from the cursor theme (servo/cursor_x11.zig). */
+#if __has_include(<X11/Xcursor/Xcursor.h>)
+#include <X11/Xcursor/Xcursor.h>
+#endif
 #endif

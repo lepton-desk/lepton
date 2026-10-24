@@ -5,6 +5,9 @@
 # single instance, the native menu and the page's own bar with real mouse and keys —
 # then packaged as zip and msi, installed, run and removed, and built again with
 # "decorations": false (frameless: drag, double click, the resize border).
+# The same app is also packaged on Linux (`lepton package --windows`, job linux-package):
+# that MSI is installed, run, measured and removed here too, and both machines' zip and
+# msi are compared byte for byte.
 # The scripts are tools/ci/windows/; their report and screenshots are the artifact.
 name: windows
 
@@ -22,7 +25,64 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The Windows package made on Linux: the CLI cross-builds the core with Zig and writes
+  # the zip and the msi in Rust (installer_db.rs), so Linux needs neither Windows nor WiX.
+  linux-package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zig 0.16
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz"
+          mkdir -p "$RUNNER_TEMP/zig" && tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+
+      - name: CLI
+        run: |
+          cargo build --release --bin lepton
+          ./target/release/lepton --version
+
+      # The app the Windows job builds, made the same way (same name, owner, config, page).
+      - name: Package for Windows
+        run: |
+          npm install -g pnpm@10
+          pnpm --dir packages/api install --frozen-lockfile
+          pnpm --dir packages/api run build
+          lepton="$GITHUB_WORKSPACE/target/release/lepton"
+          cd "$RUNNER_TEMP"
+          "$lepton" new ci-app --template vanilla-ts --target webview --package-manager npm --owner ci --non-interactive
+          cd ci-app
+          node -e '
+            const fs = require("fs");
+            const ws = process.env.GITHUB_WORKSPACE;
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            for (const group of ["dependencies", "devDependencies"]) {
+              if (pkg[group]?.["@lepton-desk/api"]) pkg[group]["@lepton-desk/api"] = `file:${ws}/packages/api`;
+              if (pkg[group]?.["@lepton-desk/cli"]) pkg[group]["@lepton-desk/cli"] = `file:${ws}/packages/cli`;
+            }
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+            const config = JSON.parse(fs.readFileSync("lepton.config.json", "utf8"));
+            config.deepLinks = ["leptonci"];
+            config.bundle = { targets: ["zip", "msi"] };
+            config.permissions = [...config.permissions, "window.start_drag", "window.menu", "window.maximize", "window.unmaximize", "window.state", "window.minimize", "window.close"];
+            fs.writeFileSync("lepton.config.json", JSON.stringify(config, null, 2));
+          '
+          cp "$GITHUB_WORKSPACE/tools/ci/ci-page.ts" src/
+          echo 'import "./ci-page.ts";' >> src/main.ts
+          npm install --no-audit --no-fund
+          "$lepton" package --windows
+          mkdir -p "$RUNNER_TEMP/out"
+          cp src-lepton/bundle/*.msi src-lepton/bundle/*.zip "$RUNNER_TEMP/out/"
+          sha256sum "$RUNNER_TEMP"/out/* | tee "$RUNNER_TEMP/out/sha256.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-from-linux
+          path: ${{ runner.temp }}/out
+
   app:
+    needs: linux-package
     runs-on: windows-2025
     defaults:
       run:
@@ -78,7 +138,7 @@ jobs:
           pnpm --dir packages/api run build
           $lepton = "$env:GITHUB_WORKSPACE\target\release\lepton.exe"
           Set-Location $env:RUNNER_TEMP
-          & $lepton new ci-app --template vanilla-ts --target webview --package-manager npm --non-interactive
+          & $lepton new ci-app --template vanilla-ts --target webview --package-manager npm --owner ci --non-interactive
           Set-Location ci-app
           $api = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/api"
           $cli = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/cli"
@@ -129,6 +189,41 @@ jobs:
           $measured = $LASTEXITCODE
           $remove = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn /l*v `"$out\remove.log`"" -Wait -PassThru
           "remove: exit $($remove.ExitCode), folder left: $(Test-Path "$env:LOCALAPPDATA\Programs\$product")" | Tee-Object -Append "$out\files.txt"
+          if ($remove.ExitCode -or (Test-Path "$env:LOCALAPPDATA\Programs\$product") -or $measured) { exit 1 }
+
+      - uses: actions/download-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-package-from-linux
+          path: ${{ runner.temp }}/linux-package
+
+      # The MSI made on Linux, installed, run, measured and removed as the one made here;
+      # then both machines' files compared (reproducible: the same project, the same bytes).
+      - name: The Linux-made package
+        if: ${{ !cancelled() }}
+        run: |
+          $out = "$env:RUNNER_TEMP\report\linux-package"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $from = "$env:RUNNER_TEMP\linux-package"
+          $here = "$env:RUNNER_TEMP\ci-app\src-lepton\bundle"
+          foreach ($kind in "zip", "msi") {
+            $linux = Get-ChildItem "$from\*.$kind" | Select-Object -First 1
+            $windows = Get-ChildItem "$here\*.$kind" | Select-Object -First 1
+            $a = (Get-FileHash $linux.FullName).Hash
+            $b = (Get-FileHash $windows.FullName).Hash
+            "$kind  linux $($linux.Length) $a  windows $($windows.Length) $b  identical: $($a -eq $b)" | Tee-Object -Append "$out\compare.txt"
+          }
+          $msi = (Get-ChildItem "$from\*.msi" | Select-Object -First 1).FullName
+          $install = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v `"$out\install.log`"" -Wait -PassThru
+          "install: exit $($install.ExitCode)" | Tee-Object -Append "$out\result.txt"
+          if ($install.ExitCode) { exit 1 }
+          $product = (Get-Content "$env:RUNNER_TEMP\ci-app\lepton.config.json" -Raw | ConvertFrom-Json).productName
+          $installed = Get-ChildItem "$env:LOCALAPPDATA\Programs\$product" -Recurse -Filter *.exe | Select-Object -First 1
+          "installed: $($installed.FullName)" | Tee-Object -Append "$out\result.txt"
+          & "$env:GITHUB_WORKSPACE\tools\ci\windows\measure.ps1" -Exe $installed.FullName -Out "$out\installed"
+          $measured = $LASTEXITCODE
+          $remove = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn /l*v `"$out\remove.log`"" -Wait -PassThru
+          "remove: exit $($remove.ExitCode), folder left: $(Test-Path "$env:LOCALAPPDATA\Programs\$product")" | Tee-Object -Append "$out\result.txt"
           if ($remove.ExitCode -or (Test-Path "$env:LOCALAPPDATA\Programs\$product") -or $measured) { exit 1 }
 
       # The same app with "window": { "decorations": false }: the page's bar is the title bar.

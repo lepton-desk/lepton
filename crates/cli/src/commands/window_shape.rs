@@ -143,9 +143,8 @@ fn identity_args(text: &str) -> Result<Vec<String>, CliError> {
             .try_fold(&config, |value, key| value.get(key))
             .and_then(Value::as_str)
     };
-    let identifier = at(&["identifier"]).ok_or_else(|| {
-        CliError::Invalid("lepton.config.json has no \"identifier\"".to_owned())
-    })?;
+    let identifier = at(&["identifier"])
+        .ok_or_else(|| CliError::Invalid("lepton.config.json has no \"identifier\"".to_owned()))?;
     let mut args = vec![format!("-Didentifier={identifier}")];
     if let Some(product) = at(&["productName"]) {
         args.push(format!("-Dproduct={product}"));
@@ -240,7 +239,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            assert_ok!(super::identity_args(r#"{"identifier":"a.b"}"#), "only the identifier"),
+            assert_ok!(
+                super::identity_args(r#"{"identifier":"a.b"}"#),
+                "only the identifier"
+            ),
             vec!["-Didentifier=a.b".to_owned()]
         );
         assert_err!(super::identity_args("{}"), "no identifier");

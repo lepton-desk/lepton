@@ -21,6 +21,8 @@ pub fn linkEngine(b: *std.Build, core: *std.Build.Module, root: []const u8, lib_
     core.linkSystemLibrary("X11", .{});
     // `xkb_keysym_to_utf8`, the character a keysym stands for (`servo/view.zig`).
     core.linkSystemLibrary("xkbcommon", .{});
+    // The pointer's shapes from the user's cursor theme (`servo/cursor_x11.zig`).
+    core.linkSystemLibrary("Xcursor", .{});
 }
 
 /// `zig build servo-window-check -Drender=native -Dservo-lib=<dir>`: installs
