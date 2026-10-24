@@ -21,9 +21,9 @@
 //!
 //! No GUID is stored anywhere. The UpgradeCode is derived from the application's
 //! identifier, so every version of one application shares it; the ProductCode from the
-//! identifier and version; each ComponentId from the identifier and the file's path; the
-//! PackageCode (summary revision) from the package's contents. All are name-based UUIDs
-//! over SHA-256 — the same inputs give the same `.msi`.
+//! identifier, version and the package's contents; each ComponentId from the identifier
+//! and the file's path; the PackageCode (summary revision) from the package's contents.
+//! All are name-based UUIDs over SHA-256 — the same inputs give the same `.msi`.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -107,12 +107,19 @@ pub fn write(spec: &Installer<'_>) -> Result<String, CliError> {
     let cabinet = cabinet(&files, spec.mtime, spec.out)?;
 
     let upgrade = name_uuid("upgrade", &[spec.identifier]);
-    let product = name_uuid("product", &[spec.identifier, &version]);
     let mut digest = sha2::Sha256::new();
     digest.update(&cabinet);
     digest.update(spec.product.as_bytes());
     digest.update(version.as_bytes());
-    let package_code = uuid_from(&digest.finalize());
+    let contents = digest.finalize();
+    let package_code = uuid_from(&contents);
+    // A rebuilt package is another product even at the same version, so it replaces the
+    // installed one (the Upgrade table removes up to this version, inclusive). With one
+    // ProductCode per version, Windows refused it with 1638 (measured) — and Windows
+    // Installer compares only `major.minor.build`, so 0.1.9-beta.1 → beta.2 was refused
+    // the same way.
+    let contents_hex: String = contents.iter().map(|byte| format!("{byte:02x}")).collect();
+    let product = name_uuid("product", &[spec.identifier, &version, &contents_hex]);
 
     // The program the Start menu shortcut starts: `bin/<name>.exe` in the bundle.
     let target = format!("bin/{}", spec.program);
@@ -630,6 +637,31 @@ mod tests {
             .map(|file| file.name().to_owned())
             .collect();
         assert_eq!(names, vec![String::from("f1"), String::from("f2")]);
+
+        // A rebuild at the same version is another product, and the Upgrade table removes
+        // up to this version inclusive (512), so it replaces the installed one.
+        let product_of = |path: &std::path::Path| -> Result<Option<String>, Failure> {
+            Ok(assert_ok!(properties(path), "properties")
+                .into_iter()
+                .find(|(key, _)| key == "ProductCode")
+                .map(|(_, value)| value))
+        };
+        scratch.write("tree/share/notes/dist/index.html", "<p>rebuilt</p>\n")?;
+        let three = scratch.path().join("three.msi");
+        assert_ok!(write(&make(&three)), "rebuilt");
+        let (before, after) = (product_of(&one)?, product_of(&three)?);
+        ensure!(before.is_some() && before != after, "a rebuild has its own ProductCode");
+        assert_eq!(product_of(&two)?, before);
+        let upgrade = assert_ok!(
+            package.select_rows(::msi::Select::table("Upgrade")),
+            "upgrade"
+        )
+        .map(|row| (row[2].as_str().map(str::to_owned), row[4].as_int()))
+        .collect::<Vec<_>>();
+        ensure!(
+            upgrade.contains(&(Some(String::from("1.2.3")), Some(512))),
+            "the same version is removed: {upgrade:?}"
+        );
         Ok(())
     }
 }

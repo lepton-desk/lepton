@@ -493,13 +493,15 @@ pub(super) fn rows(
     db.rows(
         "Upgrade",
         vec![
-            // Older versions: found, and removed by RemoveExistingProducts.
+            // Older versions and another build of this one (512, VersionMax inclusive):
+            // found, and removed by RemoveExistingProducts. ICE61 warns about the equal
+            // version, as it does for WiX's `AllowSameVersionUpgrades`.
             vec![
                 text(upgrade),
                 Cell::Null,
                 text(version),
                 Cell::Null,
-                Cell::Int(0),
+                Cell::Int(512),
                 Cell::Null,
                 text("UPGRADEFOUND"),
             ],
