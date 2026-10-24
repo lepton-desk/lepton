@@ -29,10 +29,18 @@ Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Wi
 
 ## Yayın durumu
 
-- Bütün paketler `0.1.9-beta.2`'de, commit `f4e8fec` (trunk). Hiçbiri yayımlanmadı.
-- `tools/npm-preflight.sh` Linux'ta tek bir yerde duruyor: `@lepton-desk/cli-win32-x64` yerleştirilmedi. Bu bekleniyor; sıra Windows'tan başlar.
-- Windows tarafı hazır (2026-10-21): `cli-win32-x64` yerleştirildi, `api`, `plugin-clipboard`, `plugin-dialog`'un `prepublishOnly`'si geçti. Yayımlayan kişi `docs/yayin.md` 4a'daki dört komutu çalıştırır. `beta.1` yayında (`beta` etiketi).
-- `@lepton-desk/servo-linux-x64`'ün kitaplığı CI'dan geldi (`servo-bridge`, çalıştırma 39491335347, SHA-256 `f67bde25…a4f`, CI raporuyla aynı) ve `tools/stage-servo.mjs` ile yerleştirildi. Kitaplık git'te değil: yayımlayan makinede yeniden yerleştirilmeli.
+- **Windows tarafı yayımlandı (2026-10-24, commit `9fbb8bc`):** `cli-win32-x64`, `api`, `plugin-clipboard` ve `plugin-dialog` `0.1.9-beta.2`, `beta` etiketiyle npm'de. `cli-win32-x64`'ün npm'deki özeti yerleştirilen paketle aynı (`7b9b067a…`).
+  - Yayından önce bu makinede `pnpm` açılmıyordu (vite-plus pnpm 12.15.0'ı kuramıyor). Bu yüzden üç paketin `prepublishOnly`'si npm ile koşturuldu (derleme, Biome + `tsc`, testler: 21/1/3, hepsi geçti) ve yayın `--ignore-scripts` ile yapıldı.
+- **Linux tarafı, yayından önce (kullanıcı, Linux makinesinde):**
+  1. Yukarıdaki "İlk iş" 3'teki ekran ölçümleri.
+  2. `git pull`, sonra `tools/npm-preflight.sh`. `cli-win32-x64` artık npm'de olduğu için bu adım "published from Windows" diye geçmeli.
+  3. `docs/yayin.md` 4b'deki sıra: `cli-linux-x64`, `cli`, `plugin-os`, `plugin-fs`, `servo-linux-x64`, en son `create-lepton-app`.
+- `beta.1` yayında (`beta` etiketi, Linux paketleri için).
+- `@lepton-desk/servo-linux-x64`: Daha önce yerleştirilen kitaplık (çalıştırma 39491335347, `1a55272`) eski; `servo/` sonra üç commit'le değişti (son: `659545b`, çerez kavanozu). O commit'in `servo-bridge` çalıştırması başarılı: **39576853066**. Linux'ta onunkini yerleştirin:
+  - `gh run download 39576853066 -n liblepton_servo -D /tmp/servo`
+  - `node tools/stage-servo.mjs /tmp/servo/liblepton_servo.so.xz`
+
+  Betiğin yazdığı SHA-256, CI raporundaki `sha256:` satırıyla aynı olmalı. Kitaplık git'te değil.
 
 ## Windows'ta yapılacaklar
 
