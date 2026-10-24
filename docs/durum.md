@@ -240,12 +240,22 @@ Eksik:
 7. **İzin türleri (WebView2'nin sınırı, belgelendi):** WebView2'nin izin türleri (`COREWEBVIEW2_PERMISSION_KIND`, başlıktan okundu) Lepton'ınkilerden yalnız kamera, mikrofon, konum, bildirimi içeriyor; `pointer-lock`, `device-info`, `media-keys`, `storage-access`, `xr` için karşılık yok. Sessiz kalmasın diye Windows hedefli derlemede bunlardan biri `allow`/`ask` ise CLI söylüyor (`inert_on_windows`, test). `navigator.permissions.query`'yi politikadan cevaplatacak bir WebView2 API'si yok.
 8. ~~Oturum kapanışı~~ **Düzeltildi:** pencere `WM_ENDSESSION`'ı (wParam TRUE) başlık çubuğunun kapatmasıyla aynı yoldan işliyor; `WM_QUERYENDSESSION` `DefWindowProcW`'nin izniyle. Ölçüldü (iletiler sürece gönderilerek; gerçek oturum kapatma denenmedi): native uygulama önce 5 sn sonra hâlâ çalışıyordu, sonra 263 ms'de çıkış 0; WebView2 uygulaması önce çalışıyordu, sonra 61 ms'de çıkış 0.
 9. ~~Motor kurulum önerisi yok~~ **Düzeltildi:** winget varsa `winget install --id Microsoft.EdgeWebView2Runtime --exact` öneriliyor ve terminalde "Install it now?" soruluyor (Linux'taki gibi; sözleşmeleri winget kendisi soruyor); paket kimliği `winget show` ile ölçüldü (Microsoft Corporation, 155.0.4283.62). Öneri `--native`'i de anıyor (native yol artık Windows'ta var). WebView2'siz makinede denenmedi.
-10. Yoklama araçları (`webview-check`, `engine-caps`, `platform-check`…) Linux'a özel; Windows'ta yalnız `webview2-check`.
+10. ~~Yoklama araçları Linux'a özel~~ **Düzeltildi (2026-10-24):**
+    - **Ölçüldü:** `native-check`, `webview-check` ve `window-check` Windows'ta listeleniyor ama derlenmiyordu. Artık Windows'ta karşılığını söyleyerek duruyorlar (`linuxProbe`): `win32-window-check`, `windows-gpu-check`, `webview2-check`.
+    - **Windows'ta çalışan yoklamalar:**
+      - `roundtrip`: p50 208 ns, p99 304 ns;
+      - `webview2-check`;
+      - `win32-window-check`;
+      - `windows-gpu-check`.
+    - `engine-caps` ve `platform-check` WPE ve Wayland'i ölçüyor; Windows'ta listelenmiyorlar.
+    - `build.zig` 892 satırdı (sınır 800). Windows ve Linux GPU yoklamaları `src/build_windows_probes.zig` ve `src/build_linux_probes.zig` dosyalarına taşındı; `build.zig` 766 satır.
 11. ~~`windows_tests.zig` … kapsamıyor~~ **Düzeltildi (2026-10-23):** `transport`, `activation`, `bridge` (ve onunla `record`, `replay`, `page_replay`, `features`), `assets`, `single_instance` Windows testlerinde; 92 → 135 test, üç koşuda da geçti. Kapsama girince bulunan, düzeltilen: kayıt testleri dosyayı `std.c.open`/`statx` ile okuyordu (Windows'ta derlenmiyordu; artık `record.readBackForTest`, `0600` denetimi Linux'ta); `transport` ve `features` testleri kökeni `lepton://localhost` diye sabit yazmıştı (Windows'ta `http://lepton.localhost`, `core_origin`); `activation` testi Windows'ta `press`'in sayılmasını bekliyordu (orada sayılan sistemin girdisi, tasarım gereği). Üretim kodunda hata çıkmadı.
 12. ~~Çocuklar `taskkill /T /F` ile bitiyor~~ **Düzeltildi:** önce `/F`'siz `taskkill /T` (pencereli süreç `WM_CLOSE` alır), kabul edildiyse 2 sn beklenir, sonra `/F`. Ölçüldü: Lepton uygulaması `/F`'siz 377 ms'de çıkış 0, `/F` ile çıkış 1; konsol süreci `/F`'sizi hemen 128 ile reddediyor (beklemeden `/F`). `lepton`'a Ctrl-C ile uçtan uca denenmedi (başka bir konsoldan Ctrl-C gönderilemiyor).
 13. ~~Windows'ta yapılan `tar.gz`'de ikili `+x` almıyor~~ **Düzeltildi:** Windows'ta yürütme biti yok; paketin programı her zaman `bin/<ad>`, o üye `+x` işaretleniyor (`marked_executable`, test).
 - ~~Eski yorum: `plugin-fs/zig/plugin.zig:280`~~ düzeltildi (inotify / `ReadDirectoryChangesW`).
-14. Dev sunucusu sayfasında çerezlerin kalıcılığı Windows'ta ölçülmedi.
+14. ~~Dev sunucusu sayfasında çerezlerin kalıcılığı~~ **Ölçüldü (2026-10-24):**
+    - **Sonuç:** Proje npm kullanıyordu, köken `http://127.0.0.1:5173`. İki ayrı `lepton dev` oturumunda ikinci açılışta sayfa ilk açılışın çerezini (`probe=kept`, `max-age`) ve `localStorage`'ını (`seen=2`) okudu.
+    - **Ölçüm sırasında görülen:** İlk iki `lepton dev` denemesinde çekirdeğin Debug derlemesi `translate-c` adımında `AccessDenied` ile durdu (boş önbellek). Aynı komut elle iki kez geçti, sonra `lepton dev` de geçti. Sebebi araştırılmadı.
 - Bilerek: Servo yalnız Linux; systemd scope/masaüstü girdisi Linux'a özel; MSIX/imza sertifika bekliyor; arm64 yok.
 
 ### Linux'ta (Windows'ta olup Linux'ta olmayan)

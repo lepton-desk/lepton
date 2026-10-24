@@ -624,7 +624,7 @@ pub fn build(b: *std.Build) void {
 
     const run_native_check = b.addRunArtifact(native_check);
     const native_check_step = b.step("native-check", "Paint a real window with the native path and report what reached the screen");
-    native_check_step.dependOn(&run_native_check.step);
+    linuxProbe(b, target, native_check_step, &run_native_check.step, "native-check paints through the Linux window layers; on Windows the native path is measured by win32-window-check and windows-gpu-check");
 
     if (configured.protocol_step) |generated| {
         native_check.step.dependOn(generated);
@@ -653,7 +653,7 @@ pub fn build(b: *std.Build) void {
 
     const run_webview_check = b.addRunArtifact(webview_check);
     const webview_check_step = b.step("webview-check", "Load a real page into a real frame and report what changed");
-    webview_check_step.dependOn(&run_webview_check.step);
+    linuxProbe(b, target, webview_check_step, &run_webview_check.step, "webview-check loads a page into WPE WebKit; on Windows the engine is WebView2: webview2-check");
 
     if (configured.protocol_step) |generated| {
         webview_check.step.dependOn(generated);
@@ -662,76 +662,7 @@ pub fn build(b: *std.Build) void {
     // The WebView2 probe: Windows only, and on its own — the core does not build there yet
     // (POSIX IPC, the Linux window layer). `webview2/` holds Microsoft's header.
     if (target.result.os.tag == .windows) {
-        const webview2_check = support.throughLld(b.addExecutable(.{
-            .name = "lepton-webview2-check",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/tools/webview2_check.zig"),
-                .target = target,
-                .optimize = std.builtin.OptimizeMode.Debug,
-                .link_libc = true,
-            }),
-        }));
-        webview2_check.root_module.addIncludePath(b.path("webview2"));
-        support.addCModules(b, webview2_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_webview2_check"});
-        for ([_][]const u8{ "ole32", "user32", "advapi32", "shlwapi" }) |name| {
-            webview2_check.root_module.linkSystemLibrary(name, .{});
-        }
-        const run_webview2_check = b.addRunArtifact(webview2_check);
-        b.step(
-            "webview2-check",
-            "Put WebView2 in a real Win32 window, load a page and report what reached it",
-        ).dependOn(&run_webview2_check.step);
-
-        // The native render path's Win32 window, measured from the screen. The window layer
-        // comes from `src/windows_root.zig`: the core's root does not build on Windows yet.
-        const window_layer = b.createModule(.{
-            .root_source_file = b.path("src/windows_root.zig"),
-            .target = target,
-            .optimize = std.builtin.OptimizeMode.Debug,
-            .link_libc = true,
-        });
-        window_layer.addIncludePath(b.path("webview2"));
-        support.addCModules(b, window_layer, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &core_c_headers);
-        const win32_window_check = support.throughLld(b.addExecutable(.{
-            .name = "lepton-win32-window-check",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/tools/win32_window_check.zig"),
-                .target = target,
-                .optimize = std.builtin.OptimizeMode.Debug,
-                .link_libc = true,
-                .imports = &.{.{ .name = "lepton_window", .module = window_layer }},
-            }),
-        }));
-        win32_window_check.root_module.addIncludePath(b.path("webview2"));
-        support.addCModules(b, win32_window_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_windows"});
-        for ([_][]const u8{ "user32", "gdi32", "dwmapi" }) |name| {
-            win32_window_check.root_module.linkSystemLibrary(name, .{});
-        }
-        b.step(
-            "win32-window-check",
-            "Open the native path's Win32 window, present a frame and read it back from the screen",
-        ).dependOn(&b.addRunArtifact(win32_window_check).step);
-
-        // The GPU half's first measurement: a Direct3D 11 device and a flip-model swap chain
-        // on that window, read back from the screen; WARP alongside.
-        const windows_gpu_check = support.throughLld(b.addExecutable(.{
-            .name = "lepton-windows-gpu-check",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/tools/windows_gpu_check.zig"),
-                .target = target,
-                .optimize = std.builtin.OptimizeMode.Debug,
-                .link_libc = true,
-                .imports = &.{.{ .name = "lepton_window", .module = window_layer }},
-            }),
-        }));
-        support.addCModules(b, windows_gpu_check.root_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_windows"});
-        for ([_][]const u8{ "user32", "gdi32", "dwmapi", "d3d11", "dxgi", "dwrite", "opengl32" }) |name| {
-            windows_gpu_check.root_module.linkSystemLibrary(name, .{});
-        }
-        b.step(
-            "windows-gpu-check",
-            "Draw with Direct3D 11 into the native window and read it back from the screen",
-        ).dependOn(&b.addRunArtifact(windows_gpu_check).step);
+        @import("src/build_windows_probes.zig").add(b, target, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &core_c_headers);
     }
 
     // Only built where the engine is linked. A capability report on a build with no
@@ -802,56 +733,7 @@ pub fn build(b: *std.Build) void {
     // rests on it and a plan built on an unmeasured assumption is the failure mode this
     // project keeps paying for.
     if (std.mem.eql(u8, render, "native") and hasPkgConfig(b, "egl")) {
-        // Linked on the module, before the executable is made from it: `std.Build`
-        // refuses a link after a compilation step exists, and the core module has the
-        // same rule written next to its own library links.
-        const gpu_module = b.createModule(.{
-            .root_source_file = b.path("src/tools/gpu_check.zig"),
-            .target = target,
-            .optimize = std.builtin.OptimizeMode.Debug,
-            .link_libc = true,
-            .imports = &.{
-                .{ .name = "lepton_core", .module = core },
-            },
-        });
-        gpu_module.linkSystemLibrary("egl", .{});
-        // EGL makes the context; OpenGL ES is what draws into it, and the two are
-        // separate libraries. Linking only EGL leaves `glClear` undefined at link time.
-        gpu_module.linkSystemLibrary("GLESv2", .{});
-        gpu_module.linkSystemLibrary("wayland-egl", .{});
-        support.addCModules(b, gpu_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_gpu_check"});
-        // The bare-surface probe builds a `wl_surface` itself rather than taking the
-        // window's, which means it needs the Wayland client library directly instead of
-        // inheriting it from the core module.
-
-        const gpu_check = support.throughLld(b.addExecutable(.{
-            .name = "lepton-gpu-check",
-            .root_module = gpu_module,
-        }));
-
-        const run_gpu_check = b.addRunArtifact(gpu_check);
-        const gpu_check_step = b.step(
-            "gpu-check",
-            "Measure whether this framework's own window can carry a GPU surface",
-        );
-        gpu_check_step.dependOn(&run_gpu_check.step);
-
-        const scene_window_check = support.throughLld(b.addExecutable(.{
-            .name = "lepton-scene-window-check",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path("src/tools/scene_window_check.zig"),
-                .target = target,
-                .optimize = std.builtin.OptimizeMode.ReleaseSafe,
-                .link_libc = true,
-                .imports = &.{.{ .name = "lepton_core", .module = core }},
-            }),
-        }));
-        const scene_window_step = b.step(
-            "scene-window-check",
-            "Present the draw command list in a real window for 3 s and read the surface back",
-        );
-        scene_window_step.dependOn(&b.addRunArtifact(scene_window_check).step);
-        if (configured.protocol_step) |generated| scene_window_check.step.dependOn(generated);
+        @import("src/build_linux_probes.zig").gpu(b, target, core, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), configured.protocol_step);
     }
 
     // The 0.2.0 GPU renderer's first measurement: does this machine's Vulkan meet the
@@ -859,34 +741,26 @@ pub fn build(b: *std.Build) void {
     // features draw? Headless, so it is not tied to the render path. Linux only: Windows'
     // Vulkan is not found through pkg-config (the Windows native path will load it).
     if (target.result.os.tag == .linux and hasPkgConfig(b, "vulkan")) {
-        const vulkan_module = b.createModule(.{
-            .root_source_file = b.path("src/tools/vulkan_check.zig"),
-            .target = target,
-            .optimize = std.builtin.OptimizeMode.Debug,
-            .link_libc = true,
-            .imports = &.{
-                .{ .name = "lepton_core", .module = core },
-            },
-        });
-        vulkan_module.linkSystemLibrary("vulkan", .{});
-        support.addCModules(b, vulkan_module, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &.{"c_vulkan"});
-        const vulkan_check = support.throughLld(b.addExecutable(.{
-            .name = "lepton-vulkan-check",
-            .root_module = vulkan_module,
-        }));
-        const run_vulkan_check = b.addRunArtifact(vulkan_check);
-        const vulkan_check_step = b.step(
-            "vulkan-check",
-            "Measure whether this machine's Vulkan meets the native renderer's threshold, and draws",
-        );
-        vulkan_check_step.dependOn(&run_vulkan_check.step);
+        @import("src/build_linux_probes.zig").vulkan(b, target, core, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null));
     }
 
     const run_window_check = b.addRunArtifact(window_check);
     const window_check_step = b.step("window-check", "Open a real window and report what the server said");
-    window_check_step.dependOn(&run_window_check.step);
+    linuxProbe(b, target, window_check_step, &run_window_check.step, "window-check opens a Wayland or X11 window; on Windows: win32-window-check");
 
     if (configured.protocol_step) |generated| {
         window_check.step.dependOn(generated);
+    }
+}
+
+/// A probe of the Linux layers (Wayland/X11, WPE): on another system the step says which
+/// probe measures the same thing there, instead of failing to compile the Linux code
+/// (measured: `native-check`, `webview-check` and `window-check` on Windows were compile
+/// errors).
+fn linuxProbe(b: *std.Build, target: std.Build.ResolvedTarget, step: *std.Build.Step, run: *std.Build.Step, elsewhere: []const u8) void {
+    if (target.result.os.tag == .linux) {
+        step.dependOn(run);
+    } else {
+        step.dependOn(&b.addFail(elsewhere).step);
     }
 }
