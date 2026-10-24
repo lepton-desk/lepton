@@ -10,7 +10,7 @@ const c = wv.c;
 
 /// Listens on `webview` when this is a Debug build; a release build prints nothing.
 pub fn watch(webview: *c.ICoreWebView2, handler: *c.ICoreWebView2DevToolsProtocolEventReceivedEventHandler, enabled: *c.ICoreWebView2CallDevToolsProtocolMethodCompletedHandler) void {
-    if (builtin.mode != .Debug) return;
+    if (builtin.mode != std.builtin.OptimizeMode.Debug) return;
     var receiver: ?*c.ICoreWebView2DevToolsProtocolEventReceiver = null;
     if (!wv.ok(webview.lpVtbl.*.GetDevToolsProtocolEventReceiver.?(webview, wv.W("Runtime.consoleAPICalled"), @ptrCast(&receiver)))) return;
     const events = receiver orelse return;

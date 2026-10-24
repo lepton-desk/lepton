@@ -9,6 +9,9 @@
 //! - `bundle.icon` → `-Dicon=<path>`, for a Windows build only: the Windows program's
 //!   icon — its title bar, taskbar button and Explorer icon. Without it, Lepton's own
 //!   (written into the build cache).
+//! - `identifier`, `productName`, `channel.name`, `window.title` → `-Didentifier=…`,
+//!   `-Dproduct=…`, `-Dchannel=…`, `-Dtitle=…`: who the application is, so an edit after
+//!   `lepton new` reaches the program.
 //!
 //! A project whose `src-lepton/build.zig` predates an option keeps building without it
 //! and is told what it misses, as `size_window` does for the size.
@@ -112,6 +115,12 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
     } else {
         None
     };
+    // Who the application is (`identifier`, `productName`, `channel.name`, `window.title`):
+    // a build option, so an edit reaches the program, and Zig 0.17's cached configuration
+    // with it. An older `build.zig` has the values written into `main.zig` instead.
+    if build.contains("\"identifier\"") {
+        args.extend(identity_args(&text)?);
+    }
     for step in steps.iter_mut() {
         if is_core_build(step) {
             step.args.extend(args.iter().cloned());
@@ -121,6 +130,33 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
         }
     }
     Ok(())
+}
+
+/// `-Didentifier=…`, `-Dproduct=…`, and `-Dchannel=…` / `-Dtitle=…` when the configuration
+/// names them (the template derives them otherwise, as `lepton new` does).
+fn identity_args(text: &str) -> Result<Vec<String>, CliError> {
+    let config: Value = serde_json::from_str(text).map_err(|error| {
+        CliError::Invalid(format!("lepton.config.json is not valid JSON: {error}"))
+    })?;
+    let at = |path: &[&str]| {
+        path.iter()
+            .try_fold(&config, |value, key| value.get(key))
+            .and_then(Value::as_str)
+    };
+    let identifier = at(&["identifier"]).ok_or_else(|| {
+        CliError::Invalid("lepton.config.json has no \"identifier\"".to_owned())
+    })?;
+    let mut args = vec![format!("-Didentifier={identifier}")];
+    if let Some(product) = at(&["productName"]) {
+        args.push(format!("-Dproduct={product}"));
+    }
+    if let Some(channel) = at(&["channel", "name"]) {
+        args.push(format!("-Dchannel={channel}"));
+    }
+    if let Some(title) = at(&["window", "title"]) {
+        args.push(format!("-Dtitle={title}"));
+    }
+    Ok(args)
 }
 
 /// Whether a core build makes a Windows program: its `-Dtarget`, or this machine without one.
@@ -183,6 +219,31 @@ mod tests {
             read(root, r#"{"window":{"decorations":"no"}}"#),
             "a string is not a boolean"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn the_build_is_handed_who_the_application_is() -> Result<(), Failure> {
+        let args = assert_ok!(
+            super::identity_args(
+                r#"{"identifier":"dev.lepton.notes","productName":"Notes","channel":{"name":"/lepton-dev.lepton.notes"},"window":{"title":"My Notes"}}"#
+            ),
+            "a full configuration"
+        );
+        assert_eq!(
+            args,
+            vec![
+                "-Didentifier=dev.lepton.notes".to_owned(),
+                "-Dproduct=Notes".to_owned(),
+                "-Dchannel=/lepton-dev.lepton.notes".to_owned(),
+                "-Dtitle=My Notes".to_owned(),
+            ]
+        );
+        assert_eq!(
+            assert_ok!(super::identity_args(r#"{"identifier":"a.b"}"#), "only the identifier"),
+            vec!["-Didentifier=a.b".to_owned()]
+        );
+        assert_err!(super::identity_args("{}"), "no identifier");
         Ok(())
     }
 
