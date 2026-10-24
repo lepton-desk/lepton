@@ -430,6 +430,22 @@ pub(super) fn rows(
         text(spec.product),
         text("shortcut"),
     ]);
+    // Its icon: a path to the `.ico` the template installs as `share/<name>/icon.ico`;
+    // without one Windows draws a blank placeholder beside the name (measured).
+    if let Some(icon) = notification_icon(files) {
+        scheme_rows.push(vec![
+            text("notification_icon"),
+            Cell::Int(1),
+            text(&format!(
+                "Software\\Classes\\AppUserModelId\\{}",
+                spec.identifier
+            )),
+            text("IconUri"),
+            text(&format!("[#{}]", icon.key)),
+            // The file's own component, which a reference to it must share (ICE69).
+            text(&icon.component),
+        ]);
+    }
     db.rows("Registry", scheme_rows)?;
     // The shortcut belongs to its target's component (ICE69): it comes and goes with the
     // program, whose key path is an HKCU value (ICE43).
@@ -572,4 +588,39 @@ pub(super) fn rows(
             .collect(),
     )?;
     Ok(())
+}
+
+/// The `.ico` the template installs for the program's notifications: `share/<name>/icon.ico`.
+fn notification_icon(files: &[File]) -> Option<&File> {
+    files.iter().find(|file| {
+        let parts: Vec<&str> = file.relative.split('/').collect();
+        matches!(parts.as_slice(), ["share", name, "icon.ico"] if !name.is_empty())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{File, notification_icon};
+
+    fn file(key: &str, relative: &str) -> File {
+        File {
+            key: key.into(),
+            component: String::new(),
+            directory: String::new(),
+            name: String::new(),
+            relative: relative.into(),
+            bytes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_notification_icon_is_the_one_beside_the_frontend() {
+        let files = [
+            file("f1", "bin/notes.exe"),
+            file("f2", "share/notes/dist/icon.ico"),
+            file("f3", "share/notes/icon.ico"),
+        ];
+        assert_eq!(notification_icon(&files).map(|icon| icon.key.as_str()), Some("f3"));
+        assert!(notification_icon(&files[..2]).is_none());
+    }
 }

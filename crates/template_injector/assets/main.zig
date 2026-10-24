@@ -22,6 +22,14 @@
 //! engine changes.
 
 const std = @import("std");
+/// Who the application is: `lepton.config.json`'s `identifier`, `productName`, `channel.name` and
+/// `window.title`, read by `build.zig` on every build, so an edit there reaches the program.
+const who = struct {{
+    const identifier = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").identifier}});
+    const product = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").product}});
+    const channel = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").channel}});
+    const title = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").title}});
+}};
 const builtin = @import("builtin");
 const core = @import("lepton_core");
 
@@ -98,7 +106,7 @@ fn run(init: std.process.Init.Minimal) !void {{
 
     // `lepton replay`: the recorded requests run against these commands with no window,
     // and the process ends with the verdict. Before the display: a replay needs none.
-    var app_state: AppState = .{{ .product = "{product}" }};
+    var app_state: AppState = .{{ .product = who.product }};
     if (comptime !core.render.is_native) {{
         if (core.webviewReplay.requested() != null) {{
             const registry = commands.bind(&app_state);
@@ -121,7 +129,7 @@ fn run(init: std.process.Init.Minimal) !void {{
             if (count == given.len) break;
             given[count] = arg;
         }}
-        switch (core.singleInstance.claim("{identifier}", given[0..count])) {{
+        switch (core.singleInstance.claim(who.identifier, given[0..count])) {{
             .primary => |held| instance = held,
             .forwarded => return,
             .alone => {{}},
@@ -131,7 +139,7 @@ fn run(init: std.process.Init.Minimal) !void {{
     // The channel is created before the engine: the frontend SDK looks the window up by
     // name the moment its script runs, and a window that appeared a turn later would
     // find nobody home.
-    var window_channel = try core.channel.create(allocator, "{channel}", .{{}});
+    var window_channel = try core.channel.create(allocator, who.channel, .{{}});
     defer window_channel.deinit(allocator);
     // SIGTERM, Ctrl+C or the session ending: the loop ends and every `defer` runs, so the
     // channel leaves `/dev/shm` with the process instead of staying behind.
@@ -159,7 +167,7 @@ fn run(init: std.process.Init.Minimal) !void {{
         std.debug.print(
             "this build cannot load pages: no web engine is installed. install " ++
                 (if (windows) "the WebView2 runtime" else "WPE WebKit") ++
-                " or build with --target native to run {product}\n",
+                " or build with --target native to run " ++ who.product ++ "\n",
             .{{}},
         );
         return error.NoEngine;
@@ -177,7 +185,7 @@ fn run(init: std.process.Init.Minimal) !void {{
     claimOwnDataDirectory();
     // `lepton.config.json`'s `webPermissions`: what the page may ask the engine for.
     core.webviewPermissions.setPolicies(@import("build_options").web_permissions);
-    core.webviewPermissions.setApplication("{identifier}", "{product}");
+    core.webviewPermissions.setApplication(who.identifier, who.product);
 
     // Before the engine too: WebKit's processes inherit the cgroup they are forked in, so
     // the application moves into its own `app-{identifier}-<pid>.scope` first and a task
@@ -186,7 +194,7 @@ fn run(init: std.process.Init.Minimal) !void {{
     // Windows needs no such step: WebView2's processes are this process's children, and
     // Task Manager groups them under it.
     if (comptime !windows) {{
-        const scoped = core.scope.enter("{identifier}", "{product}");
+        const scoped = core.scope.enter(who.identifier, who.product);
         core.report.fact("scope", if (scoped == .unavailable) .warn else .good, "{{t}}", .{{scoped}});
     }}
 
@@ -205,7 +213,7 @@ fn run(init: std.process.Init.Minimal) !void {{
     view.resized(@intCast(size.width), @intCast(size.height));
     view.map();
     // The window's name until the page sets `document.title`, and whenever it clears it.
-    view.setTitle("{title}");
+    view.setTitle(who.title);
 
     // The core's scheme, registered on the view that lives here for the whole run. It is
     // both the IPC channel and, for a bundled frontend, the server: a `file://` document
@@ -246,7 +254,7 @@ fn run(init: std.process.Init.Minimal) !void {{
 
     // The size is printed from the value the engine was given rather than from a second
     // copy baked in at substitution time, so the two cannot drift apart.
-    core.report.fact("window", .plain, "{product} · {{s}} · {{d}}×{{d}}", .{{
+    core.report.fact("window", .plain, who.product ++ " · {{s}} · {{d}}×{{d}}", .{{
         session,
         size.width,
         size.height,
@@ -258,9 +266,9 @@ fn run(init: std.process.Init.Minimal) !void {{
     // A second, private channel for the round-trip figure: a frame out and its echo back
     // through a real mapping, timed. Separate from the page's ring so the probe never
     // consumes a sample the page has not read.
-    var rtt_window = try core.channel.create(allocator, "{channel}-rtt", .{{ .cell_count = 2 }});
+    var rtt_window = try core.channel.create(allocator, who.channel ++ "-rtt", .{{ .cell_count = 2 }});
     defer rtt_window.deinit(allocator);
-    var rtt_peer = try core.channel.attach(allocator, "{channel}-rtt");
+    var rtt_peer = try core.channel.attach(allocator, who.channel ++ "-rtt");
     defer rtt_peer.deinit(allocator);
 
     window_channel.sendHello(core.wire.Mode.webview, 0) catch |err| switch (err) {{
@@ -429,8 +437,8 @@ fn configuredSize() core.window.Size {{
 /// engine is: the frontend SDK looks it up by name the moment its script runs.
 fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void {{
     const request: core.window.Request = .{{
-        .title = "{product}",
-        .app_id = "{identifier}",
+        .title = who.title,
+        .app_id = who.identifier,
         .size = configuredSize(),
         // The masthead's colour (`Palette.rail`): the system title bar takes it (Windows).
         .title_colour = .{{ 0x1b, 0x20, 0x26 }},
@@ -484,7 +492,7 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
 
     std.debug.print("render       native, no engine\n", .{{}});
     std.debug.print("requested    {{d}}x{{d}}\n", .{{ request.size.width, request.size.height }});
-    std.debug.print("channel      {{s}}\n", .{{"{channel}"}});
+    std.debug.print("channel      {{s}}\n", .{{who.channel}});
     std.debug.print("frames       {{t}}\n", .{{request.pacing}});
 
     var frames: u32 = 0;
@@ -608,7 +616,7 @@ fn paint(frame: *core.surface.Surface, subject: ?*core.render.Text, frames: u32,
 
 /// The screen's type: the name, the frame counter and the resident set.
 fn label(type_face: *core.render.Text, frames: u32, state: *State, ink: Palette) void {{
-    _ = type_face.draw(baseline, baseline * 3, "{product}", ink.heading);
+    _ = type_face.draw(baseline, baseline * 3, who.product, ink.heading);
     _ = type_face.draw(baseline, baseline * 3 + baseline * 2, "native render, no web engine", ink.body);
 
     // The frame counter, which is the part a developer actually watches: it only advances
@@ -664,7 +672,7 @@ const GpuScreen = if (core.gles3.available) struct {{
         const b: f32 = baseline;
         try self.list.rect(allocator, .{{ .x = 0, .y = top, .width = w, .height = b * 4 }}, .{{ .fill = scene.rgba(0x1b2026ff) }});
         try self.list.rect(allocator, .{{ .x = 0, .y = top + b * 4, .width = w, .height = 1 }}, .{{ .fill = scene.rgba(0x2c343dff) }});
-        _ = try self.heading.draw(allocator, &self.glyphs, &self.list, "{product}", b, top + b * 2, scene.rgba(0xe6eaefff));
+        _ = try self.heading.draw(allocator, &self.glyphs, &self.list, who.product, b, top + b * 2, scene.rgba(0xe6eaefff));
         _ = try self.body.draw(allocator, &self.glyphs, &self.list, "native render, drawn on the GPU", b, top + b * 3, scene.rgba(0x9da7b2ff));
 
         var line: [64]u8 = undefined;
@@ -677,7 +685,7 @@ const GpuScreen = if (core.gles3.available) struct {{
             try self.list.rect(allocator, .{{ .x = b, .y = y, .width = w - b * 2, .height = 1 }}, .{{ .fill = scene.rgba(0x1f252bff) }});
         }}
 
-        try core.chromeScene.titlebar(handle.input, "{product}", &self.body, allocator, &self.glyphs, &self.list);
+        try core.chromeScene.titlebar(handle.input, who.product, &self.body, allocator, &self.glyphs, &self.list);
         try core.chromeScene.menu(handle.menu, &self.body, allocator, &self.glyphs, &self.list);
         try handle.presentScene(&self.list, &self.glyphs, scene.rgba(0x14181cff), size, null);
     }}
@@ -730,7 +738,7 @@ const WinGpuScreen = if (core.windowsGpu.available) struct {{
         const b: f32 = baseline;
         try self.list.rect(allocator, .{{ .x = 0, .y = 0, .width = w, .height = b * 4 }}, .{{ .fill = scene.rgba(0x1b2026ff) }});
         try self.list.rect(allocator, .{{ .x = 0, .y = b * 4, .width = w, .height = 1 }}, .{{ .fill = scene.rgba(0x2c343dff) }});
-        _ = try self.heading.draw(allocator, &self.glyphs, &self.list, "{product}", b, b * 2, scene.rgba(0xe6eaefff));
+        _ = try self.heading.draw(allocator, &self.glyphs, &self.list, who.product, b, b * 2, scene.rgba(0xe6eaefff));
         _ = try self.body.draw(allocator, &self.glyphs, &self.list, "native render, drawn on the GPU", b, b * 3, scene.rgba(0x9da7b2ff));
 
         var line: [64]u8 = undefined;
@@ -885,7 +893,7 @@ fn openWindow(allocator: std.mem.Allocator, request: core.window.Request) !Opene
 /// a shared directory would let one application read another's storage — which is what
 /// happened before this, measured.
 fn claimOwnDataDirectory() void {{
-    if (core.render.use_application_directories("{identifier}")) return;
+    if (core.render.use_application_directories(who.identifier)) return;
     // Windows: `%LOCALAPPDATA%` is set for every signed-in user; without it the engine
     // keeps its own default, `<exe>.WebView2` beside the executable.
     if (comptime windows) return;

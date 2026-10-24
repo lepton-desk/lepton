@@ -224,7 +224,11 @@ fn the_zig_entry_point_carries_the_manifests_own_values() -> Result<(), Failure>
     let planned = planned_for(&manifest)?;
     let zig = contents_of(&planned, "src-lepton/main.zig")?;
 
-    assert_contains!(zig, manifest.channel_name.as_str());
+    // Nor are the channel and identifier: `build.zig` reads them from
+    // `lepton.config.json`, so an identifier edited after `lepton new` reaches the
+    // program as it reaches the installer.
+    assert_absent!(zig, manifest.channel_name.as_str());
+    assert_contains!(zig, "who.channel");
     assert_contains!(zig, "Ledger");
     // The size is not written into `main.zig`: once it was, and editing the
     // configuration afterwards changed nothing. It comes from the build options the
@@ -235,6 +239,7 @@ fn the_zig_entry_point_carries_the_manifests_own_values() -> Result<(), Failure>
     let build = contents_of(&planned, "src-lepton/build.zig")?;
     assert_contains!(build, "\"window-width\"");
     assert_contains!(build, "\"window_height\"");
+    assert_contains!(build, "../lepton.config.json");
 
     // Braces must balance, or the file a developer opens first is a syntax error.
     balanced(zig, '{', '}')

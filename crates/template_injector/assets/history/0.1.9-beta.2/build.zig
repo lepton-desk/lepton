@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) !void {
     try check_render_options(render, servo_lib != null);
 
     const name = b.option([]const u8, "name", "The binary's name") orelse "app";
+    const app = try identity(b);
 
     // The development server's address, given to the build by `lepton dev` rather than
     // compiled into the source. The frontend is a *runtime* address for this framework,
@@ -106,6 +107,10 @@ pub fn build(b: *std.Build) !void {
     options.addOption(u32, "window_height", window_height);
     options.addOption(bool, "window_decorations", window_decorations);
     options.addOption([]const u8, "frame_rate", @tagName(frame_rate));
+    options.addOption([]const u8, "identifier", app.identifier);
+    options.addOption([]const u8, "product", app.product);
+    options.addOption([]const u8, "channel", app.channel);
+    options.addOption([]const u8, "title", app.title);
 
     const root = b.createModule(.{
         .root_source_file = b.path("main.zig"),
@@ -192,6 +197,9 @@ pub fn build(b: *std.Build) !void {
         _ = resources.addCopyFile(source, "lepton-icon.ico");
         const script = resources.add("lepton-icon.rc", "1 ICON \"lepton-icon.ico\"\n");
         exe.root_module.addWin32ResourceFile(.{ .file = script });
+        // And as a file, `share/<name>/icon.ico`: the core names it as the icon of the
+        // program's notifications (`IconUri`), which takes a path, not a resource.
+        b.getInstallStep().dependOn(&b.addInstallFile(source, b.fmt("share/{s}/icon.ico", .{name})).step);
     };
 
     b.installArtifact(exe);
@@ -275,6 +283,61 @@ fn check_render_options(render: []const u8, servo: bool) !void {
         std.log.err("lepton: -Dservo-lib needs the webview render path: Servo is the engine the webview renders with, so there is nothing for it to serve in the native path", .{});
         return error.ServoNeedsWebview;
     }
+}
+
+/// Who the application is, read from `../lepton.config.json` on every build: `identifier`,
+/// `productName`, `channel.name` (`/lepton-<identifier>` without one) and `window.title`
+/// (the product's name without one). `lepton new` once wrote them into `main.zig`, and an
+/// identifier changed afterwards left the program claiming the old one while its installer
+/// registered the new (measured: a notification name and icon on a key the program
+/// never used).
+const Identity = struct { identifier: []const u8, product: []const u8, channel: []const u8, title: []const u8 };
+
+fn identity(b: *std.Build) !Identity {
+    const text = b.build_root.handle.readFileAlloc(b.graph.io, "../lepton.config.json", b.allocator, .limited(1 << 20)) catch |err| {
+        std.log.err("lepton: could not read lepton.config.json beside src-lepton: {t}", .{err});
+        return error.NoConfiguration;
+    };
+    const parsed = std.json.parseFromSliceLeaky(std.json.Value, b.allocator, text, .{}) catch |err| {
+        std.log.err("lepton: lepton.config.json is not valid JSON: {t}", .{err});
+        return error.NoConfiguration;
+    };
+    const root = switch (parsed) {
+        .object => |object| object,
+        else => {
+            std.log.err("lepton: lepton.config.json is not an object", .{});
+            return error.NoConfiguration;
+        },
+    };
+    const identifier = textAt(root, "identifier") orelse {
+        std.log.err("lepton: lepton.config.json has no \"identifier\"", .{});
+        return error.NoConfiguration;
+    };
+    const product = textAt(root, "productName") orelse {
+        std.log.err("lepton: lepton.config.json has no \"productName\"", .{});
+        return error.NoConfiguration;
+    };
+    const channel = if (root.get("channel")) |value| switch (value) {
+        .object => |object| textAt(object, "name"),
+        else => null,
+    } else null;
+    const title = if (root.get("window")) |value| switch (value) {
+        .object => |object| textAt(object, "title"),
+        else => null,
+    } else null;
+    return .{
+        .identifier = identifier,
+        .product = product,
+        .channel = channel orelse b.fmt("/lepton-{s}", .{identifier}),
+        .title = title orelse product,
+    };
+}
+
+fn textAt(object: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    return switch (object.get(key) orelse return null) {
+        .string => |text| text,
+        else => null,
+    };
 }
 
 /// Zig 0.16's own ELF linker, which Debug builds for Linux use, stops at the `.sframe`

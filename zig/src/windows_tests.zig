@@ -14,6 +14,7 @@ test {
     _ = @import("render/webview/webview2/chrome.zig");
     _ = @import("render/webview/webview2/console.zig");
     _ = @import("render/webview/webview2/notifications.zig");
+    _ = @import("render/webview/webview2/permissions.zig");
     _ = @import("render/webview/menu.zig");
     _ = @import("ipc/shm.zig");
     _ = @import("ipc/ring.zig");

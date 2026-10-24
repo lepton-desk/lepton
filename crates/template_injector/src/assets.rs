@@ -503,7 +503,10 @@ mod tests {
         ] {
             assert_absent!(&rendered, placeholder);
         }
-        assert_contains!(&rendered, "/lepton-ledger");
+        // Who the application is comes from the build too (`build.zig` reads
+        // `lepton.config.json`), so an identifier edited later reaches the program.
+        assert_absent!(&rendered, "/lepton-ledger");
+        assert_contains!(&rendered, "who.channel");
         // The size comes from the build, never from numbers written here once.
         assert_contains!(&rendered, "options.window_width");
         balanced(&rendered, '{', '}')
@@ -515,16 +518,14 @@ mod tests {
         // into the output at exactly the place a `replace`-based substitution would
         // rescan, and the identifier that follows would then be filled with the title's
         // text instead of the real one.
-        let rendered = zig_entry("Ledger", "{channel}", "{identifier}", "com.example");
+        let rendered = zig_entry("{identifier}", "{channel}", "{title}", "com.example");
 
-        // The value survives verbatim, which is correct: it is the developer's text.
-        // Asserted through the channel name rather than the window title, because the
-        // channel is the first substituted value in the entry point and a brace in it
-        // lands earlier — before any escaping has had a chance to run.
-        assert_contains!(&rendered, "\"{channel}\"");
+        // The value survives verbatim, which is correct: it is the developer's text. Only
+        // the opening comment carries it now; the code reads `who.product`.
+        assert_contains!(&rendered, "entry point for {identifier}.");
         // And the placeholder after it was filled from the real argument, which is the
-        // property that a rescan would have destroyed.
-        assert_contains!(&rendered, "\"com.example\"");
+        // property a rescan would have destroyed.
+        assert_contains!(&rendered, "share/com.example");
         balanced(&rendered, '{', '}')
     }
 
@@ -765,15 +766,17 @@ mod tests {
 
     #[test]
     fn a_quote_in_a_name_stays_inside_the_zig_literal() -> Result<(), Failure> {
-        // A quote ended `.product = "…"` early and let the rest of the name be code.
+        // A quote ended `.product = "…"` early and let the rest of the name be code. The
+        // names are no longer code at all: the program reads them from the build
+        // (`who.product`), and `build.zig`'s options escape them.
         let entry = super::zig_entry("Bob's \"App\"", "/lepton-bob", "A \\ B", "bob.app");
         ensure!(
-            entry.contains(".product = \"Bob's \\\"App\\\"\""),
-            "the quote is escaped in the product literal"
+            entry.contains(".product = who.product"),
+            "the product comes from the build"
         );
         ensure!(
-            entry.contains("\"A \\\\ B\""),
-            "the backslash is escaped in the title"
+            !entry.contains("\"/lepton-bob\"") && !entry.contains("\"A \\\\ B\""),
+            "no name is written into the code"
         );
         assert_eq!(super::zig_text("a\nb"), "a\\nb");
         Ok(())

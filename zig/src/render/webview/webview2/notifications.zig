@@ -337,6 +337,45 @@ fn registerName(id: []const u16) void {
     const units = std.unicode.utf8ToUtf16Le(name[0 .. name.len - 1], product) catch return;
     name[units] = 0;
     _ = RegSetKeyValueW(hkey_current_user, @ptrCast(&key), wv.W("DisplayName"), c.REG_SZ, &name, @intCast((units + 1) * 2));
+    // Without `IconUri` Windows draws a blank placeholder beside the name (measured); the
+    // value is an .ico file's path (Windows App SDK's `RegisterAssets`). The template
+    // installs the program's icon as `<prefix>\share\<name>\icon.ico`.
+    var icon: [c.MAX_PATH + 64]u16 = undefined;
+    const icon_units = iconPath(&icon) orelse return;
+    _ = RegSetKeyValueW(hkey_current_user, @ptrCast(&key), wv.W("IconUri"), c.REG_SZ, &icon, @intCast((icon_units + 1) * 2));
+}
+
+/// `<prefix>\share\<name>\icon.ico` for `<prefix>\bin\<name>.exe`, NUL-terminated in
+/// `out`; its length in units, or null when the file is not there.
+fn iconPath(out: []u16) ?usize {
+    var exe: [c.MAX_PATH]u16 = undefined;
+    const length = c.GetModuleFileNameW(null, &exe, exe.len);
+    if (length == 0 or length >= exe.len) return null;
+    return iconBeside(exe[0..length], out) orelse return null;
+}
+
+fn iconBeside(exe: []const u16, out: []u16) ?usize {
+    const file_at = (std.mem.lastIndexOfScalar(u16, exe, '\\') orelse return null) + 1;
+    const bin = exe[0 .. file_at - 1];
+    const prefix = bin[0 .. std.mem.lastIndexOfScalar(u16, bin, '\\') orelse return null];
+    const file = exe[file_at..];
+    const extension = wv.W(".exe");
+    const stem = if (file.len > extension.len and std.ascii.eqlIgnoreCase(
+        std.mem.sliceAsBytes(file[file.len - extension.len ..]),
+        std.mem.sliceAsBytes(extension[0..]),
+    )) file[0 .. file.len - extension.len] else file;
+    const share = wv.W("\\share\\");
+    const tail = wv.W("\\icon.ico");
+    const total = prefix.len + share.len + stem.len + tail.len;
+    if (total + 1 > out.len) return null;
+    var at: usize = 0;
+    for ([_][]const u16{ prefix, share, stem, tail }) |part| {
+        @memcpy(out[at..][0..part.len], part);
+        at += part.len;
+    }
+    out[at] = 0;
+    if (c.GetFileAttributesW(@ptrCast(out.ptr)) == c.INVALID_FILE_ATTRIBUTES) return null;
+    return at;
 }
 
 /// A toast and the XML document it was made from. The document is kept as long as the
@@ -466,4 +505,27 @@ test "the WinRT ids are the SDK's" {
     try std.testing.expectEqual(@as(c_ushort, 0xd235), id.Data2);
     try std.testing.expectEqual(@as(c_ushort, 0x4598), id.Data3);
     try std.testing.expectEqualSlices(u8, &.{ 0xbb, 0xef, 0x98, 0xfe, 0x4d, 0x1a, 0x3a, 0xd4 }, &id.Data4);
+}
+
+test "the notification icon is the one installed beside the program" {
+    const io = std.testing.io;
+    var dir = std.testing.tmpDir(.{});
+    defer dir.cleanup();
+    var root: [c.MAX_PATH]u8 = undefined;
+    const root_len = try dir.dir.realPath(io, &root);
+    var exe: [c.MAX_PATH]u16 = undefined;
+    const exe_len = try std.unicode.utf8ToUtf16Le(&exe, root[0..root_len]);
+    const program = wv.W("\\bin\\Notes.EXE");
+    @memcpy(exe[exe_len..][0..program.len], program);
+    const whole = exe[0 .. exe_len + program.len];
+    var out: [c.MAX_PATH + 64]u16 = undefined;
+    // Not installed yet: no value is written.
+    try std.testing.expect(iconBeside(whole, &out) == null);
+    try dir.dir.createDirPath(io, "share/Notes");
+    try dir.dir.writeFile(io, .{ .sub_path = "share/Notes/icon.ico", .data = &.{ 0, 0, 1, 0 } });
+    const units = iconBeside(whole, &out) orelse return error.TestUnexpectedResult;
+    var shown: [c.MAX_PATH * 3]u8 = undefined;
+    const shown_len = try std.unicode.utf16LeToUtf8(&shown, out[0..units]);
+    try std.testing.expect(std.mem.endsWith(u8, shown[0..shown_len], "\\share\\Notes\\icon.ico"));
+    try std.testing.expect(std.mem.startsWith(u8, shown[0..shown_len], root[0..root_len]));
 }
