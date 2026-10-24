@@ -7,9 +7,9 @@ name: zig
 on:
   push:
     branches: [trunk]
-    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", "crates/cli/**", ".github/workflows/zig.yml"]
+    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", "crates/**", ".github/workflows/zig.yml"]
   pull_request:
-    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", "crates/cli/**", ".github/workflows/zig.yml"]
+    paths: ["zig/**", "packages/*/zig/**", "crates/template_injector/assets/*.zig", "crates/**", ".github/workflows/zig.yml"]
   workflow_dispatch:
 
 jobs:
@@ -41,6 +41,14 @@ jobs:
       - name: Formatting
         if: matrix.zig == '0.16.0'
         run: zig fmt --check zig/src zig/build.zig packages/*/zig
+
+      # The Rust workspace's formatting: three files once came in from Windows unformatted
+      # and nothing noticed.
+      - name: Rust formatting
+        if: matrix.zig == '0.16.0'
+        run: |
+          rustup component add rustfmt
+          cargo fmt --all -- --check
 
       - name: Core tests
         working-directory: zig
