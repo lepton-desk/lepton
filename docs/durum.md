@@ -8,12 +8,18 @@ Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Wi
    - **MSI:** ICE: 0 hata, yalnız ICE91 uyarıları. Kurulumda `AppUserModelId\<id>` → `DisplayName` ve `IconUri` yazılıyor, kaldırmada anahtar ve klasör siliniyor (`msiexec /x` 0).
    - **Bildirim simgesi:** Yoktu; Windows yer tutucu çiziyordu. Şablon artık simgeyi `share/<ad>/icon.ico` olarak da kuruyor. Çekirdek ve MSI, `IconUri` değerine bu dosyanın yolunu yazıyor (Windows App SDK'nin `RegisterAssets` yaptığı gibi). Yeni bir kimlikle MSI kurulumunun ilk bildiriminde Lepton'ın simgesi göründü. Windows simgeyi AUMID başına önbellekte tutuyor: simgesiz bildirim göstermiş bir kimlikte değişmedi. Yeni AUMID'lerde `.ico` da `.png` de çalıştı.
    - **`webPermissions` `allow`:** Sayfa `Notification.permission` için `default`, `permissions.query` için `prompt` görüyordu; `requestPermission`'dan önce açılan ilk bildirim `error` veriyordu. Artık açılışta `ICoreWebView2Profile4::SetPermissionState` uygulamanın kökenine `allow`/`deny` yazıyor; `ask` için kayıtlı durum siliniyor. Ölçüldü: `granted`, `granted`, ilk bildirim gösterildi. `webview2/permissions.zig` Windows testlerinde hiç yoktu; eklendi.
-   - **Kimlik `lepton.config.json`'dan:** `identifier` proje oluşturulduktan sonra değişince program eski kimliği kullanıyordu: `main.zig`'e yazılmıştı. MSI ise yenisini kaydediyordu. Artık şablonun `build.zig`'i `identifier`, `productName`, `channel.name` ve `window.title`'ı her derlemede `../lepton.config.json`'dan okuyor, `main.zig` bunları `who.*` olarak alıyor. Ölçüldü: kimliği değiştirilen yeni projenin veri klasörü yeni kimlikle açıldı. Eski projeler eski `main.zig`'leriyle derlenmeye devam ediyor (`lepton update` şablonu getirir).
+   - **Kimlik `lepton.config.json`'dan:** `identifier` proje oluşturulduktan sonra değişince program eski kimliği kullanıyordu: `main.zig`'e yazılmıştı. MSI ise yenisini kaydediyordu. Artık CLI `identifier`, `productName`, `channel.name` ve `window.title`'ı her derlemeye `-Didentifier`, `-Dproduct`, `-Dchannel`, `-Dtitle` olarak veriyor (pencere boyutu gibi). Elle `zig build` yapılınca şablonun `build.zig`'i dosyayı kendisi okuyor; Zig 0.17'de bu okuma yapılandırma bağımlılığı olarak bildiriliyor. `main.zig` değerleri `who.*` olarak alıyor. İlk sürüm dosyayı yalnız `build.zig`'de okuyordu ve CI'da Zig 0.17'de kırıldı (0.17'de `build_root` yok). Ölçüldü (Zig 0.16 ve 0.17, CLI ile ve elle): kimliği değiştirilen yeni projenin veri klasörü yeni kimlikle açıldı. Aynı ölçüm, 0.17'de `console.zig`'in `.Debug` karşılaştırmasının derlenmediğini de gösterdi; düzeltildi. Eski projeler eski `main.zig`'leriyle derlenmeye devam ediyor (`lepton update` şablonu getirir).
    - Aynı sürümün yeniden derlenmiş MSI'si, eskisi kaldırılmadan kurulmuyor (1638): ürün kodu aynı, paket kodu yeni. Windows Installer'ın kuralı bu; sürüm değişince büyük yükseltme eskisini kaldırıyor.
    - Windows CI'daki pacing hatasının sebebi koşucunun DWM'iydi: saniyede 43–50 kare birleştirdi, `DwmFlush` 20–23 ms sürdü. Alt sınır artık ekranın ve birleştiricinin yavaş olanına göre (`84b6ec7`).
-2. Kalan Windows maddeleri: 10 (yoklama araçları Windows'ta), 14 (dev sunucusunda çerezlerin kalıcılığı; pnpm'in vite-plus sarmalayıcısı burada dosya kilidine takıldı, npm ile denenecek).
-3. Linux 8 (`windowControls`) ve Linux'ta yazılıp derlenip ölçülmeyenler: WPE sığdırma, sınırsız kare, Servo değişiklikleri (`servo-bridge` iş akışı ya da kullanıcının makinesi).
-4. Sonra beta.2 son denetimi: changelog (site) bu oturumun bütün işleriyle, `tools/npm-preflight.sh` (Linux).
+2. ~~Kalan Windows maddeleri 10 ve 14~~ — 2026-10-24'te bitti (aşağıda, "Eksikler"de).
+3. **Linux makinesinde (kullanıcı):** Bunlar ekranda ölçülecek; CI'ın yüzeysiz EGL'i ölçemiyor:
+   - Linux 8 (`windowControls`);
+   - WPE sığdırma;
+   - sınırsız kare;
+   - Servo değişiklikleri (`servo-bridge` iş akışı da derleyip açıyor);
+   - yeni şablon (kimlik `-D` ile, bildirim simgesi dosyası Windows'a özgü).
+4. Site changelog'u güncellendi (`lepton-site` `db96e63`). Kalan: `tools/npm-preflight.sh` Linux'ta.
+5. CI `2f5fef1`: `zig` (Linux, Zig 0.16 ve 0.17) ve `windows` yeşil.
 
 ## Yayın durumu
 
