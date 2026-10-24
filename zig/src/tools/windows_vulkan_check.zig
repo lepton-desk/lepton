@@ -99,7 +99,8 @@ fn shapes(allocator: std.mem.Allocator) !bool {
     }
     const per_second = @divTrunc(@as(i64, frames) * rate.frequency(), @max(check.ticks() - started, 1));
     const refresh = check.displayHz();
-    check.expect(if (refresh == 0) per_second >= 57 and per_second <= 63 else @abs(per_second - refresh) <= 3, "vk paced", "{d} frames = {d}/s, display {d} Hz", .{ frames, per_second, refresh });
+    const composed = check.composedHz();
+    check.expect(check.pacedAt(per_second, refresh, composed), "vk paced", "{d} frames = {d}/s, display {d} Hz, compositor {d}/s", .{ frames, per_second, refresh, composed });
 
     // A resize: the swap chain is made again at the new size, the far corner drawn.
     try w.resize(.{ .width = size.width + 100, .height = size.height + 60 });

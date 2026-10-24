@@ -224,7 +224,8 @@ fn sceneOnWindow() !void {
     const elapsed_ms = @divTrunc((ticks() - started) * 1000, frequency.QuadPart);
     const per_second = @divTrunc(@as(i64, frames) * 1000, @max(elapsed_ms, 1));
     const refresh = displayHz();
-    expect(if (refresh == 0) per_second >= 57 and per_second <= 63 else @abs(per_second - refresh) <= 3, "paced", "{d} frames in {d} ms = {d}/s, display {d} Hz", .{ frames, elapsed_ms, per_second, refresh });
+    const composed = composedHz();
+    expect(pacedAt(per_second, refresh, composed), "paced", "{d} frames in {d} ms = {d}/s, display {d} Hz, compositor {d}/s", .{ frames, elapsed_ms, per_second, refresh, composed });
 
     // Text (`render/glyph_text_windows.zig`), as the GLES 3 test draws it: ink between the
     // pen's start and its advance, above the baseline down to the descender; none outside.
@@ -363,7 +364,8 @@ fn rawSwapChain() !void {
     const elapsed_ms = @divTrunc((ticks() - started) * 1000, frequency.QuadPart);
     const per_second = @divTrunc(@as(i64, frames) * 1000, @max(elapsed_ms, 1));
     const refresh = displayHz();
-    expect(refresh == 0 or @abs(per_second - refresh) <= 3, "vsync", "{d} presents in {d} ms = {d}/s, display {d} Hz", .{ frames, elapsed_ms, per_second, refresh });
+    const composed = composedHz();
+    expect(refresh == 0 or pacedAt(per_second, refresh, composed), "vsync", "{d} presents in {d} ms = {d}/s, display {d} Hz, compositor {d}/s", .{ frames, elapsed_ms, per_second, refresh, composed });
 
     const warp = createDevice(c.D3D_DRIVER_TYPE_WARP);
     if (warp) |software| {
@@ -371,6 +373,27 @@ fn rawSwapChain() !void {
         release(software.context);
         release(software.device);
     } else expect(false, "warp", "no WARP device", .{});
+}
+
+/// Paced frames are paced against the display: never faster than its refresh (6 % over,
+/// rounded up, 3 frames at least), and not far under what the compositor itself managed
+/// around them. The CI runner draws on the CPU (Basic Render Driver, a nominal 64 Hz) and
+/// its compositor kept 64 a second on one run and 43 to 50 on another (`DwmFlush` 20 to
+/// 23 ms a frame, measured), so a bound on the nominal refresh alone failed a correctly
+/// paced chain; a real GPU here composes 60 and paces 59 at 60 Hz.
+pub fn pacedAt(per_second: i64, refresh: i64, composed: i64) bool {
+    if (refresh == 0) return per_second >= 57 and per_second <= 63;
+    const over = @max(3, @divTrunc(refresh * 6 + 99, 100));
+    return per_second <= refresh + over and per_second * 100 >= @min(refresh, composed) * 85;
+}
+
+/// What the compositor manages now, frames a second: 30 `DwmFlush` waits.
+pub fn composedHz() i64 {
+    var frequency: c.LARGE_INTEGER = undefined;
+    _ = c.QueryPerformanceFrequency(&frequency);
+    const started = ticks();
+    for (0..30) |_| if (c.DwmFlush() < 0) return 0;
+    return @divTrunc(30 * frequency.QuadPart, @max(ticks() - started, 1));
 }
 
 /// The display's refresh rate, Hz; 0 when Windows does not say.
@@ -436,13 +459,9 @@ fn swapModels() !void {
             try w.wait(16);
         }
         const per_second = @divTrunc(@as(i64, frames) * frequency.QuadPart, @max(ticks() - started, 1));
+        const composed = composedHz();
         const shown = screenAt(@ptrCast(w.hwnd), @intCast(size.width / 2), @intCast(size.height / 2));
-        // Paced, not unlimited: no faster than the refresh (6 % over, rounded up, 3 frames at
-        // least), and not far under it. The CI runner draws on the CPU (Basic Render Driver,
-        // a nominal 64 Hz) and paced these at 58 to 65 a second, slowest right after the
-        // unlimited scene had it busy (measured over three runs); a real GPU here, 59 at 60 Hz.
-        const over = @max(3, @divTrunc(refresh * 6 + 99, 100));
-        const paced = refresh == 0 or (per_second <= refresh + over and per_second * 100 >= refresh * 85);
-        expect(renderer.swap == model and shown == 0x3090c0 and paced, "swap model", "{t}: made {t}, #{x:0>6} on screen, {d}/s, frame-latency object {s}", .{ model, renderer.swap, shown, per_second, if (renderer.frameWait() != null) "yes" else "no" });
+        const paced = pacedAt(per_second, refresh, composed);
+        expect(renderer.swap == model and shown == 0x3090c0 and paced, "swap model", "{t}: made {t}, #{x:0>6} on screen, {d}/s, compositor {d}/s, frame-latency object {s}", .{ model, renderer.swap, shown, per_second, composed, if (renderer.frameWait() != null) "yes" else "no" });
     }
 }
