@@ -46,6 +46,7 @@ pub struct LeptonServoCallbacks {
     pub loaded: Option<extern "C" fn(*mut c_void)>,
     pub navigation: Option<extern "C" fn(*mut c_void, *const u8, usize) -> i32>,
     pub cursor: Option<extern "C" fn(*mut c_void, *const u8, usize)>,
+    pub context_menu: Option<extern "C" fn(*mut c_void, u32) -> i32>,
 }
 
 /// The core's callbacks, called on the core's thread.
@@ -92,6 +93,18 @@ impl Host for CallbackHost {
     fn cursor(&self, name: &str) {
         if let Some(call) = self.0.cursor {
             call(self.0.context, name.as_ptr(), name.len());
+        }
+    }
+
+    fn context_menu(&self, editable: bool, selection: bool) -> bool {
+        match self.0.context_menu {
+            Some(call) => {
+                call(
+                    self.0.context,
+                    u32::from(editable) | (u32::from(selection) << 1),
+                ) != 0
+            }
+            None => false,
         }
     }
 }
@@ -356,6 +369,14 @@ pub extern "C" fn lepton_servo_wheel(servo: *mut Engine, dx: f64, dy: f64, x: f6
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn lepton_servo_context_menu_select(servo: *mut Engine, action: u32) {
+    // SAFETY: the core's handle.
+    if let Some(engine) = unsafe { engine(servo) } {
+        engine.context_menu_select(action);
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn lepton_servo_key(
     servo: *mut Engine,
     pressed: i32,
@@ -483,7 +504,7 @@ mod tests {
         assert_eq!(offset_of!(LeptonServoSurface, height), 32);
         assert_eq!(offset_of!(LeptonServoSurface, scale), 36);
 
-        assert_eq!(size_of::<LeptonServoCallbacks>(), 64);
+        assert_eq!(size_of::<LeptonServoCallbacks>(), 72);
         assert_eq!(offset_of!(LeptonServoCallbacks, context), 0);
         assert_eq!(offset_of!(LeptonServoCallbacks, wake), 8);
         assert_eq!(offset_of!(LeptonServoCallbacks, request), 16);
@@ -492,5 +513,6 @@ mod tests {
         assert_eq!(offset_of!(LeptonServoCallbacks, loaded), 40);
         assert_eq!(offset_of!(LeptonServoCallbacks, navigation), 48);
         assert_eq!(offset_of!(LeptonServoCallbacks, cursor), 56);
+        assert_eq!(offset_of!(LeptonServoCallbacks, context_menu), 64);
     }
 }

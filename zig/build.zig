@@ -61,6 +61,10 @@ pub const CoreOptions = struct {
     render: []const u8 = "webview",
     /// Where `liblepton_servo.so` is: pages render in Servo, not WPE (`src/build_servo.zig`).
     servo_lib: ?[]const u8 = null,
+    /// A package build: Servo's library is installed under `lib/<this>/` and found only there.
+    servo_bundle: ?[]const u8 = null,
+    /// `window.contextMenu`: the default right-click menu (`render/webview/context_menu.zig`).
+    context_menu: bool = true,
 };
 
 /// Configures the core module and returns it.
@@ -153,7 +157,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     const want_webview = !native_render;
     // WPE is the Linux engine; Windows pages go through WebView2 below.
     const have_servo = want_webview and linux and options.servo_lib != null;
-    if (have_servo) @import("src/build_servo.zig").linkEngine(b, core, options.root, options.servo_lib.?);
+    if (have_servo) @import("src/build_servo.zig").linkEngine(b, core, options.root, options.servo_lib.?, options.servo_bundle);
     const want_wpe = want_webview and linux and !have_servo;
 
     // Two engine ABIs are in the wild and they are not source compatible.
@@ -346,6 +350,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     opts.addOption(bool, "have_wpe", have_wpe);
     opts.addOption(bool, "have_webview2", have_webview2);
     opts.addOption(bool, "have_servo", have_servo);
+    opts.addOption(bool, "context_menu", options.context_menu);
     opts.addOption(bool, "wpe_platform_abi", use_platform_abi);
     opts.addOption([]const u8, "wpe_backend_library", wpe_backend_library orelse "");
 

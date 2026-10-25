@@ -60,6 +60,37 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
 - CI: Rust formatting (`cargo fmt --check`) in `zig.yml`, run on any change under
   `crates/`; a `linux-package` job in `windows.yml` that makes the Windows packages on
   Ubuntu, after which the Windows job installs that MSI, measures it and removes it.
+- `lepton package --linux --servo`: the core is built with `-Dservo-bundle`, which installs
+  `liblepton_servo.so` into `zig-out/lib/<name>/` and gives the binary only
+  `$ORIGIN/../lib/<name>` as its run path (`build_servo.zig`; the template sets
+  `each_lib_rpath = false`, since Zig otherwise appended the `-L` directory — measured).
+  `servo.rs` `carry` copies it into the bundle; `/usr/lib/<name>/` in the Arch and Debian
+  packages, so two apps never own the same file. The package's dependencies are the
+  binary's and the carried library's `DT_NEEDED` less the carried ones
+  (`depends::needed_from_system`), plus `libEGL.so.1`, which Servo opens at run time
+  (`servo::LOADED`, measured with `LD_DEBUG=files`): fontconfig, libstdc++, libgcc, zlib
+  and libglvnd come from Servo. Every Linux package refuses a binary whose run path names an absolute directory:
+  before, a `--servo` binary carried the developer's `node_modules` path and found Servo
+  only on the machine that built it (measured on a beta.2 project). A `build.zig` without
+  `servo-bundle` is refused with `lepton update`. Measured: `--verify` of the `.tar.gz`
+  and the Arch package (45.2 / 61.0 MB), `LD_DEBUG` shows the library loaded from the
+  unpacked package.
+- A default right-click menu on every engine (`render/webview/context_menu.zig`): Cut,
+  Copy, Paste, Select All, disabled where they would do nothing, and Inspect in a Debug
+  build, wherever the page did not cancel `contextmenu`. `window.contextMenu: false`
+  (`-Dcontext-menu=false`, `window_shape.rs`) turns it off. WPE emits `context-menu` and
+  draws nothing, and its Wayland surfaces are its own: the menu is drawn into the page
+  (`context_menu.js`) in the `lepton-menu` script world, where alone the `leptonMenu`
+  handler exists, in a closed shadow root in the top layer; a press on it is cancelled so
+  the field keeps its focus and selection, and the choice is
+  `webkit_web_view_execute_editing_command` (`context_menu_wpe.zig`). Measured on WPE
+  2.54: the signal, the call with the right enabled states, and the choice reaching the
+  core; the user confirmed the enabled items work. Servo: the bridge takes Servo's own
+  `EmbedderControl::ContextMenu`, asks the page for a selection outside a text field,
+  calls the core's new `context_menu` callback (`LeptonServoCallbacks` now 72 bytes), which
+  draws the list in `menu_x11.zig`; `lepton_servo_context_menu_select` answers. WebView2:
+  its own menu, kept to the editing items (`webview2/context_menu.zig`); before, release
+  builds had none and Debug builds a browser's. Labels are Turkish for a `tr` locale.
 
 ### Changed
 

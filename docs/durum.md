@@ -337,3 +337,9 @@ Yeni:
 - **`bundle.icon` SVG Linux paketinde (ölçüldü):** `tar.gz` ve pacman paketinde `share/icons/hicolor/scalable/apps/<id>.svg`, özgün dosyayla bayt bayt aynı; `.png` gerekçesiyle reddediliyor.
 - **Linux'tan Windows paketi (ölçüldü):** `lepton package --windows`: PE32+ GUI exe, `zip` ve `msi`; iki derleme bayt bayt aynı; `--verify` Linux'ta gerekçesiyle reddediliyor. CI: `windows.yml`'e `linux-package` işi (Ubuntu'da paketler), Windows işi o MSI'yi kurup `measure.ps1` ile ölçüp kaldırıyor ve iki makinenin `zip`/`msi`'sini karşılaştırıyor. **CI'da çalışacak.**
 - **Paketlere eski ön yüz dosyaları giriyordu (bulundu, düzeltildi, ölçüldü):** Vite `dist/`'i boşaltıyor ama `zig build` onu `zig-out/share/<ad>/dist`'e kurarken eski dosyaları silmiyor; Windows `.zip`'inde iki `index-*.js` vardı. CLI artık ön yüz verilen çekirdek derlemesinden önce o klasörü boşaltıyor (`launch::clear_installed_frontend`, test); pakette tek dosya.
+
+## Sağ tık menüsü: ölçülecekler (2026-10-25)
+
+- Servo: köprü (`servo/bridge`) yalnız CI'da derlenir; `context_menu` callback'i, metin kutusunda Kes/Kopyala/Yapıştır/Tümünü seç ve kutu dışında seçim + Kopyala, Tümünü seç (JS `selectAllChildren`) yeni `liblepton_servo.so` ile ölçülecek. Kutu dışında Servo'nun `ContextMenuAction::Copy`'si sayfa seçimini kopyalıyor mu bilinmiyor.
+- WebView2: öğe adları `selectAll`, `inspect`/`inspectElement` belgedeki kurala göre yazıldı (yalnız `cut`/`copy`/`paste` belgede örnek); Windows'ta sağ tıkla ölçülecek.
+

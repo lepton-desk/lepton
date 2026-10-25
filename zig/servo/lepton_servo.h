@@ -58,7 +58,7 @@ typedef struct LeptonServoSurface {
     float scale;      /* offset 36, device pixels per CSS pixel */
 } LeptonServoSurface;
 
-/* What the bridge tells the core. Any member may be null. 64 bytes. */
+/* What the bridge tells the core. Any member may be null. 72 bytes. */
 typedef struct LeptonServoCallbacks {
     void *context; /* offset 0, passed back to each callback */
     /* offset 8. Any thread: Servo has work; call `lepton_servo_spin` soon. */
@@ -77,6 +77,11 @@ typedef struct LeptonServoCallbacks {
     /* offset 56. The page's cursor by its CSS name ("pointer", "text", "e-resize"…), the
      * name freedesktop cursor themes use; UTF-8, not terminated. */
     void (*cursor)(void *context, const uint8_t *name, size_t len);
+    /* offset 64. A right click the page did not take (`contextmenu` not cancelled): the
+     * core shows its menu at the pointer and answers with
+     * `lepton_servo_context_menu_select`. Bits: 1 over a text field, 2 text is selected.
+     * Zero (or a null member) shows nothing, and the bridge tells Servo so. */
+    int32_t (*context_menu)(void *context, uint32_t flags);
 } LeptonServoCallbacks;
 
 /* The application's directory for cookies, `localStorage`, IndexedDB and caches, before
@@ -122,6 +127,9 @@ void lepton_servo_wheel(LeptonServo *servo, double dx, double dy, double x, doub
 int32_t lepton_servo_key(LeptonServo *servo, int32_t pressed, const uint8_t *key,
                          size_t key_len, const uint8_t *code, size_t code_len,
                          uint32_t modifiers, int32_t repeat);
+
+/* The answer to `context_menu`: 1 cut, 2 copy, 3 paste, 4 select all, 0 nothing chosen. */
+void lepton_servo_context_menu_select(LeptonServo *servo, uint32_t action);
 
 /* Writes the next painted frame to a PNG at `path` (a diagnostic). 0 on success. */
 int32_t lepton_servo_screenshot(LeptonServo *servo, const uint8_t *path, size_t len);

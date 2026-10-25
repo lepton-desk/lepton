@@ -18,6 +18,8 @@ use super::CliError;
 const SHT_DYNAMIC: u32 = 6;
 const DT_NULL: u64 = 0;
 const DT_NEEDED: u64 = 1;
+const DT_RPATH: u64 = 15;
+const DT_RUNPATH: u64 = 29;
 
 /// The `DT_NEEDED` names of an ELF executable, in file order, without repeats.
 pub fn needed(path: &Path) -> Result<Vec<String>, CliError> {
@@ -35,6 +37,54 @@ pub fn needed(path: &Path) -> Result<Vec<String>, CliError> {
 /// [`needed`] over the file's bytes. Every read is bounds-checked; a truncated or hostile
 /// file is an error, never a panic.
 pub fn needed_in(bytes: &[u8]) -> Result<Vec<String>, &'static str> {
+    dynamic_strings(bytes, &[DT_NEEDED])
+}
+
+/// The directories the loader searches first for `path`'s libraries (`DT_RUNPATH`, or
+/// the older `DT_RPATH`), in order.
+pub fn search_path(path: &Path) -> Result<Vec<String>, CliError> {
+    let bytes = std::fs::read(path).map_err(|error| {
+        CliError::Invalid(format!("could not read {}: {error}", path.display()))
+    })?;
+    let entries = dynamic_strings(&bytes, &[DT_RUNPATH, DT_RPATH]).map_err(|reason| {
+        CliError::Invalid(format!(
+            "{} is not a readable ELF file: {reason}",
+            path.display()
+        ))
+    })?;
+    Ok(entries
+        .iter()
+        .flat_map(|entry| entry.split(':'))
+        .filter(|dir| !dir.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+/// The libraries `binary` takes from the system: its own `DT_NEEDED` and those of the
+/// libraries a package carries in `carried` (Servo's), less the carried ones themselves.
+/// A carried library is no package's file, and what it needs is still the system's.
+pub fn needed_from_system(binary: &Path, carried: &Path) -> Result<Vec<String>, CliError> {
+    let mut names = needed(binary)?;
+    let mut own = Vec::new();
+    let mut index = 0;
+    while let Some(name) = names.get(index) {
+        let library = carried.join(name);
+        if library.is_file() {
+            own.push(name.clone());
+            for more in needed(&library)? {
+                if !names.contains(&more) {
+                    names.push(more);
+                }
+            }
+        }
+        index += 1;
+    }
+    names.retain(|name| !own.contains(name));
+    Ok(names)
+}
+
+/// The strings the `.dynamic` entries tagged `tags` name, in file order, without repeats.
+fn dynamic_strings(bytes: &[u8], tags: &[u64]) -> Result<Vec<String>, &'static str> {
     if bytes.get(..4) != Some(b"\x7fELF".as_slice()) {
         return Err("no ELF magic");
     }
@@ -82,7 +132,7 @@ pub fn needed_in(bytes: &[u8]) -> Result<Vec<String>, &'static str> {
             if tag == DT_NULL {
                 break;
             }
-            if tag != DT_NEEDED {
+            if !tags.contains(&tag) {
                 continue;
             }
             let start =
@@ -93,7 +143,7 @@ pub fn needed_in(bytes: &[u8]) -> Result<Vec<String>, &'static str> {
                 .position(|&byte| byte == 0)
                 .ok_or("unterminated string")?;
             let name = std::str::from_utf8(tail.get(..end).ok_or("string out of range")?)
-                .map_err(|_| "library name is not UTF-8")?;
+                .map_err(|_| "dynamic string is not UTF-8")?;
             if !names.iter().any(|known: &String| known == name) {
                 names.push(name.to_owned());
             }
@@ -145,15 +195,15 @@ pub fn pacman_owner(library: &Path) -> Option<String> {
     (!name.is_empty()).then(|| name.to_owned())
 }
 
-/// Every `DT_NEEDED` library of `binary`, each with its owning Arch package.
-pub fn resolve(binary: &Path) -> Result<Vec<Dependency>, CliError> {
-    Ok(needed(binary)?
+/// Each of `sonames` with its owning Arch package.
+pub fn resolve(sonames: Vec<String>) -> Vec<Dependency> {
+    sonames
         .into_iter()
         .map(|soname| {
             let package = locate(&soname).and_then(|path| pacman_owner(&path));
             Dependency { soname, package }
         })
-        .collect())
+        .collect()
 }
 
 /// The distinct package names, sorted; libraries no package owns are left out here and
@@ -213,7 +263,9 @@ fn u64_at(bytes: &[u8], at: usize) -> Result<u64, &'static str> {
 // The tests read this test binary's own ELF and the system's libc: Linux only.
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use super::{Dependency, locate, needed, needed_in, packages, pacman_owner, unowned};
+    use super::{
+        Dependency, locate, needed, needed_from_system, needed_in, packages, pacman_owner, unowned,
+    };
     use lepton_orchestrator::testing::{Failure, fail};
     use lepton_orchestrator::{assert_eq, assert_err, assert_ok, ensure};
 
@@ -294,6 +346,33 @@ mod tests {
             vec![String::from("glibc"), String::from("zlib")]
         );
         assert_eq!(unowned(&deps), vec!["libown.so"]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_carried_library_leaves_the_list_and_brings_what_it_needs() -> Result<(), Failure> {
+        // The test binary needs libc; carrying a copy of it stands in for Servo's library.
+        let binary = this_binary()?;
+        let Some(libc) = locate("libc.so.6") else {
+            return Err(fail("libc.so.6 in a system library directory", "not found"));
+        };
+        let scratch = lepton_orchestrator::testing::Scratch::new("depends-carried")?;
+        let none = assert_ok!(
+            needed_from_system(&binary, scratch.path()),
+            "nothing carried"
+        );
+        assert_eq!(none, assert_ok!(needed(&binary), "needed"));
+
+        std::fs::copy(&libc, scratch.path().join("libc.so.6"))
+            .map_err(|error| fail("copy libc", error))?;
+        let names = assert_ok!(needed_from_system(&binary, scratch.path()), "libc carried");
+        ensure!(
+            !names.iter().any(|name| name == "libc.so.6"),
+            "carried: {names:?}"
+        );
+        for own in assert_ok!(needed(&libc), "libc's own") {
+            ensure!(names.contains(&own), "{own} missing from {names:?}");
+        }
         Ok(())
     }
 }

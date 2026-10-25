@@ -49,6 +49,11 @@ pub struct Flags {
     #[arg(long)]
     pub linux: bool,
 
+    /// Packages a Servo build (experimental): `liblepton_servo.so` goes into the
+    /// package's `lib/<name>/`, where the binary looks for it.
+    #[arg(long, requires = "linux")]
+    pub servo: bool,
+
     /// Unpacks every written package into an empty directory, starts the application
     /// from there, measures it and closes it; fails if it does not stay up.
     #[arg(long)]
@@ -107,12 +112,17 @@ impl Flags {
             )));
         }
 
+        if self.servo {
+            super::servo::require_bundle_option(root)?;
+        }
         if !self.no_build {
             let build = super::build::Flags {
                 native: self.native,
                 webview: self.webview,
                 windows: self.windows,
                 linux: self.linux,
+                servo: self.servo,
+                servo_bundle: self.servo,
                 ..Default::default()
             };
             build.build_in(root)?;
@@ -128,13 +138,16 @@ impl Flags {
             system,
         };
         let bundle = assemble(&spec)?;
+        if system == System::Linux && cfg!(target_os = "linux") {
+            super::servo::carry(&spec.prefix, &spec.binary, &bundle)?;
+        }
         let report = super::report::Report::new();
         report.fact("packaged", &super::report::shown(&bundle));
 
         // ELF `DT_NEEDED` and the distribution's owners: a Linux question. A Windows build
         // needs only system DLLs and the WebView2 runtime (`lepton info`).
         let depends = if system == System::Linux && cfg!(target_os = "linux") {
-            report_dependencies(&bundle.join("bin").join(&spec.binary))
+            report_dependencies(&bundle, &spec.binary)
         } else {
             Vec::new()
         };
@@ -172,9 +185,10 @@ impl Flags {
 /// Informational for the `.tar.gz` (which declares nothing); the Arch and Debian formats
 /// will write the same list into their metadata. A failure to read it is printed, not
 /// fatal, because the directory and archive are correct without it.
-fn report_dependencies(binary: &Path) -> Vec<String> {
-    match super::depends::resolve(binary) {
-        Ok(found) => {
+fn report_dependencies(bundle: &Path, binary: &str) -> Vec<String> {
+    match system_needs(bundle, binary) {
+        Ok(names) => {
+            let found = super::depends::resolve(names);
             let packages = super::depends::packages(&found);
             super::report::Report::new().fact("depends", &packages.join(" "));
             let unowned = super::depends::unowned(&found);
@@ -190,15 +204,26 @@ fn report_dependencies(binary: &Path) -> Vec<String> {
     }
 }
 
+/// The libraries the bundle's binary takes from the system (not those it carries in
+/// `lib/<binary>/`).
+fn system_needs(bundle: &Path, binary: &str) -> Result<Vec<String>, CliError> {
+    let carried = bundle.join("lib").join(binary);
+    let mut names = super::depends::needed_from_system(&bundle.join("bin").join(binary), &carried)?;
+    if carried.join(super::servo::LIBRARY).is_file() {
+        names.extend(super::servo::LOADED.iter().map(|name| (*name).to_owned()));
+    }
+    Ok(names)
+}
+
 /// The Debian packages owning the binary's `DT_NEEDED` libraries, per `dpkg-query`.
 ///
 /// Every library must have an owner: a `.deb` that leaves one out installs on a machine
 /// that cannot start it. Off Debian there is no dpkg to ask, and the names are listed in
 /// `bundle.deb.depends` instead.
-fn debian_depends(binary: &Path) -> Result<Vec<String>, CliError> {
+fn debian_depends(bundle: &Path, binary: &str) -> Result<Vec<String>, CliError> {
     let mut packages = Vec::new();
     let mut missing = Vec::new();
-    for soname in super::depends::needed(binary)? {
+    for soname in system_needs(bundle, binary)? {
         match super::depends::locate(&soname).and_then(|path| super::deb::dpkg_owner(&path)) {
             Some(owner) => packages.push(owner),
             None => missing.push(soname),
@@ -339,7 +364,7 @@ pub fn write_target(
             })?;
             let debian = match &formats.deb_depends {
                 Some(listed) => listed.clone(),
-                None => debian_depends(&bundle.join("bin").join(&spec.binary))?,
+                None => debian_depends(bundle, &spec.binary)?,
             };
             let (out, digest) = super::deb::write(&super::deb::Package {
                 bundle,

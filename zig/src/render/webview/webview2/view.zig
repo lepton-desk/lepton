@@ -35,6 +35,8 @@ const invoke = @import("../invoke.zig");
 const features = @import("../features.zig");
 const permissions = @import("permissions.zig");
 const downloads = @import("downloads.zig");
+const context_menu = @import("context_menu.zig");
+const shared_menu = @import("../context_menu.zig");
 const console = @import("console.zig");
 const notifications = @import("notifications.zig");
 const popup = @import("popup.zig");
@@ -285,17 +287,18 @@ pub const View = struct {
         return .{ .window = hwnd, .environment = environment, .controller = controller, .webview = core };
     }
 
-    /// Developer tools, the default context menu and the browser's own keys (F5, Ctrl+F,
-    /// Ctrl+P) in Debug builds only — WPE draws no context menu and binds no key, and a
-    /// shipped application is not a browser. The status bar (a link's URL at the bottom)
-    /// never.
+    /// Developer tools and the browser's own keys (F5, Ctrl+F, Ctrl+P) in Debug builds
+    /// only — WPE binds no key, and a shipped application is not a browser. The right-click
+    /// menu is Lepton's default one (`context_menu.zig`: editing items only) unless
+    /// `window.contextMenu` is false. The status bar (a link's URL at the bottom) never.
     pub fn configure(core: *c.ICoreWebView2) void {
         var settings: [*c]c.ICoreWebView2Settings = null;
         if (!wv.ok(core.lpVtbl.*.get_Settings.?(core, &settings)) or settings == null) return;
         defer _ = settings.*.lpVtbl.*.Release.?(settings);
         const debug: c.BOOL = if (builtin.mode == std.builtin.OptimizeMode.Debug) c.TRUE else c.FALSE;
         _ = settings.*.lpVtbl.*.put_AreDevToolsEnabled.?(settings, debug);
-        _ = settings.*.lpVtbl.*.put_AreDefaultContextMenusEnabled.?(settings, debug);
+        _ = settings.*.lpVtbl.*.put_AreDefaultContextMenusEnabled.?(settings, if (shared_menu.enabled) c.TRUE else c.FALSE);
+        if (shared_menu.enabled) context_menu.watch(core);
         _ = settings.*.lpVtbl.*.put_IsStatusBarEnabled.?(settings, c.FALSE);
         var third: ?*c.ICoreWebView2Settings3 = null;
         if (wv.ok(settings.*.lpVtbl.*.QueryInterface.?(settings, &c.IID_ICoreWebView2Settings3, @ptrCast(&third)))) {

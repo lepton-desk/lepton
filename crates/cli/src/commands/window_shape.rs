@@ -6,6 +6,8 @@
 //! - `window.frameRate: "unlimited"` → `-Dframe-rate=unlimited`: the native path draws as
 //!   fast as the machine can instead of at the display's refresh (`"display"`, the default).
 //!   `LEPTON_FRAME_RATE` overrides it when the program runs.
+//! - `window.contextMenu: false` → `-Dcontext-menu=false`: no default right-click menu
+//!   (Cut, Copy, Paste, Select All; Inspect in a developer's build).
 //! - `bundle.icon` → `-Dicon=<path>`, for a Windows build only: the Windows program's
 //!   icon — its title bar, taskbar button and Explorer icon. Without it, Lepton's own
 //!   (written into the build cache).
@@ -31,6 +33,8 @@ pub struct Shape {
     pub decorated: bool,
     /// `window.frameRate` is `"unlimited"`.
     pub unlimited: bool,
+    /// `window.contextMenu` (`true` when absent).
+    pub context_menu: bool,
     /// The project's `.ico`, absolute.
     pub icon: Option<std::path::PathBuf>,
 }
@@ -65,11 +69,24 @@ pub fn read(root: &Path, text: &str) -> Result<Shape, CliError> {
             ));
         }
     };
+    let context_menu = match config
+        .get("window")
+        .and_then(|window| window.get("contextMenu"))
+    {
+        None => true,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => {
+            return Err(CliError::Invalid(
+                "\"window.contextMenu\" must be true or false".to_owned(),
+            ));
+        }
+    };
     let bundle = lepton_template_injector::parse_bundle(text)
         .map_err(|error| CliError::Invalid(error.reason))?;
     Ok(Shape {
         decorated,
         unlimited,
+        context_menu,
         icon: bundle.icon.map(|icon| root.join(icon)),
     })
 }
@@ -99,6 +116,15 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
         } else {
             eprintln!(
                 "lepton: src-lepton/build.zig predates window.frameRate; frames stay at the display's refresh (recreate the project with a current `lepton new`)"
+            );
+        }
+    }
+    if !shape.context_menu {
+        if build.contains("\"context-menu\"") {
+            args.push("-Dcontext-menu=false".to_owned());
+        } else {
+            eprintln!(
+                "lepton: src-lepton/build.zig predates window.contextMenu; the default right-click menu stays (run `lepton update`)"
             );
         }
     }
@@ -207,6 +233,7 @@ mod tests {
             Shape {
                 decorated: true,
                 unlimited: false,
+                context_menu: true,
                 icon: None
             }
         );
@@ -221,6 +248,21 @@ mod tests {
         assert_eq!(frameless.icon, Some(root.join("app.ico")));
         assert_err!(
             read(root, r#"{"window":{"decorations":"no"}}"#),
+            "a string is not a boolean"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_default_context_menu_is_on_unless_turned_off() -> Result<(), Failure> {
+        let root = Path::new("project");
+        let off = assert_ok!(
+            read(root, r#"{"window":{"contextMenu":false}}"#),
+            "turned off"
+        );
+        assert_eq!(off.context_menu, false);
+        assert_err!(
+            read(root, r#"{"window":{"contextMenu":"no"}}"#),
             "a string is not a boolean"
         );
         Ok(())

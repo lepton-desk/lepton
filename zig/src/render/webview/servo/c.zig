@@ -12,8 +12,9 @@ comptime {
     std.debug.assert(@sizeOf(c.LeptonServoSurface) == 40);
     std.debug.assert(@offsetOf(c.LeptonServoSurface, "window") == 24);
     std.debug.assert(@offsetOf(c.LeptonServoSurface, "scale") == 36);
-    std.debug.assert(@sizeOf(c.LeptonServoCallbacks) == 64);
+    std.debug.assert(@sizeOf(c.LeptonServoCallbacks) == 72);
     std.debug.assert(@offsetOf(c.LeptonServoCallbacks, "loaded") == 40);
     std.debug.assert(@offsetOf(c.LeptonServoCallbacks, "navigation") == 48);
     std.debug.assert(@offsetOf(c.LeptonServoCallbacks, "cursor") == 56);
+    std.debug.assert(@offsetOf(c.LeptonServoCallbacks, "context_menu") == 64);
 }

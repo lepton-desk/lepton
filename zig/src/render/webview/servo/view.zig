@@ -31,6 +31,7 @@ const transport = @import("../transport.zig");
 const request = @import("request.zig");
 const keymap = @import("keymap.zig");
 const menu_x11 = @import("menu_x11.zig");
+const context_menu = @import("../context_menu.zig");
 const cursor_x11 = @import("cursor_x11.zig");
 const invoke = @import("../invoke.zig");
 const events = @import("../events.zig");
@@ -242,6 +243,19 @@ fn onCursor(_: ?*anyopaque, name: [*c]const u8, len: usize) callconv(.c) void {
     view.cursors.setPage(view.xdisplay, view.window.window_id, name[0..len], view.over_edge);
 }
 
+/// A right click the page did not take: the default menu (`context_menu.zig`) at the
+/// pointer, in the window `window.menu` draws. No Inspect: Servo has no inspector here.
+fn onContextMenu(_: ?*anyopaque, flags: u32) callconv(.c) i32 {
+    const view = host.view orelse return 0;
+    if (view.menu.isOpen()) return 0;
+    var entries: [context_menu.max_entries]context_menu.Entry = undefined;
+    const shown = context_menu.entries(.{ .editable = flags & 1 != 0, .selection = flags & 2 != 0 }, false, &entries);
+    var bytes: [256]u8 = undefined;
+    const list = context_menu.encode(shown, context_menu.turkish(), &bytes) catch return 0;
+    view.menu.open(&view.window, list, view, &View.contextMenuDone) catch return 0;
+    return 1;
+}
+
 /// The view's document may only be the application's own page (`features.isOwnPage`).
 /// Another address is refused, and not opened elsewhere yet: handing it to the desktop
 /// goes through the OpenURI portal, which a Servo build does not link.
@@ -328,6 +342,7 @@ pub const View = struct {
             .loaded = onLoaded,
             .navigation = onNavigation,
             .cursor = onCursor,
+            .context_menu = if (context_menu.enabled) onContextMenu else null,
         };
         var reason: [512]u8 = @splat(0);
         const scheme = "lepton";
@@ -517,6 +532,12 @@ pub const View = struct {
         var result: [2]u8 = undefined;
         std.mem.writeInt(u16, &result, id, .little);
         later.finish(.ok, &result);
+    }
+
+    /// The default menu's choice back to Servo, which performs it (0: nothing chosen).
+    fn contextMenuDone(context: *anyopaque, id: u16) void {
+        const self: *View = @ptrCast(@alignCast(context));
+        c.lepton_servo_context_menu_select(self.servo, id);
     }
 
     fn windowDrag(data: ?*anyopaque) bool {

@@ -8,15 +8,28 @@
 const std = @import("std");
 const support = @import("build_support.zig");
 
+/// The library's file name.
+const library = "liblepton_servo.so";
+
 /// Links the core to Servo: the bridge's header (`servo/`), `liblepton_servo.so` from
-/// `lib_dir`, and Xlib, which the view hands Servo (surfman takes no XCB connection). The
-/// binary finds the library beside itself once packaged (`$ORIGIN/../lib`), or in
-/// `lib_dir` during development.
-pub fn linkEngine(b: *std.Build, core: *std.Build.Module, root: []const u8, lib_dir: []const u8) void {
+/// `lib_dir`, and Xlib, which the view hands Servo (surfman takes no XCB connection).
+///
+/// Where the binary finds the library at run time: in `lib_dir` during development; in a
+/// package build (`bundle`, the application's name) only in `<prefix>/lib/<bundle>/`,
+/// where the library is installed beside the binary. A package once recorded the
+/// developer's `node_modules` path and found the library only on the machine that built
+/// it. The application's own directory under `lib/`, not `lib/` itself: two applications
+/// installed into `/usr` would otherwise both own `/usr/lib/liblepton_servo.so`.
+pub fn linkEngine(b: *std.Build, core: *std.Build.Module, root: []const u8, lib_dir: []const u8, bundle: ?[]const u8) void {
     core.addIncludePath(b.path(b.pathJoin(&.{ root, "servo" })));
     core.addLibraryPath(.{ .cwd_relative = lib_dir });
-    core.addRPath(.{ .cwd_relative = lib_dir });
-    core.addRPathSpecial("$ORIGIN/../lib");
+    if (bundle) |name| {
+        core.addRPathSpecial(b.fmt("$ORIGIN/../lib/{s}", .{name}));
+        const installed = b.addInstallFileWithDir(.{ .cwd_relative = b.pathJoin(&.{ lib_dir, library }) }, .lib, b.pathJoin(&.{ name, library }));
+        b.getInstallStep().dependOn(&installed.step);
+    } else {
+        core.addRPath(.{ .cwd_relative = lib_dir });
+    }
     core.linkSystemLibrary("lepton_servo", .{ .use_pkg_config = .no });
     core.linkSystemLibrary("X11", .{});
     // `xkb_keysym_to_utf8`, the character a keysym stands for (`servo/view.zig`).

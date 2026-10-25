@@ -15,11 +15,12 @@ use keyboard_types::{Code, Key, KeyState, Location, Modifiers};
 use raw_window_handle::{DisplayHandle, WindowHandle};
 use servo::protocol_handler::ProtocolRegistry;
 use servo::{
-    ConsoleLogLevel, Cursor, DevicePoint, EventLoopWaker, InputEvent, KeyboardEvent, LoadStatus,
-    MouseButton, MouseButtonAction, MouseButtonEvent, MouseLeftViewportEvent, MouseMoveEvent,
-    NavigationRequest, Opts, RenderingContext, Servo, ServoBuilder, UserContentManager, UserScript,
-    WebView, WebViewBuilder, WebViewDelegate, WheelDelta, WheelEvent, WheelMode,
-    WindowRenderingContext,
+    ConsoleLogLevel, ContextMenu, ContextMenuAction, ContextMenuElementInformationFlags, Cursor,
+    DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, InputEvent, JSValue,
+    KeyboardEvent, LoadStatus, MouseButton, MouseButtonAction, MouseButtonEvent,
+    MouseLeftViewportEvent, MouseMoveEvent, NavigationRequest, Opts, RenderingContext, Servo,
+    ServoBuilder, UserContentManager, UserScript, WebView, WebViewBuilder, WebViewDelegate,
+    WheelDelta, WheelEvent, WheelMode, WindowRenderingContext,
 };
 use url::Url;
 
@@ -37,6 +38,11 @@ pub trait Host {
     /// The page's cursor, by its CSS name (`pointer`, `text`, `e-resize`…), which is also
     /// the name the freedesktop cursor themes give it.
     fn cursor(&self, name: &str);
+    /// A right click the page did not take: the core shows its menu and answers with
+    /// `Engine::context_menu_select`. `editable`: a text field; `selection`: text is
+    /// selected there, or in the page.
+    /// `false`: nothing is shown, and Servo is told so.
+    fn context_menu(&self, editable: bool, selection: bool) -> bool;
 }
 
 /// Where Servo keeps the application's web data, set before the engine starts.
@@ -67,6 +73,9 @@ struct Page {
     host: Rc<dyn Host>,
     /// A frame is ready and not yet painted.
     dirty: Cell<bool>,
+    /// Servo's context menu while the core's is open, and whether it was opened over a
+    /// text field. Dropped unanswered, it tells Servo nothing was chosen.
+    menu: Rc<RefCell<Option<(ContextMenu, bool)>>>,
 }
 
 impl WebViewDelegate for Page {
@@ -100,6 +109,47 @@ impl WebViewDelegate for Page {
         }
     }
 
+    /// Servo's context menu, asked for only when the page did not cancel `contextmenu`.
+    /// Its own items are a browser's (Back, Reload, links); the core shows Lepton's
+    /// editing menu instead (`render/webview/context_menu.zig`). Servo reports a selection
+    /// only inside a text field, so the page's own is read from the page.
+    fn show_embedder_control(&self, webview: WebView, embedder_control: EmbedderControl) {
+        let EmbedderControl::ContextMenu(menu) = embedder_control else {
+            return;
+        };
+        let flags = menu.element_info().flags;
+        let editable = flags.contains(ContextMenuElementInformationFlags::EditableText);
+        let selection = flags.contains(ContextMenuElementInformationFlags::Selection);
+        *self.menu.borrow_mut() = Some((menu, editable));
+        if editable {
+            if !self.host.context_menu(true, selection) {
+                dismiss(&self.menu);
+            }
+            return;
+        }
+        let host = Rc::clone(&self.host);
+        let open = Rc::clone(&self.menu);
+        webview.evaluate_javascript(
+            "String(globalThis.getSelection()).length > 0",
+            move |result| {
+                let selected = matches!(result, Ok(JSValue::Boolean(true)));
+                if !host.context_menu(false, selected) {
+                    dismiss(&open);
+                }
+            },
+        );
+    }
+
+    fn hide_embedder_control(&self, _webview: WebView, control_id: EmbedderControlId) {
+        let mut menu = self.menu.borrow_mut();
+        if menu
+            .as_ref()
+            .is_some_and(|(open, _)| open.id() == control_id)
+        {
+            *menu = None;
+        }
+    }
+
     fn show_console_message(&self, _webview: WebView, level: ConsoleLogLevel, message: String) {
         let level = match level {
             ConsoleLogLevel::Log | ConsoleLogLevel::Dir => 0,
@@ -110,6 +160,13 @@ impl WebViewDelegate for Page {
             ConsoleLogLevel::Trace => 5,
         };
         self.host.console(level, &message);
+    }
+}
+
+/// Tells Servo the open context menu chose nothing.
+fn dismiss(menu: &RefCell<Option<(ContextMenu, bool)>>) {
+    if let Some((open, _)) = menu.borrow_mut().take() {
+        open.dismiss();
     }
 }
 
@@ -217,11 +274,37 @@ impl Engine {
             page: Rc::new(Page {
                 host,
                 dirty: Cell::new(false),
+                menu: Rc::new(RefCell::new(None)),
             }),
             scripts,
             scale: if scale > 0.0 { scale } else { 1.0 },
             webview: RefCell::new(None),
         })
+    }
+
+    /// The core's answer to [`Host::context_menu`]: 1 cut, 2 copy, 3 paste, 4 select all,
+    /// anything else nothing. Servo performs its editing actions only inside a text field;
+    /// outside one, Select All is the page's own selection API.
+    pub fn context_menu_select(&self, action: u32) {
+        let Some((menu, editable)) = self.page.menu.borrow_mut().take() else {
+            return;
+        };
+        match action {
+            1 => menu.select(ContextMenuAction::Cut),
+            2 => menu.select(ContextMenuAction::Copy),
+            3 => menu.select(ContextMenuAction::Paste),
+            4 if editable => menu.select(ContextMenuAction::SelectAll),
+            4 => {
+                menu.dismiss();
+                if let Some(view) = self.webview.borrow().as_ref() {
+                    view.evaluate_javascript(
+                        "globalThis.getSelection().selectAllChildren(document.body)",
+                        |_| {},
+                    );
+                }
+            }
+            _ => menu.dismiss(),
+        }
     }
 
     pub fn add_user_script(&self, js: &str) {
@@ -275,7 +358,9 @@ impl Engine {
     /// (`servo/patches/servo`, `write_network_state_and_stop`): Servo writes the jar only
     /// at the end of its own shutdown, which the core never waits for (`_exit`).
     pub fn write_state(&self) {
-        self.servo.site_data_manager().write_network_state_and_stop();
+        self.servo
+            .site_data_manager()
+            .write_network_state_and_stop();
     }
 
     pub fn resize(&self, width: u32, height: u32) {
@@ -368,7 +453,6 @@ impl Engine {
         Ok(())
     }
 }
-
 
 /// The CSS name of `cursor` (CSS UI 4 `cursor`), which freedesktop cursor themes use too.
 fn css_cursor(cursor: Cursor) -> &'static str {

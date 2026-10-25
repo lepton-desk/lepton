@@ -85,6 +85,7 @@ pub const developer_tools = builtin.mode == std.builtin.OptimizeMode.Debug;
 pub fn apply(web_view: *anyopaque) void {
     _ = e_signal_connect(web_view, "decide-policy", @ptrCast(&onDecide), null, null, 0);
     _ = e_signal_connect(web_view, "create", @ptrCast(&onCreate), null, null, 0);
+    @import("context_menu_wpe.zig").apply(web_view);
     const settings = e_get_settings(web_view) orelse return;
     if (developer_tools) {
         e_set_developer_extras(settings, 1);
@@ -196,6 +197,11 @@ fn onEvent(_: ?*anyopaque, event: ?*anyopaque, web_view: ?*anyopaque) callconv(.
     if (!isInspectorShortcut(e_event_keyval(event), e_event_modifiers(event))) return 0;
     e_toggle_inspector(web_view);
     return 1;
+}
+
+test {
+    _ = @import("context_menu.zig");
+    _ = @import("context_menu_wpe.zig");
 }
 
 test "the inspector opens on F12 and Ctrl+Shift+I only" {

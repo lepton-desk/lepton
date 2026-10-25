@@ -48,6 +48,9 @@ pub fn build(b: *std.Build) !void {
     // Servo, experimental: the directory holding `liblepton_servo.so`, which the CLI finds
     // for `--servo`. Without it the pages render in WPE WebKit.
     const servo_lib = b.option([]const u8, "servo-lib", "Render pages in Servo, from this directory's liblepton_servo.so (experimental, Linux)");
+    // `lepton package --servo`: the library goes into `zig-out/lib/<name>/` and the binary
+    // looks for it only there, so the package runs on a machine without `node_modules`.
+    const servo_bundle = b.option(bool, "servo-bundle", "Carry liblepton_servo.so in lib/<name>/ (a package build)") orelse false;
 
     // A contradictory pair of flags is a mistake in the command line, not a defect in
     // the build script, so it is reported rather than panicked: the message is the
@@ -78,6 +81,8 @@ pub fn build(b: *std.Build) !void {
     const window_decorations = b.option(bool, "window-decorations", "Draw the system title bar (default: true)") orelse true;
     // `window.frameRate`: `display` (the screen's refresh) or `unlimited` (native path).
     const frame_rate = b.option(enum { display, unlimited }, "frame-rate", "Native frames: display (default) or unlimited") orelse .display;
+    // `window.contextMenu: false`: no default right-click menu (Cut, Copy, Paste, Select All).
+    const context_menu = b.option(bool, "context-menu", "Show the default right-click menu (default: true)") orelse true;
     // The Windows program's icon (`.ico`): `bundle.icon`, or Lepton's own, named by the CLI.
     const icon = b.option([]const u8, "icon", "The program's icon, an .ico file (Windows)");
 
@@ -93,6 +98,8 @@ pub fn build(b: *std.Build) !void {
         // itself would make every scaffolded project fail to configure.
         .render = render,
         .servo_lib = servo_lib,
+        .servo_bundle = if (servo_bundle) name else null,
+        .context_menu = context_menu,
     });
 
     // The program's own build options. `lepton dev` passes the server address through
@@ -180,6 +187,11 @@ pub fn build(b: *std.Build) !void {
     if (configured.protocol_step) |generated| {
         exe.step.dependOn(generated);
     }
+
+    // A Servo package finds its library only beside itself: Zig otherwise adds every
+    // `-L` directory to the run path, and the package recorded the developer's
+    // `node_modules` after its own `$ORIGIN/../lib/<name>` (measured).
+    if (servo_bundle) exe.each_lib_rpath = false;
 
     // Windows: a release build is a GUI program, so starting it from Explorer or a
     // shortcut opens no console window beside it. Debug keeps the console for the core's

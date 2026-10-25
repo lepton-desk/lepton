@@ -73,6 +73,11 @@ pub struct Flags {
     #[arg(skip)]
     pub servo_lib: Option<PathBuf>,
 
+    /// A package build (`lepton package --servo`): Servo's library is installed beside
+    /// the binary and found only there.
+    #[arg(skip)]
+    pub servo_bundle: bool,
+
     /// Prints what would run without running it.
     #[arg(long, short = 'n')]
     pub dry_run: bool,
@@ -274,6 +279,9 @@ impl Flags {
         }
         if let Some(dir) = &self.servo_lib {
             step = step.arg(format!("-Dservo-lib={}", dir.display()));
+            if self.servo_bundle {
+                step = step.arg("-Dservo-bundle=true");
+            }
         }
 
         step
