@@ -16,7 +16,7 @@
  */
 
 import type { BuiltinEvents } from "./commands.gen.ts";
-import { type WireLayout, wireLayout } from "./core.ts";
+import { decodeEvents, type WireLayout, wireLayout } from "./wire.ts";
 
 export type { BuiltinEvents } from "./commands.gen.ts";
 
@@ -41,43 +41,6 @@ export interface LeptonEvent {
 
 export type EventCallback = (event: LeptonEvent) => void;
 export type UnlistenFn = () => void;
-
-/** Reads back-to-back `notice` frames, refusing anything malformed. */
-export function decodeEvents(layout: WireLayout, bytes: Uint8Array): LeptonEvent[] {
-  const shape = layout.events;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const names = new TextDecoder();
-  const out: LeptonEvent[] = [];
-  let at = 0;
-  while (at < bytes.byteLength) {
-    if (at + layout.wireHeaderBytes + shape.noticeBytes > bytes.byteLength) {
-      throw new RangeError("event frame shorter than its header");
-    }
-    if (view.getUint16(at + layout.wireProtocolOffset, true) !== layout.protocol) {
-      throw new RangeError("event speaks another wire protocol version");
-    }
-    if (view.getUint16(at + layout.wireKindOffset, true) !== shape.kindNotice) {
-      throw new RangeError("frame is not an event");
-    }
-    const payloadLen = view.getUint32(at + layout.invoke.headerPayloadLenOffset, true);
-    const sequence = view.getBigUint64(at + layout.invoke.headerSequenceOffset, true);
-    const body = at + layout.wireHeaderBytes;
-    const nameLen = view.getUint16(body + shape.noticeNameLenOffset, true);
-    const dataLen = view.getUint32(body + shape.noticeDataLenOffset, true);
-    const nameAt = body + shape.noticeBytes;
-    const end = body + payloadLen;
-    if (end > bytes.byteLength || nameAt + nameLen + dataLen > end) {
-      throw new RangeError("event runs past its frame");
-    }
-    out.push({
-      name: names.decode(bytes.subarray(nameAt, nameAt + nameLen)),
-      payload: bytes.subarray(nameAt + nameLen, nameAt + nameLen + dataLen),
-      sequence,
-    });
-    at = end;
-  }
-  return out;
-}
 
 const listeners = new Map<string, Set<EventCallback>>();
 let pumping = false;

@@ -188,7 +188,7 @@ fn withoutCommentLines(comptime source: []const u8) []const u8 {
 }
 
 /// Who the application is, as the page reads it from `__lepton.app`
-/// (`@lepton-desk/api/app` `info()`, `@lepton-desk/api/window` `title()`). The template's
+/// (`@lepton-desk/api/app` `info()`). The template's
 /// `main.zig` sets it on the bridge (`Bridge.application`) from `lepton.config.json`; a
 /// `main.zig` that predates it leaves every field empty. Fixed for the run, so the page
 /// reads it without asking the core.
@@ -198,8 +198,6 @@ pub const Application = struct {
     /// `version`.
     version: []const u8 = "",
     identifier: []const u8 = "",
-    /// `window.title`: the window's name while the page has no `document.title`.
-    title: []const u8 = "",
 };
 
 /// Longest field written into the page, in bytes; a longer one is cut at a character.
@@ -212,7 +210,6 @@ pub fn writeApplication(out: []u8, application: Application) error{NoSpaceLeft}!
         .{ "name", application.name },
         .{ "version", application.version },
         .{ "identifier", application.identifier },
-        .{ "title", application.title },
     };
     used += (try std.fmt.bufPrint(out[used..], "Object.freeze({{", .{})).len;
     for (fields, 0..) |field, index| {
@@ -271,7 +268,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, 
     // core is, so their table is written here at run time beside the comptime layout.
     var app_table: [2048]u8 = undefined;
     const app = try registry.writeAppTable(commands, &app_table);
-    var who_buffer: [4 * (max_application_field * 6 + 16) + 32]u8 = undefined;
+    var who_buffer: [3 * (max_application_field * 6 + 16) + 32]u8 = undefined;
     const who = try writeApplication(&who_buffer, application);
     const written = try std.fmt.bufPrintSentinel(out,
         \\(() => {{
@@ -515,8 +512,8 @@ test "the transport defines itself only in the application's own page" {
 
 test "the page reads who the application is, whatever the configuration's text" {
     var buffer: [16384]u8 = undefined;
-    const text = try script(&buffer, 1, &no_commands, "", .{ .name = "Notes \"2\"", .version = "1.2.3", .identifier = "dev.lepton.notes", .title = "a\\b\nc\u{2028}" });
-    try std.testing.expect(std.mem.indexOf(u8, text, "app: Object.freeze({name:\"Notes \\\"2\\\"\",version:\"1.2.3\",identifier:\"dev.lepton.notes\",title:\"a\\\\b\\u000ac\\u2028\"})") != null);
+    const text = try script(&buffer, 1, &no_commands, "", .{ .name = "Notes \"2\"", .version = "1.2.3", .identifier = "a\\b\nc\u{2028}" });
+    try std.testing.expect(std.mem.indexOf(u8, text, "app: Object.freeze({name:\"Notes \\\"2\\\"\",version:\"1.2.3\",identifier:\"a\\\\b\\u000ac\\u2028\"})") != null);
     // Cut at a character, never inside one: 255 ASCII bytes and a two-byte "ğ".
     // (Built with `@memset`: Zig 0.17 has no `**`.)
     var long: [257]u8 = undefined;

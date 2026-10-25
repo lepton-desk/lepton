@@ -19,14 +19,14 @@ use std::time::{Duration, Instant, SystemTime};
 
 use lepton_orchestrator::{Step, Toolchain};
 
-/// The scope whose linked packages are checked.
-pub const SCOPE: &str = "@lepton-desk";
 /// The tool name these steps carry in a plan.
 pub const TOOL: &str = "linked";
 
-/// Linked packages under `root/node_modules/@lepton-desk` whose `dist/` is stale.
+/// Linked packages under `root/node_modules/<sdkScope>` (`@lepton-desk`) whose `dist/` is
+/// stale.
 pub fn stale(root: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(root.join("node_modules").join(SCOPE)) else {
+    let scope = super::update_packages::scope(root);
+    let Ok(entries) = std::fs::read_dir(root.join("node_modules").join(scope)) else {
         return Vec::new();
     };
     let mut found: Vec<PathBuf> = entries
@@ -135,6 +135,7 @@ impl Watcher {
     pub fn start(root: PathBuf, program: &'static str) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let seen = Arc::clone(&stop);
+        let scope = super::update_packages::scope(&root);
         let thread = std::thread::spawn(move || {
             let mut watch = Watch::default();
             while !seen.load(Ordering::Relaxed) {
@@ -149,14 +150,14 @@ impl Watcher {
                         super::report::Report::new().fact(
                             "linked",
                             &format!(
-                                "{SCOPE}/{name} rebuilt in {:.1} s",
+                                "{scope}/{name} rebuilt in {:.1} s",
                                 rebuilt.took.as_secs_f64()
                             ),
                         );
                     } else {
                         super::report::Report::new().warn(
                             "linked",
-                            &format!("{SCOPE}/{name} failed to build; waiting for the next edit"),
+                            &format!("{scope}/{name} failed to build; waiting for the next edit"),
                         );
                     }
                 }

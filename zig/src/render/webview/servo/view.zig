@@ -222,7 +222,9 @@ fn onRequest(_: ?*anyopaque, held: ?*c.LeptonServoRequest) callconv(.c) void {
 fn onTitle(_: ?*anyopaque, utf8: [*c]const u8, len: usize) callconv(.c) void {
     const view = host.view orelse return;
     const page = if (len == 0 or utf8 == null) "" else utf8[0..len];
-    view.window.setTitle(if (page.len == 0) view.title[0..view.title_len] else page);
+    const shown = if (page.len == 0) view.title[0..view.title_len] else page;
+    view.window.setTitle(shown);
+    view.bridge.showTitle(shown);
 }
 
 fn onConsole(_: ?*anyopaque, level: u32, utf8: [*c]const u8, len: usize) callconv(.c) void {
@@ -473,6 +475,7 @@ pub const View = struct {
         @memcpy(self.title[0..kept.len], kept);
         self.title_len = kept.len;
         self.window.setTitle(kept);
+        self.bridge.showTitle(kept);
     }
 
     pub fn startBridge(self: *View) void {

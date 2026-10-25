@@ -161,36 +161,21 @@ jobs:
           & $lepton build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Get-ChildItem src-lepton/zig-out/bin
-          # A web view program names Windows 10 as its oldest Windows (`pe_version.zig`):
-          # the optional header's OS and subsystem versions, offsets 40 and 48.
+          # The PE header keeps Zig's 6.0: with a 10.0 subsystem version the program ran with
+          # no window and no WebView2 process here, while the same bytes with 6.0 opened
+          # (measured, 2026-10-25). Windows 10 is checked when the program starts instead.
           $exe = (Get-ChildItem src-lepton\zig-out\bin\*.exe | Select-Object -First 1).FullName
           $bytes = [IO.File]::ReadAllBytes($exe)
           $optional = [BitConverter]::ToInt32($bytes, 0x3c) + 24
           $os = "$([BitConverter]::ToUInt16($bytes, $optional + 40)).$([BitConverter]::ToUInt16($bytes, $optional + 42))"
           $subsystem = "$([BitConverter]::ToUInt16($bytes, $optional + 48)).$([BitConverter]::ToUInt16($bytes, $optional + 50))"
           "PE header: operating system $os, subsystem $subsystem"
-          if ($os -ne "10.0" -or $subsystem -ne "10.0") { exit 1 }
+          if ($os -ne "6.0" -or $subsystem -ne "6.0") { exit 1 }
 
       - name: Window
         run: |
           $exe = (Get-ChildItem "$env:RUNNER_TEMP\ci-app\src-lepton\zig-out\bin\*.exe" | Select-Object -First 1).FullName
           ./tools/ci/windows/measure.ps1 -Exe $exe -Out "$env:RUNNER_TEMP\report\window"
-
-      # The same program with the PE header's OS and subsystem version set back to 6.0,
-      # as Zig writes it: every other byte is the program above, so a window here and
-      # none there is the header's doing.
-      - name: The same program with a 6.0 header
-        if: ${{ !cancelled() }}
-        run: |
-          # A whole copy of zig-out, outside it: the program finds its page in ../share, and
-          # nothing extra may reach the package made from zig-out below.
-          Copy-Item "$env:RUNNER_TEMP\ci-app\src-lepton\zig-out" "$env:RUNNER_TEMP\pe6" -Recurse
-          $copy = (Get-ChildItem "$env:RUNNER_TEMP\pe6\bin\*.exe" | Select-Object -First 1).FullName
-          $bytes = [IO.File]::ReadAllBytes($copy)
-          $optional = [BitConverter]::ToInt32($bytes, 0x3c) + 24
-          foreach ($at in 40, 48) { $bytes[$optional + $at] = 6; $bytes[$optional + $at + 1] = 0; $bytes[$optional + $at + 2] = 0; $bytes[$optional + $at + 3] = 0 }
-          [IO.File]::WriteAllBytes($copy, $bytes)
-          ./tools/ci/windows/measure.ps1 -Exe $copy -Out "$env:RUNNER_TEMP\report\pe6"
 
       # Each check runs even when one before it failed; the job still fails.
       - name: Package, install, remove

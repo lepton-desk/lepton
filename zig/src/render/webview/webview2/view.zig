@@ -40,7 +40,7 @@ const notifications = @import("notifications.zig");
 const popup = @import("popup.zig");
 const chrome_mod = @import("chrome.zig");
 
-pub const Error = error{ NoRuntime, NoWindow, Com, Environment, Controller, Timeout };
+pub const Error = error{ OldWindows, NoRuntime, NoWindow, Com, Environment, Controller, Timeout };
 
 /// The host the page and the core share (`http://lepton.localhost/`).
 pub const host = "lepton.localhost";
@@ -244,13 +244,22 @@ pub const View = struct {
 
     /// Finds the runtime, opens a hidden window and brings the engine up in it.
     pub fn open() Error!View {
+        // A web view needs Windows 10 or 11: WebView2 stopped at 109 on 8.1 and older and gets
+        // no security fixes there, so a page is not run in it even where it is installed.
+        // Checked here, not in the PE header: a 10.0 subsystem version there left the
+        // program running with no window and no WebView2 process on Windows Server 2025,
+        // while the same bytes with 6.0 opened (measured, `windows` workflow).
+        if (@intFromEnum(std.zig.system.windows.detectRuntimeVersion()) < @intFromEnum(std.Target.Os.WindowsVersion.win10)) {
+            tell("This application needs Windows 10 or 11: it shows its pages with WebView2, which gets no security fixes on older Windows.");
+            return error.OldWindows;
+        }
         window.becomeDpiAware();
         const com = c.CoInitializeEx(null, c.COINIT_APARTMENTTHREADED);
         if (com != c.S_OK and com != c.S_FALSE) return error.Com;
 
         var dir_buffer: [c.MAX_PATH]u16 = undefined;
-        const dir = runtime.directory(&dir_buffer) orelse return error.NoRuntime;
-        const create = runtime.load(dir) orelse return error.NoRuntime;
+        const dir = runtime.directory(&dir_buffer) orelse return noRuntime();
+        const create = runtime.load(dir) orelse return noRuntime();
         var version: [96]u8 = undefined;
         const named = std.fmt.bufPrint(&version_text, "WebView2 {s}", .{runtime.version(dir, &version)}) catch "WebView2";
         version_len = named.len;
@@ -352,7 +361,9 @@ pub const View = struct {
         // that is not a name the window should carry.
         const own_title = page.len == 0 or std.mem.startsWith(u8, page, "http://") or std.mem.startsWith(u8, page, "https://") or
             std.mem.startsWith(u8, page, "about:") or std.mem.startsWith(u8, page, host);
-        window.setTitle(self.window, if (own_title) self.title[0..self.title_len] else page);
+        const shown = if (own_title) self.title[0..self.title_len] else page;
+        window.setTitle(self.window, shown);
+        self.bridge.showTitle(shown);
     }
 
     /// Answers `http://lepton.localhost/*` from the bridge, and wires the window's
@@ -541,6 +552,19 @@ fn onResource(
     // The event's own reference: a request the bridge kept (`ref`) lives on.
     request.unref(pending);
     return c.S_OK;
+}
+
+/// Why the program cannot start, where a release build has no console to print it to.
+fn tell(text: []const u8) void {
+    var wide: [256:0]u16 = undefined;
+    const len = std.unicode.utf8ToUtf16Le(&wide, text) catch return;
+    wide[len] = 0;
+    _ = c.MessageBoxW(null, &wide, null, c.MB_OK | c.MB_ICONERROR);
+}
+
+fn noRuntime() Error {
+    tell("This application needs the WebView2 runtime, which comes with Windows 10 and 11. Install it from Microsoft (\"Microsoft Edge WebView2 Runtime\") and start the application again.");
+    return error.NoRuntime;
 }
 
 fn onTitle(this: [*c]c.ICoreWebView2DocumentTitleChangedEventHandler, _: [*c]c.ICoreWebView2, _: [*c]c.IUnknown) callconv(.winapi) c.HRESULT {

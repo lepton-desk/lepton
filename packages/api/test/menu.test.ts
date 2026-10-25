@@ -2,7 +2,7 @@
 // builds by hand, so the two ends agree.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { encodeMenu } from "../src/window.ts";
+import { encodeMenu } from "../src/payloads.ts";
 
 test("menu items are encoded as the core reads them", () => {
   const bytes = encodeMenu([

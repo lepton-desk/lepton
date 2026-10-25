@@ -105,17 +105,17 @@ if (bar) { dragRegion(bar); windowControls(bar); }
 ```
 
 The application's name in the bar: `info()` (`@lepton-desk/api/app`) is `productName`,
-`version` and `identifier`; `title()` is the window's name — `document.title`, or
-`window.title` while the page has none, as the system's title bar shows it — and
-`onTitleChanged` follows it. None of them needs a permission or waits: the core writes them
-into the page before its scripts run.
+`version` and `identifier`, written into the page by the core before its scripts run (no
+permission, no waiting). `title()` is the window's name as the system's title bar shows it —
+`document.title`, or `window.title` while the page has none — kept by the core; it needs
+`window.title` under `permissions`. `onTitleChanged` follows it (events need no permission).
 
 ```ts
 import { info } from "@lepton-desk/api/app";
 import { onTitleChanged, title } from "@lepton-desk/api/window";
 const show = (name: string) => (label.textContent = `${info().name} — ${name}`);
-show(title());
 await onTitleChanged(show);
+show(await title());
 ```
 
 The bar carries `data-maximized` while the window is maximized (`#titlebar[data-maximized]`

@@ -6,16 +6,8 @@ import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:c
 import { readFileSync } from "node:fs";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import {
-  commandId,
-  decodeReply,
-  encodeRequest,
-  InvokeError,
-  invoke,
-  isLepton,
-  type Reply,
-  type WireLayout,
-} from "../src/core.ts";
+import { InvokeError, invoke, isLepton } from "../src/core.ts";
+import { commandId, decodeReply, encodeRequest, type Reply, type WireLayout } from "../src/wire.ts";
 
 const tool = fileURLToPath(
   new URL("../../../zig/zig-out/bin/lepton-invoke-check", import.meta.url),

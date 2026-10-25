@@ -10,7 +10,7 @@ const tool = fileURLToPath(
   new URL("../../../zig/zig-out/bin/lepton-invoke-check", import.meta.url),
 );
 
-function coreApp(...values: [string, string, string, string]): unknown {
+function coreApp(...values: [string, string, string]): unknown {
   const text = execFileSync(tool, ["app", ...values], { encoding: "utf8" });
   return new Function(`return (${text});`)();
 }
@@ -21,7 +21,7 @@ afterEach(() => {
 
 test("info() is who the core says the application is, quotes and all", () => {
   const name = 'Not"lar \\ ğ ';
-  Reflect.set(globalThis, "__lepton", { app: coreApp(name, "1.2.3", "dev.lepton.notes", "x") });
+  Reflect.set(globalThis, "__lepton", { app: coreApp(name, "1.2.3", "dev.lepton.notes") });
   assert.deepEqual(info(), { name, version: "1.2.3", identifier: "dev.lepton.notes" });
   assert.ok(Object.isFrozen(info()));
 });

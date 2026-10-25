@@ -17,15 +17,17 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
 
 ### Added
 
-- `@lepton-desk/api/app` `info()` → `{ name, version, identifier }`, and
-  `@lepton-desk/api/window` `title()` / `onTitleChanged()`, for a title bar the page draws
-  itself. The core writes them into the page as `__lepton.app`
-  (`render/webview/transport.zig` `writeApplication`, shared by WPE, Servo and WebView2;
-  JSON-escaped, 256 bytes a field, cut at a character); `Bridge.application` is set by the
-  template's `main.zig`. `title()` follows the engines' rule: `document.title`, else
-  `window.title`. The version reaches the build as `-Dapp-version` (`window_shape.rs`,
-  only for a `build.zig` that takes it). `lepton-invoke-check app …` prints the object for
-  the SDK's test.
+- `@lepton-desk/api/app` `info()` → `{ name, version, identifier }`, written into the page
+  by the core as `__lepton.app` (`render/webview/transport.zig` `writeApplication`, shared
+  by WPE, Servo and WebView2; JSON-escaped, 256 bytes a field, cut at a character);
+  `Bridge.application` is set by the template's `main.zig`. The version reaches the build as
+  `-Dapp-version` (`window_shape.rs`, only for a `build.zig` that takes it).
+  `lepton-invoke-check app …` prints the object for the SDK's test.
+- The window's name is the core's: the `window.title` command answers it and the
+  `window.title` event reports a change (`Bridge.showTitle`, called by each engine with
+  what its window shows — the page's `document.title`, else `window.title`). The SDK's
+  `title()` and `onTitleChanged()` read them, so a title bar the page draws needs no DOM
+  watching, and 0.2.0's native apps can give the same (`docs/plans/uyumluluk-0.2.0.md`).
 - Single instance and deep links: a second start hands its arguments to the running copy
   (unix socket on Linux, named pipe on Windows), the page hears `app.opened`;
   `deepLinks` registers schemes (desktop entry; `HKCU\Software\Classes` in the MSI).
@@ -60,6 +62,16 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   Ubuntu, after which the Windows job installs that MSI, measures it and removes it.
 
 ### Changed
+
+- API freeze for 0.1.9 (`docs/plans/uyumluluk-0.2.0.md`): the transport's shapes left the
+  SDK's entry points. `encodeRequest`, `decodeReply`, `wireLayout`, `commandId`, the layout
+  types and `decodeEvents` are `src/wire.ts`; `decodeState`, `encodeMenu`, `decodeDownload`
+  and `decodePermissionRequest` are `src/payloads.ts`; neither is in `exports`
+  (`ERR_PACKAGE_PATH_NOT_EXPORTED`, measured). No plugin or template used them.
+- `sdkScope` is read: `lepton update` moves the dependencies under it and asks the
+  registry for `<sdkScope>/cli`, and the linked-package watcher looks under it. It was
+  written into every project and read by nothing. The CLI and the schema check it is an npm
+  scope.
 
 - The template's `main.zig` is split: the `--target native` program is
   `src-lepton/native.zig`, a framework file that reads `who` from `main.zig` through
@@ -117,11 +129,16 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   from Linux; cross-building for `win10_rs4` and `win10_rs3` reproduced both sizes
   exactly. Windows builds now always name their target: `x86_64-windows.win10-gnu` for a
   web view, `x86_64-windows.win7-gnu` for a native app (`Platform::build_target`).
-- A web view program says it needs Windows 10 in its PE header: Zig writes 6.0 for every
-  Windows program whatever its target (measured from `win7` to `win11_dt`) and has no
-  option for it, so the template runs the core's `tools/pe_version.zig` on the linked
-  program (OS and subsystem version 10.0; Windows refuses a program newer than itself).
-  Native programs keep 6.0. `windows.yml` checks the header.
+- With both, a package made on Linux and one made on Windows are the same bytes: the
+  `zip` and the `msi` (`windows` workflow, `compare.txt`: identical). The last difference
+  was the program's mode in the zip (0644 from Linux); it is installed executable again.
+- A web view program refuses Windows older than 10 when it starts, with a message box
+  (`webview2/view.zig`): WebView2 stopped at 109 there and gets no security fixes. The PE
+  header could not say it: Zig writes 6.0 whatever the target and has no option, and a
+  header set to 10.0 afterwards left the program running with no window and no WebView2
+  process on the runner, while the same bytes with 6.0 opened (measured A/B). The header
+  stays 6.0, and `windows.yml` checks that. A missing WebView2 runtime is a message box
+  too, not a silent exit.
 
 ## 0.1.9-beta.1 *2026-10-19*
 

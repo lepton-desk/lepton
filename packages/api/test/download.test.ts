@@ -4,9 +4,8 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import type { WireLayout } from "../src/core.ts";
-import { decodeDownload } from "../src/download.ts";
-import { decodeEvents } from "../src/event.ts";
+import { decodeDownload } from "../src/payloads.ts";
+import { decodeEvents, type WireLayout } from "../src/wire.ts";
 
 const tool = fileURLToPath(
   new URL("../../../zig/zig-out/bin/lepton-invoke-check", import.meta.url),

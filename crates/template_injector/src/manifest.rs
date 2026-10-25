@@ -212,7 +212,7 @@ impl Manifest {
             window_title: product_name.to_owned(),
             window_width: 1200,
             window_height: 800,
-            sdk_scope: "@lepton-desk".to_owned(),
+            sdk_scope: SDK_SCOPE.to_owned(),
             language: Language::default(),
             plugins: Vec::new(),
         }
@@ -482,6 +482,30 @@ pub fn check_version(value: &str) -> Result<(), ManifestError> {
     }
 }
 
+/// The npm scope Lepton's own packages are published under, unless `sdkScope` names another
+/// (a mirror or fork that publishes them as `@acme/api`, `@acme/cli`, …).
+pub const SDK_SCOPE: &str = "@lepton-desk";
+
+/// `sdkScope`: an npm scope, `@` and a lower-case name of letters, digits, `-`, `.` and `_`
+/// (npm's rules for a scope; it becomes part of every Lepton package name).
+pub fn check_scope(value: &str) -> Result<(), ManifestError> {
+    let name = value.strip_prefix('@').unwrap_or("");
+    let fine = !name.is_empty()
+        && !name.starts_with(['.', '_'])
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_'));
+    if fine {
+        Ok(())
+    } else {
+        Err(ManifestError {
+            reason: format!(
+                "sdkScope must be an npm scope such as \"@lepton-desk\", got {value:?}"
+            ),
+        })
+    }
+}
+
 /// Checks a manifest before it is written, so a bad project is refused at the
 /// point the developer can still fix it.
 ///
@@ -499,6 +523,7 @@ pub fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
     check_title(&manifest.window_title)?;
     check_identifier(&manifest.identifier)?;
     check_version(&manifest.version)?;
+    check_scope(&manifest.sdk_scope)?;
     if manifest.window_width == 0 || manifest.window_height == 0 {
         return Err(ManifestError {
             reason: format!(
@@ -521,13 +546,32 @@ pub fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Manifest, RenderPath, Target, identifier_for, json_string, render_manifest, reverse_dns,
-        validate,
+        Manifest, RenderPath, Target, check_scope, identifier_for, json_string, render_manifest,
+        reverse_dns, validate,
     };
     use lepton_orchestrator::testing::{Failure, balanced};
     use lepton_orchestrator::{
         assert_contains, assert_eq, assert_err, assert_ne, assert_ok, ensure,
     };
+
+    #[test]
+    fn an_sdk_scope_is_an_npm_scope() -> Result<(), Failure> {
+        for good in ["@lepton-desk", "@acme", "@a.b_c-1"] {
+            assert_ok!(check_scope(good), "{good}");
+        }
+        for bad in [
+            "lepton-desk",
+            "@",
+            "@Acme",
+            "@acme/cli",
+            "@.x",
+            "@_x",
+            "@a b",
+        ] {
+            assert_err!(check_scope(bad), "{bad}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn a_new_identifier_is_owner_then_app() -> Result<(), Failure> {

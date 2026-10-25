@@ -15,8 +15,17 @@ use serde_json::Value;
 
 use super::package_manager::PackageManager;
 
-/// The scope every Lepton package is published under.
-pub const SCOPE: &str = "@lepton-desk/";
+/// The npm scope this project's Lepton packages come from: `lepton.config.json`'s
+/// `sdkScope`, `@lepton-desk` without one (or with a file that does not parse, which the
+/// command reports elsewhere). A mirror or fork that publishes Lepton as `@acme/cli` names
+/// `"sdkScope": "@acme"`, and `lepton update` and the linked-package watcher follow it.
+pub fn scope(root: &Path) -> String {
+    std::fs::read_to_string(root.join("lepton.config.json"))
+        .ok()
+        .and_then(|text| lepton_template_injector::parse_config(&text).ok())
+        .map(|manifest| manifest.sdk_scope)
+        .unwrap_or_else(|| lepton_template_injector::manifest::SDK_SCOPE.to_owned())
+}
 
 /// `x.y.z` with an optional `-beta.N` / `-rc.N`, ordered as semver orders them: a
 /// prerelease comes before its release.
@@ -127,7 +136,8 @@ const SECTIONS: [&str; 3] = ["dependencies", "devDependencies", "optionalDepende
 /// Edited as text, not re-serialised, so the file keeps its own layout and key order. A
 /// `link:`, `file:`, `workspace:` or `npm:` dependency is a checkout or an alias the
 /// developer chose (the repository's own examples use `link:`) and is left as it is.
-pub fn bump(manifest: &str, to: &Version) -> Result<(String, Vec<Change>), String> {
+pub fn bump(manifest: &str, to: &Version, scope: &str) -> Result<(String, Vec<Change>), String> {
+    let prefix = format!("{scope}/");
     let json: Value =
         serde_json::from_str(manifest).map_err(|error| format!("package.json: {error}"))?;
     let mut changes = Vec::new();
@@ -137,7 +147,7 @@ pub fn bump(manifest: &str, to: &Version) -> Result<(String, Vec<Change>), Strin
         };
         for (name, spec) in entries {
             let Some(spec) = spec.as_str() else { continue };
-            if !name.starts_with(SCOPE) || spec.contains(':') {
+            if !name.starts_with(&prefix) || spec.contains(':') {
                 continue;
             }
             let prefix: String = spec
@@ -202,8 +212,8 @@ pub fn version_in(output: &str) -> Option<Version> {
 /// through its own manager (so `.npmrc` registries apply), then npm; `None` when neither
 /// answers. `latest` is the release; a beta CLI also asks `beta`, or a project on
 /// `0.1.9-beta.0` would never hear of `0.1.9-beta.1` (`latest` stays at the last release).
-pub fn latest(root: &Path, manager: PackageManager, tag: &str) -> Option<Version> {
-    let package = format!("{SCOPE}cli@{tag}");
+pub fn latest(root: &Path, manager: PackageManager, tag: &str, scope: &str) -> Option<Version> {
+    let package = format!("{scope}/cli@{tag}");
     let mut attempts: Vec<(&str, Vec<String>)> = vec![match manager {
         PackageManager::Npm | PackageManager::Pnpm => (
             manager.program(),
@@ -246,7 +256,7 @@ pub fn latest(root: &Path, manager: PackageManager, tag: &str) -> Option<Version
 
 #[cfg(test)]
 mod tests {
-    use super::{Change, Version, bump, version_in};
+    use super::{Change, Version, bump, scope, version_in};
     use lepton_orchestrator::testing::{Failure, fail};
     use lepton_orchestrator::{assert_eq, ensure};
 
@@ -302,7 +312,8 @@ mod tests {
   }
 }
 "#;
-        let (text, changes) = bump(manifest, &version("0.1.8")?).map_err(|e| fail("a bump", e))?;
+        let (text, changes) =
+            bump(manifest, &version("0.1.8")?, "@lepton-desk").map_err(|e| fail("a bump", e))?;
         assert_eq!(changes.len(), 3);
         ensure!(
             changes.contains(&Change {
@@ -325,7 +336,8 @@ mod tests {
     #[test]
     fn a_project_already_there_is_left_alone() -> Result<(), Failure> {
         let manifest = r#"{"dependencies": {"@lepton-desk/api": "^0.1.9"}}"#;
-        let (text, changes) = bump(manifest, &version("0.1.8")?).map_err(|e| fail("a bump", e))?;
+        let (text, changes) =
+            bump(manifest, &version("0.1.8")?, "@lepton-desk").map_err(|e| fail("a bump", e))?;
         assert_eq!(changes.len(), 0);
         assert_eq!(text, manifest);
         Ok(())
@@ -344,6 +356,31 @@ mod tests {
         assert_eq!(version_in("npm error 404\n"), None::<Version>);
         assert_eq!(Version::parse("1.0.0-beta\",\"x"), None::<Version>);
         assert_eq!(Version::parse("1.0.0-beta..1"), None::<Version>);
+        Ok(())
+    }
+
+    #[test]
+    fn a_project_with_its_own_scope_moves_that_scope_only() -> Result<(), Failure> {
+        let manifest = r#"{"dependencies": {"@acme/api": "^0.1.6", "@lepton-desk/api": "^0.1.6"}}"#;
+        let (text, changes) =
+            bump(manifest, &version("0.1.8")?, "@acme").map_err(|e| fail("a bump", e))?;
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            text,
+            r#"{"dependencies": {"@acme/api": "^0.1.8", "@lepton-desk/api": "^0.1.6"}}"#
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_scope_is_read_from_the_project() -> Result<(), Failure> {
+        let scratch = lepton_orchestrator::testing::Scratch::new("update-scope")?;
+        assert_eq!(scope(scratch.path()), "@lepton-desk");
+        scratch.write(
+            "lepton.config.json",
+            r#"{"productName":"Notes","identifier":"dev.lepton.notes","sdkScope":"@acme"}"#,
+        )?;
+        assert_eq!(scope(scratch.path()), "@acme");
         Ok(())
     }
 }

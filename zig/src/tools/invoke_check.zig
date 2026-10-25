@@ -64,7 +64,6 @@ pub fn main(init: std.process.Init.Minimal) !void {
             .name = args.next() orelse return usage(),
             .version = args.next() orelse return usage(),
             .identifier = args.next() orelse return usage(),
-            .title = args.next() orelse return usage(),
         };
         var object: [8192]u8 = undefined;
         try writeAll(try core.webviewTransport.writeApplication(&object, given));
@@ -134,7 +133,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 }
 
 fn usage() error{Usage}!void {
-    std.debug.print("usage: lepton-invoke-check layout | app-commands | app <name> <version> <identifier> <title> | types | app-types | events | download-events | permission-events | serve\n", .{});
+    std.debug.print("usage: lepton-invoke-check layout | app-commands | app <name> <version> <identifier> | types | app-types | events | download-events | permission-events | serve\n", .{});
     return error.Usage;
 }
 

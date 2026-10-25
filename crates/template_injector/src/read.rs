@@ -53,7 +53,7 @@ pub fn parse_config(text: &str) -> Result<Manifest, ManifestError> {
         channel_name: sub_string(&root, "channel", "name")?
             .unwrap_or_else(|| format!("/lepton-{}", identifier_for(&product_name))),
         sdk_scope: optional_string(&root, "sdkScope")?
-            .unwrap_or_else(|| String::from("@lepton-desk")),
+            .unwrap_or_else(|| String::from(crate::manifest::SDK_SCOPE)),
         plugins: Vec::new(),
     };
 

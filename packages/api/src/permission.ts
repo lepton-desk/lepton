@@ -12,7 +12,8 @@
  */
 
 import { invoke } from "./core.ts";
-import { type LeptonEvent, listen, type UnlistenFn } from "./event.ts";
+import { listen, type UnlistenFn } from "./event.ts";
+import { decodePermissionRequest } from "./payloads.ts";
 
 /** What `webPermissions` can name. */
 export type PermissionKind =
@@ -30,15 +31,6 @@ export interface PermissionRequest {
   readonly id: number;
   /** One kind, or two for a page asking for camera and microphone at once. */
   readonly kinds: readonly PermissionKind[];
-}
-
-/** Reads a `permission.request` event; `undefined` for any other event. */
-export function decodePermissionRequest(event: LeptonEvent): PermissionRequest | undefined {
-  if (event.name !== "permission.request") return undefined;
-  const bytes = event.payload;
-  const id = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
-  const text = new TextDecoder().decode(bytes.subarray(4));
-  return { id, kinds: text.split(",") as PermissionKind[] };
 }
 
 /** Answers request `id`. Rejects with `failed` when it is no longer waiting. */

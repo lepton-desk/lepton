@@ -25,7 +25,10 @@ pub const download_failed = "download.failed";
 pub const permission_request = "permission.request";
 /// A second start of the application handed over its arguments (NUL-ended each).
 pub const app_opened = "app.opened";
-pub const builtin = [_][]const u8{ window_state, window_resized, download_started, download_progress, download_finished, download_failed, permission_request, app_opened };
+/// The window's name changed (UTF-8): the page set or cleared `document.title`
+/// (`Bridge.showTitle`).
+pub const window_title = "window.title";
+pub const builtin = [_][]const u8{ window_state, window_resized, download_started, download_progress, download_finished, download_failed, permission_request, app_opened, window_title };
 
 /// The events an application emits, declared once in its `main.zig`:
 ///

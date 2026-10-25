@@ -1,5 +1,5 @@
 /**
- * `__lepton.app`, read for `app.info()` and `window.title()`. Not one of the package's
+ * `__lepton.app`, read for `app.info()`. Not one of the package's
  * entry points: the shape belongs to the core (`transport.zig` `writeApplication`).
  *
  * @module
@@ -10,8 +10,6 @@ export interface Identity {
   readonly name: string;
   readonly version: string;
   readonly identifier: string;
-  /** `window.title`: the window's name while the page has no `document.title`. */
-  readonly title: string;
 }
 
 /** The running core's `__lepton.app`, or `undefined` outside a Lepton window or under a
@@ -21,7 +19,7 @@ export function identity(): Identity | undefined {
   if (typeof lepton !== "object" || lepton === null) return undefined;
   const app: unknown = Reflect.get(lepton, "app");
   if (typeof app !== "object" || app === null) return undefined;
-  const fields = ["name", "version", "identifier", "title"] as const;
+  const fields = ["name", "version", "identifier"] as const;
   if (!fields.every((field) => typeof Reflect.get(app, field) === "string")) return undefined;
   return app as Identity;
 }

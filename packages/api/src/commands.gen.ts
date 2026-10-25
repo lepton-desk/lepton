@@ -14,6 +14,7 @@ export interface BuiltinCommands {
   "app.args": true;
   "window.start_drag": true;
   "window.menu": true;
+  "window.title": true;
 }
 
 /** The events the core itself emits. */
@@ -26,6 +27,7 @@ export interface BuiltinEvents {
   "download.failed": true;
   "permission.request": true;
   "app.opened": true;
+  "window.title": true;
 }
 
 /** Every status, by name; `ok` is success. */

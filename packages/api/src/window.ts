@@ -1,63 +1,34 @@
 /**
  * `@lepton-desk/api/window` — the application's window.
  *
- * Every function but {@link title} and {@link onTitleChanged} is an `invoke` of a built-in
- * command, so each must be listed under `permissions` in `lepton.config.json`
- * (`window.close`, `window.minimize`, `window.maximize`, `window.unmaximize`,
- * `window.state`, `window.start_drag`, `window.menu`).
+ * Every function is an `invoke` of a built-in command, so each must be listed under
+ * `permissions` in `lepton.config.json` (`window.close`, `window.minimize`,
+ * `window.maximize`, `window.unmaximize`, `window.state`, `window.title`,
+ * `window.start_drag`, `window.menu`). Listening to events needs no permission.
  *
  * @module
  */
 
-import { invoke, wireLayout } from "./core.ts";
+import { invoke } from "./core.ts";
 import { listen, type UnlistenFn } from "./event.ts";
-import { identity } from "./identity.ts";
+import { decodeState, encodeMenu } from "./payloads.ts";
 
 /**
- * The window's name now, for a title bar the page draws itself: the page's
- * `document.title`, or `window.title` from `lepton.config.json` (the product's name
- * without one) while the page has none. The rule every engine's window follows (WPE,
- * Servo, WebView2), read here rather than asked of the core: no permission, no waiting.
- * Outside a Lepton window, or under a core from before 0.1.9-beta.3, `document.title`.
+ * The window's name now, as the system's title bar shows it: the page's `document.title`,
+ * or `window.title` from `lepton.config.json` (the product's name without one) while the
+ * page has none. The core keeps it, whatever the engine, so a title bar the page draws
+ * itself can show it. Needs `window.title` under `permissions`.
  */
-export function title(): string {
-  return document.title !== "" ? document.title : (identity()?.title ?? "");
+export async function title(): Promise<string> {
+  return new TextDecoder().decode(await invoke("window.title"));
 }
 
 /**
- * Calls `handler` with the window's new name ({@link title}) whenever it changes: the
- * page set `document.title`, or cleared it. Resolves with a function that stops
- * listening.
+ * Calls `handler` with the window's new name ({@link title}) whenever it changes: the page
+ * set `document.title`, or cleared it. Resolves with a function that stops listening.
  */
 export function onTitleChanged(handler: (title: string) => void): Promise<UnlistenFn> {
-  let shown = title();
-  let element: Element | null = null;
-  const check = (): void => {
-    const now = title();
-    if (now === shown) return;
-    shown = now;
-    handler(now);
-  };
-  // The `<title>`'s own text, and the head, where `document.title` adds one.
-  const text = new MutationObserver(check);
-  const watch = (): void => {
-    const current = document.querySelector("title");
-    if (current !== element) {
-      text.disconnect();
-      element = current;
-      if (current !== null) {
-        text.observe(current, { childList: true, characterData: true, subtree: true });
-      }
-    }
-    check();
-  };
-  const head = new MutationObserver(watch);
-  head.observe(document.head ?? document.documentElement, { childList: true });
-  watch();
-  return Promise.resolve(() => {
-    head.disconnect();
-    text.disconnect();
-  });
+  return listen("window.title", (event) => handler(new TextDecoder().decode(event.payload)));
 }
 
 /** The window's state, from WPE's toplevel state bits. */
@@ -90,18 +61,6 @@ export async function unmaximize(): Promise<void> {
 export async function toggleMaximize(): Promise<void> {
   if ((await state()).maximized) await unmaximize();
   else await maximize();
-}
-
-/** Turns state bits into a `WindowState`, with the bit values the core supplies. */
-export function decodeState(bits: number): WindowState {
-  const layout = wireLayout();
-  if (layout === undefined) throw new Error("not running inside a Lepton window");
-  const shape = layout.events.windowState;
-  return {
-    maximized: (bits & shape.maximized) !== 0,
-    fullscreen: (bits & shape.fullscreen) !== 0,
-    active: (bits & shape.active) !== 0,
-  };
 }
 
 export async function state(): Promise<WindowState> {
@@ -219,38 +178,6 @@ export type MenuItem =
       readonly checked?: boolean;
     }
   | { readonly separator: true };
-
-const menuFlag = { separator: 1, disabled: 2, checked: 4 } as const;
-
-/** The items as the core reads them (`zig/src/render/webview/menu.zig`). */
-export function encodeMenu(items: readonly MenuItem[]): Uint8Array {
-  if (items.length === 0 || items.length > 64) throw new RangeError("a menu has 1 to 64 items");
-  const utf8 = new TextEncoder();
-  const parts: number[] = [items.length];
-  for (const item of items) {
-    if ("separator" in item) {
-      parts.push(0, 0, menuFlag.separator, 0, 0);
-      continue;
-    }
-    if (!Number.isInteger(item.id) || item.id < 1 || item.id > 0xffff) {
-      throw new RangeError(`menu item "${item.label}" needs an id from 1 to 65535`);
-    }
-    const label = utf8.encode(item.label);
-    if (label.length === 0 || label.length > 256) {
-      throw new RangeError("a menu label is 1 to 256 bytes");
-    }
-    const flags = (item.disabled ? menuFlag.disabled : 0) | (item.checked ? menuFlag.checked : 0);
-    parts.push(
-      item.id & 0xff,
-      item.id >> 8,
-      flags,
-      label.length & 0xff,
-      label.length >> 8,
-      ...label,
-    );
-  }
-  return Uint8Array.from(parts);
-}
 
 /**
  * Shows the system's own menu at the pointer — a context menu that looks and behaves like

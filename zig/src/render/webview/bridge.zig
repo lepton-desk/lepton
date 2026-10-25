@@ -85,6 +85,9 @@ pub fn lastPath() ?[]const u8 {
 pub const max_later = 8;
 /// How many pages may wait on `/__lepton/region` at once; one more evicts the oldest.
 pub const max_region_held = 4;
+/// The longest window name kept for `window.title`, in bytes; a longer one is cut at a
+/// character. Window titles are short: the WPE view keeps 256.
+pub const max_title = 512;
 
 const Later = struct {
     request: ?*anyopaque = null,
@@ -130,6 +133,10 @@ pub const Bridge = struct {
     /// Who the application is, written into the page as `__lepton.app`; set by the
     /// template's `main.zig` before `startBridge`.
     application: transport.Application = .{},
+    /// The window's name as the system's title bar shows it (`showTitle`), for
+    /// `window.title`.
+    title: [max_title]u8 = undefined,
+    title_len: usize = 0,
     /// The window the `window.*` commands act on; set by the view that owns it.
     window: invoke.Window = .{},
     /// Events for the page, and the one events request waiting for the next of them.
@@ -307,6 +314,20 @@ pub const Bridge = struct {
     /// Answers one request: a file for `lepton://localhost/`, the channel body otherwise.
     /// Publishes an event to the page: appended to the log, and answered at once to a
     /// request waiting for it.
+    /// Every engine calls this with the name its window now shows (the page's
+    /// `document.title`, or the application's `window.title` while there is none): kept
+    /// for `window.title`, and sent to the page as the `window.title` event when it changed.
+    /// Cut at a character to `max_title` bytes.
+    pub fn showTitle(self: *Bridge, shown: []const u8) void {
+        var end = @min(shown.len, max_title);
+        while (end > 0 and end < shown.len and shown[end] & 0xc0 == 0x80) end -= 1;
+        const kept = shown[0..end];
+        if (std.mem.eql(u8, kept, self.title[0..self.title_len])) return;
+        @memcpy(self.title[0..kept.len], kept);
+        self.title_len = kept.len;
+        _ = self.emit(events.window_title, kept) catch {};
+    }
+
     pub fn emit(self: *Bridge, name: []const u8, data: []const u8) events.EmitError!u64 {
         const number = try self.events.emit(name, data);
         if (self.recorder) |*recorder| {
@@ -423,7 +444,9 @@ pub const Bridge = struct {
         }
         const begun = if (self.recorder) |*recorder| recorder.now() else 0;
         self.handling = true;
-        const answered = invoke.handle(self.request_frame[0..read], &self.registry, self.window, &effects, out[0..invoke.max_reply]);
+        var window = self.window;
+        window.title = self.title[0..self.title_len];
+        const answered = invoke.handle(self.request_frame[0..read], &self.registry, window, &effects, out[0..invoke.max_reply]);
         self.handling = false;
         if (!effects.deferred) if (free_slot) |index| self.release(index);
         const frame = answered catch {
@@ -739,4 +762,24 @@ test "the frontend host is told apart from the channel" {
     try std.testing.expectEqualStrings("check", hostOf("lepton://check/storage/kept"));
     try std.testing.expectEqualStrings("localhost", hostOf("lepton://localhost"));
     try std.testing.expectEqualStrings("", hostOf("not a uri"));
+}
+
+test "the shown title is kept for window.title and sent once per change" {
+    // `emit` wakes a held request through the engine, which a native build does not link.
+    if (comptime !@import("root.zig").is_available()) return error.SkipZigTest;
+    var bridge = Bridge{};
+    bridge.showTitle("Notes");
+    try std.testing.expectEqualStrings("Notes", bridge.title[0..bridge.title_len]);
+    try std.testing.expectEqual(@as(u64, 1), bridge.events.latest);
+    // The same name again: nothing new for the page.
+    bridge.showTitle("Notes");
+    try std.testing.expectEqual(@as(u64, 1), bridge.events.latest);
+    bridge.showTitle("Belge 1 — Notes");
+    try std.testing.expectEqual(@as(u64, 2), bridge.events.latest);
+    // Longer than kept: cut before the "ğ" that would straddle the limit.
+    var long: [max_title + 1]u8 = undefined;
+    @memset(long[0 .. max_title - 1], 'x');
+    @memcpy(long[max_title - 1 ..], "ğ");
+    bridge.showTitle(&long);
+    try std.testing.expectEqual(@as(usize, max_title - 1), bridge.title_len);
 }

@@ -31,8 +31,8 @@ No browser ships with the app: it uses the system's web engine.
 | Small screens (1280 × 800 and below) | the window is centred (X11; Wayland places it itself) | the window is fitted to the work area and centred |
 
 Web view apps need Windows 10 or 11: WebView2 stopped at 109 on Windows 8.1, 8 and 7 and
-gets no security fixes there, so a web view program's header names Windows 10 and older
-Windows refuses to start it. Native apps are built for Windows 7 SP1 and later; they do
+gets no security fixes there, so a web view program says so in a message box and does not
+start there. Native apps are built for Windows 7 SP1 and later; they do
 not start there yet (Zig's standard library imports Windows 8 functions), which Lepton's
 own system layer is planned to change.
 
@@ -148,7 +148,7 @@ await maximize();
 const bar = document.querySelector<HTMLElement>("#titlebar");
 if (bar) {
   dragRegion(bar); // with "window": { "decorations": false }
-  bar.textContent = `${info().name} — ${title()}`; // no permission, no waiting
+  bar.textContent = `${info().name} — ${await title()}`; // title() needs window.title
 }
 const chosen = await popupMenu([{ id: 1, label: "Copy" }, { separator: true }, { id: 2, label: "Delete" }]);
 ```

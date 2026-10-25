@@ -52,6 +52,10 @@ pub const Command = enum(u32) {
     /// Shows a native menu at the pointer and answers the chosen item's `u16` id (LE),
     /// 0 when the user dismissed it. The items: `menu.zig`. Answers once the user chose.
     window_menu = 11,
+    /// The window's name now (UTF-8): the page's `document.title`, or the application's
+    /// `window.title` while the page has none — what the system's title bar shows. Kept
+    /// by the bridge (`Bridge.showTitle`), whatever the engine.
+    window_title = 12,
     _,
 
     /// The name the page uses: `<group>.<name>`.
@@ -68,13 +72,14 @@ pub const Command = enum(u32) {
             .app_args => "app.args",
             .window_start_drag => "window.start_drag",
             .window_menu => "window.menu",
+            .window_title => "window.title",
             _ => @compileError("a command without a public name cannot reach the page"),
         };
     }
 };
 
 /// The named commands, for code generated from them.
-pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond, .app_args, .window_start_drag, .window_menu };
+pub const commands = [_]Command{ .ping, .protocol, .window_close, .window_minimize, .window_maximize, .window_unmaximize, .window_state, .permission_respond, .app_args, .window_start_drag, .window_menu, .window_title };
 
 /// What the window commands ask the platform to do.
 pub const WindowAction = enum { minimize, maximize, unmaximize };
@@ -101,6 +106,8 @@ pub const Window = struct {
     /// Shows `menu` (checked by `menu.zig`) and finishes `later` with the chosen id;
     /// false when it cannot be shown. Unset where there is no native menu.
     menu: ?*const fn (context: ?*anyopaque, menu: []const u8, later: Later) bool = null,
+    /// The window's name now (`window.title`), set by the bridge for each request.
+    title: []const u8 = "",
 
     fn perform(self: Window, action: WindowAction) bool {
         const act = self.act orelse return false;
@@ -257,6 +264,7 @@ pub fn handle(frame: []const u8, registry: *const Registry, window: Window, effe
             effects.deferred = true;
             break :blk out[0..0];
         },
+        .window_title => reply(out, sequence, .ok, window.title) catch reply(out, sequence, .too_large, &.{}),
         _ => reply(out, sequence, .unknown_command, &.{}),
     };
 }
@@ -326,7 +334,7 @@ pub fn request(out: []u8, sequence: u64, command: u32, argument: []const u8) err
 
 /// Every built-in granted: what the handler tests below exercise.
 const NoState = struct {};
-const everything = registry_mod.checked(NoState, &.{}, registry_mod.permissionList("core.ping,core.protocol,window.close,window.minimize,window.maximize,window.unmaximize,window.state")).unbound;
+const everything = registry_mod.checked(NoState, &.{}, registry_mod.permissionList("core.ping,core.protocol,window.close,window.minimize,window.maximize,window.unmaximize,window.state,window.title")).unbound;
 
 fn decodeReply(frame: []const u8) !struct { header: wire.Header, reply: wire.Reply, result: []const u8 } {
     const h = try wire.readHeader(frame);
@@ -616,4 +624,13 @@ test "window.menu holds the request until the menu answers; without a platform m
 
 test {
     _ = @import("menu.zig");
+}
+
+test "window.title answers the name the bridge keeps" {
+    var in: [256]u8 = undefined;
+    var out: [256]u8 = undefined;
+    var effects: Effects = .{};
+    const named = try decodeReply(try handle(try request(&in, 1, @intFromEnum(Command.window_title), ""), &everything, .{ .title = "Belge 1 — Notes" }, &effects, &out));
+    try std.testing.expectEqual(@as(u32, 0), named.reply.status);
+    try std.testing.expectEqualStrings("Belge 1 — Notes", named.result);
 }

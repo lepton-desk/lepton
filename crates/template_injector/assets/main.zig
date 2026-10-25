@@ -230,9 +230,8 @@ fn run(init: std.process.Init.Minimal) !void {{
     // Before the transport is written: the page learns the application's command names
     // from it, and the bridge answers only what `permissions` grants.
     view.bridge.registry = commands.bind(&app_state);
-    // Who the application is, for the page's `info()` (`@lepton-desk/api/app`) and the
-    // window's name in a title bar it draws itself (`title()`, `@lepton-desk/api/window`).
-    view.bridge.application = .{{ .name = who.product, .version = who.version, .identifier = who.identifier, .title = who.title }};
+    // Who the application is, for the page's `info()` (`@lepton-desk/api/app`).
+    view.bridge.application = .{{ .name = who.product, .version = who.version, .identifier = who.identifier }};
     // The dev server's origin before the transport: the transport defines itself only in
     // the application's own page, which under `lepton dev` is the dev server's.
     const from_dev_server = !std.mem.startsWith(u8, address, "file://");

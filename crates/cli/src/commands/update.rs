@@ -28,7 +28,7 @@ use lepton_orchestrator::Toolchain;
 use super::build::CORE_DIR;
 use super::package_manager::{self, PackageManager};
 use super::report::{Report, shown};
-use super::update_packages::{self as packages, SCOPE, Version};
+use super::update_packages::{self as packages, Version};
 use super::{CliError, Outcome};
 
 /// Set on the newer CLI this one hands over to: the packages are done, only the core and
@@ -227,6 +227,7 @@ impl Flags {
         let agent = std::env::var("npm_config_user_agent").ok();
         let (manager, _) = package_manager::detect(root, agent.as_deref(), pnpm);
         let report = Report::new();
+        let scope = packages::scope(root);
 
         let target = match &self.to {
             Some(text) => {
@@ -234,7 +235,7 @@ impl Flags {
                     .ok_or_else(|| CliError::Invalid(format!("--to {text} is not a version")))?;
                 if wanted < own {
                     return Err(CliError::Invalid(format!(
-                        "--to {wanted} is older than this CLI ({own}); install {SCOPE}cli@{wanted} to go back"
+                        "--to {wanted} is older than this CLI ({own}); install {scope}/cli@{wanted} to go back"
                     )));
                 }
                 wanted
@@ -242,7 +243,7 @@ impl Flags {
             None => match [own.dist_tag(), "latest"]
                 .into_iter()
                 .take(if own.dist_tag() == "latest" { 1 } else { 2 })
-                .filter_map(|tag| packages::latest(root, manager, tag))
+                .filter_map(|tag| packages::latest(root, manager, tag, &scope))
                 .max()
             {
                 Some(latest) => {
@@ -259,9 +260,10 @@ impl Flags {
             },
         };
 
-        let (bumped, changes) = packages::bump(&manifest, &target).map_err(CliError::Invalid)?;
+        let (bumped, changes) =
+            packages::bump(&manifest, &target, &scope).map_err(CliError::Invalid)?;
         if changes.is_empty() {
-            report.fact("packages", &format!("{SCOPE}* already at {target}"));
+            report.fact("packages", &format!("{scope}/* already at {target}"));
         }
         for change in &changes {
             report.fact(

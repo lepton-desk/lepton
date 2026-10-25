@@ -441,7 +441,7 @@ pub const View = struct {
         @memcpy(self.title[0..kept.len], kept);
         self.title[kept.len] = 0;
         self.title_len = kept.len;
-        if (!comptime @import("build_options").wpe_platform_abi) return;
+        if (!comptime @import("build_options").wpe_platform_abi) return self.bridge.showTitle(kept);
         if (!self.title_watched) {
             self.title_watched = true;
             _ = e_signal_connect(@ptrCast(self.web_view), "notify::title", @ptrCast(&onTitle), self, null, 0);
@@ -450,13 +450,12 @@ pub const View = struct {
     }
 
     fn showTitle(self: *View) void {
+        const raw = e_web_view_get_title(@ptrCast(self.web_view));
+        const page = if (raw) |text| std.mem.span(text) else "";
+        const shown: [:0]const u8 = if (page.len != 0) page else self.title[0..self.title_len :0];
+        self.bridge.showTitle(shown);
         const toplevel = e_view_get_toplevel(@ptrCast(self.view)) orelse return;
-        const page = if (e_web_view_get_title(@ptrCast(self.web_view))) |raw| std.mem.span(raw) else "";
-        if (page.len != 0) {
-            e_toplevel_set_title(toplevel, e_web_view_get_title(@ptrCast(self.web_view)).?);
-        } else {
-            e_toplevel_set_title(toplevel, self.title[0..self.title_len :0]);
-        }
+        e_toplevel_set_title(toplevel, shown.ptr);
     }
 
     fn onTitle(_: ?*anyopaque, _: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {

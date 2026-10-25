@@ -8,7 +8,8 @@
  * @module
  */
 
-import { type LeptonEvent, listen, type UnlistenFn } from "./event.ts";
+import { listen, type UnlistenFn } from "./event.ts";
+import { decodeDownload, downloadEvents } from "./payloads.ts";
 
 export type DownloadEvent =
   | { readonly kind: "started"; readonly id: number; readonly name: string }
@@ -22,39 +23,11 @@ export type DownloadEvent =
   | { readonly kind: "finished"; readonly id: number; readonly path: string }
   | { readonly kind: "failed"; readonly id: number; readonly message: string };
 
-const kinds = {
-  "download.started": "started",
-  "download.progress": "progress",
-  "download.finished": "finished",
-  "download.failed": "failed",
-} as const;
-
-/** Reads one `download.*` event's payload; `undefined` for any other event. */
-export function decodeDownload(event: LeptonEvent): DownloadEvent | undefined {
-  const kind = kinds[event.name as keyof typeof kinds];
-  if (kind === undefined) return undefined;
-  const bytes = event.payload;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const id = view.getUint32(0, true);
-  if (kind === "progress") {
-    return {
-      kind,
-      id,
-      received: Number(view.getBigUint64(8, true)),
-      expected: Number(view.getBigUint64(16, true)),
-    };
-  }
-  const text = new TextDecoder().decode(bytes.subarray(4));
-  if (kind === "started") return { kind, id, name: text };
-  if (kind === "finished") return { kind, id, path: text };
-  return { kind, id, message: text };
-}
-
 /** Calls `handler` for every download event: started, progress, finished, failed. */
 export async function onDownload(handler: (event: DownloadEvent) => void): Promise<UnlistenFn> {
   const stops = await Promise.all(
-    Object.keys(kinds).map((name) =>
-      listen(name as keyof typeof kinds, (event) => {
+    downloadEvents.map((name) =>
+      listen(name, (event) => {
         const decoded = decodeDownload(event);
         if (decoded !== undefined) handler(decoded);
       }),

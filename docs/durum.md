@@ -2,6 +2,12 @@
 
 Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Windows dahil) `git pull` ile okunabilir kılmak için var. Yayın adımları `docs/yayin.md`'de; burası neyin yapıldığını, neyin ölçüldüğünü ve neyin açık kaldığını söyler. Sürüm çıkınca güncellenir.
 
+## beta.3 sırası (kullanıcı, 2026-10-25)
+
+**2026-10-25 öğleden sonra (ölçüldü):** (1) PE başlığı 10.0'ın bozduğu A/B ile kesinleşti (CI 40196245288: aynı baytlar 6.0 ile pencere açtı, 10.0 ile süreç çalıştı, pencere ve alt süreç yok). Başlık 6.0'a döndü (`pe_version.zig` silindi, `windows.yml` 6.0'ı denetliyor); Windows 10 şartı açılışta (`webview2/view.zig`: `detectRuntimeVersion` < win10 → ileti kutusu, `OldWindows`; eksik WebView2 de ileti kutusu). 10.0'ın Windows içindeki mekanizması ölçülmedi (Windows'ta hata ayıklama gerekir). Aynı çalıştırmada Linux ve Windows paketleri **bayt bayt aynı** (`zip`, `msi`). (2) Dondurma öncesi: SDK iç ayrıntıları `wire.ts`/`payloads.ts`'e (dışa açık değil, ölçüldü); başlık çekirdeğin (`window.title` komutu ve olayı, `Bridge.showTitle`, WPE/Servo ekranda ölçüldü, WebView2 derlendi); `sdkScope` artık `lepton update` ve `linked`'de kullanılıyor (+ CLI ve şema kuralı); şema `frameRate`, `bundle.icon` (`.ico`/`.svg`/liste), `sdkScope` açıklaması (Biome ile biçimlendi, ajv ile 6 durumda doğrulandı). Kalan dondurma işi: Zig yüzeyi (`core.commands`/`core.events`, olay hedefi, eklenti `tick`) — QuickJS araştırmasından sonra.
+
+beta.3 = son beta ve API dondurması. Sıra: (1) PE başlığı 10.0 ile WebView2 uygulamasının penceresi açılmıyor (CI, süreç çalışıyor) — A/B ölçümü; (2) **0.2.0 uyumluluk denetimi**: dondurulacak her API (`@lepton-desk/api`, `lepton.config.json`, eklenti sözleşmesi, `main.zig`'in çekirdek yüzeyi) QuickJS'li native yolda ve Lepton'ın kendi WPE platformunda aynı şekliyle çalışır mı; örnek: `window.title()`/`onTitleChanged` DOM'a dayanıyor; (3) WebView2 WASM ölçümü CI'da; (4) WASM threads isteğe bağlı ayar; (5) WASM şablonları (desteklenenlerin çoğu/hepsi) ve eklenti sözleşmesi (`docs/plans/wasm.md`); (6) çalışma zamanı izin sorusu; (7) arm64 paketleme. 0.2.0'da beta.3 çıkana kadar kod yok, yalnız prob (QuickJS). Sertifika/imzalama yok. Sonra sürüm artırımı ve tam ön kontrol (elle çalıştırılan adımlar 2026-10-25'te geçti; yalnız şablon geçmişi artırımı bekliyor).
+
 ## Sıradaki ilk iş (kullanıcı, 2026-10-24)
 
 1. ~~**Özel başlık çubuğunda uygulama adı, her motorda.**~~ 2026-10-25, Linux'ta bitti:
