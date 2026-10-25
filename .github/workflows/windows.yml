@@ -161,6 +161,15 @@ jobs:
           & $lepton build
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Get-ChildItem src-lepton/zig-out/bin
+          # A web view program names Windows 10 as its oldest Windows (`pe_version.zig`):
+          # the optional header's OS and subsystem versions, offsets 40 and 48.
+          $exe = (Get-ChildItem src-lepton\zig-out\bin\*.exe | Select-Object -First 1).FullName
+          $bytes = [IO.File]::ReadAllBytes($exe)
+          $optional = [BitConverter]::ToInt32($bytes, 0x3c) + 24
+          $os = "$([BitConverter]::ToUInt16($bytes, $optional + 40)).$([BitConverter]::ToUInt16($bytes, $optional + 42))"
+          $subsystem = "$([BitConverter]::ToUInt16($bytes, $optional + 48)).$([BitConverter]::ToUInt16($bytes, $optional + 50))"
+          "PE header: operating system $os, subsystem $subsystem"
+          if ($os -ne "10.0" -or $subsystem -ne "10.0") { exit 1 }
 
       - name: Window
         run: |

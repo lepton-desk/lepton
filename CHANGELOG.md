@@ -110,14 +110,18 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   instruction" elsewhere. `lepton build` (and `package`, which builds through it) now
   passes `-Dcpu=baseline`.
 
-### Measured, not yet the same
-
-- The Windows `.zip` and `.msi` made on Linux install and pass the same checks on Windows
-  as the ones made there. The two machines' files differed only in the `.exe` (CI,
-  2026-10-25, `members.txt`: 1 239 040 bytes from Linux, 1 303 040 from Windows; the
-  frontend and icon identical). It is not the CPU difference above: with
-  `-Dcpu=baseline` on both sides the Windows-made `.exe` is still different (1 307 136
-  bytes, run 40188220214); the cause is not measured yet.
+- A Windows build on Windows was made for that machine's Windows version: Zig's native
+  target there names the building machine's version as the oldest, and the standard
+  library chooses code by it (`has_unix_sockets` from Windows 10 1803). On the CI
+  runner (Windows 11 24H2) the program was 68 096 bytes larger than the same app built
+  from Linux; cross-building for `win10_rs4` and `win10_rs3` reproduced both sizes
+  exactly. Windows builds now always name their target: `x86_64-windows.win10-gnu` for a
+  web view, `x86_64-windows.win7-gnu` for a native app (`Platform::build_target`).
+- A web view program says it needs Windows 10 in its PE header: Zig writes 6.0 for every
+  Windows program whatever its target (measured from `win7` to `win11_dt`) and has no
+  option for it, so the template runs the core's `tools/pe_version.zig` on the linked
+  program (OS and subsystem version 10.0; Windows refuses a program newer than itself).
+  Native programs keep 6.0. `windows.yml` checks the header.
 
 ## 0.1.9-beta.1 *2026-10-19*
 

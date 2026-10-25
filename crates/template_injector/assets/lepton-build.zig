@@ -203,7 +203,29 @@ pub fn build(b: *std.Build) !void {
         b.getInstallStep().dependOn(&b.addInstallFile(source, b.fmt("share/{s}/icon.ico", .{name})).step);
     };
 
-    b.installArtifact(exe);
+    // Windows: a web view program says in its PE header that it needs Windows 10, where
+    // WebView2 is current, so Windows 7 and 8.1 refuse to start it rather than start it
+    // and fail where the page should be. Zig writes 6.0 into every program and has no
+    // option for it; the core's `pe-version` tool writes the header's four version fields
+    // into the installed copy. A native program keeps 6.0: it is meant to reach Windows 7.
+    if (target.result.os.tag == .windows and std.mem.eql(u8, render, "webview")) {
+        const pe_version = throughLld(b.addExecutable(.{
+            .name = "pe-version",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(VENDORED_CORE ++ "/src/tools/pe_version.zig"),
+                .target = b.graph.host,
+                .optimize = std.builtin.OptimizeMode.ReleaseSafe,
+            }),
+        }));
+        const file_name = b.fmt("{s}.exe", .{name});
+        const stamp = b.addRunArtifact(pe_version);
+        stamp.addFileArg(exe.getEmittedBin());
+        const stamped = stamp.addOutputFileArg(file_name);
+        stamp.addArgs(&.{ "10", "0" });
+        b.getInstallStep().dependOn(&b.addInstallBinFile(stamped, file_name).step);
+    } else {
+        b.installArtifact(exe);
+    }
 
     // The TypeScript names of `main.zig`'s commands, regenerated on every build and
     // installed as `zig-out/lepton-commands.d.ts` (outside `bin/` and `share/`, so it is

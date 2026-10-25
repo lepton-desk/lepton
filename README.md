@@ -30,8 +30,11 @@ No browser ships with the app: it uses the system's web engine.
 | System title bar follows the page's `theme-color` / `color-scheme` | no (no compositor protocol for it) | dark/light on Windows 10; the colour itself on Windows 11 (measured on Server 2025, build 26100, by the `windows` workflow) |
 | Small screens (1280 × 800 and below) | the window is centred (X11; Wayland places it itself) | the window is fitted to the work area and centred |
 
-Windows 8.1, 8 and 7 are not supported: WebView2 stopped at 109 there and gets no
-security fixes.
+Web view apps need Windows 10 or 11: WebView2 stopped at 109 on Windows 8.1, 8 and 7 and
+gets no security fixes there, so a web view program's header names Windows 10 and older
+Windows refuses to start it. Native apps are built for Windows 7 SP1 and later; they do
+not start there yet (Zig's standard library imports Windows 8 functions), which Lepton's
+own system layer is planned to change.
 
 ## Requirements
 
@@ -104,8 +107,8 @@ Templates: `vanilla`, `react`, `vue`, `svelte`, `solid`, `preact`, `lit`, `astro
 
 `lepton package --windows` on Linux writes a `.zip` and an `.msi` (both writers are plain
 Rust), the same bytes on every run. CI installs that MSI on Windows and runs it through the
-checks a Windows-made one passes. The two machines' packages differ only in the `.exe`
-(measured, member by member); why is not measured yet. `--verify` runs on Windows only.
+checks a Windows-made one passes; `windows.yml` compares the two packages member by
+member. `--verify` runs on Windows only.
 
 ## Recording a session
 

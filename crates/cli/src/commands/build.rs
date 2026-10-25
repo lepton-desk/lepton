@@ -265,12 +265,7 @@ impl Flags {
             .arg("-Dcpu=baseline")
             .in_dir(root.join(CORE_DIR));
 
-        // Only for a platform that is not this one. Naming the host's own triple turns
-        // a native build into a cross-compile, and a cross-compile does not consult
-        // pkg-config: the display libraries the core was just probed for stop being
-        // findable, and the failure names `-lxcb-randr` rather than the flag that
-        // caused it.
-        if let Some(triple) = platform.cross_triple() {
+        if let Some(triple) = platform.build_target(native) {
             step = step.arg(format!("-Dtarget={triple}"));
         }
 
@@ -323,6 +318,28 @@ impl Platform {
             Self::Windows => "x86_64-windows-gnu",
             Self::MacOs => "aarch64-macos",
         })
+    }
+
+    /// The `-Dtarget` a core build for this platform passes.
+    ///
+    /// Linux and macOS: only from another machine. Naming the host's own triple turns a
+    /// native build into a cross-compile, and a cross-compile does not consult
+    /// pkg-config: the display libraries the core was just probed for stop being
+    /// findable, and the failure names `-lxcb-randr` rather than the flag that caused it.
+    ///
+    /// Windows: always, with the oldest Windows the program is for. Zig's native target
+    /// there is the building machine's own version, and the standard library chooses code
+    /// by it: on Windows 11 24H2 the program carried unix-socket support (Windows 10 1803
+    /// and later) and was 68 096 bytes larger than the same app built from Linux
+    /// (measured: 1 307 136 against 1 239 040 bytes, the same split reproduced by
+    /// cross-building for `win10_rs4` and `win10_rs3`). A web view needs WebView2, so
+    /// Windows 10; a native app keeps Windows 7 SP1 in reach (`docs/plans/windows.md`).
+    pub fn build_target(self, native: bool) -> Option<&'static str> {
+        match self {
+            Self::Windows if native => Some("x86_64-windows.win7-gnu"),
+            Self::Windows => Some("x86_64-windows.win10-gnu"),
+            _ => self.cross_triple(),
+        }
     }
 
     /// The triple this platform is built with, host or not.
@@ -522,34 +539,38 @@ mod tests {
     }
 
     #[test]
-    fn the_host_build_names_no_target_and_a_cross_build_does() -> Result<(), Failure> {
+    fn a_build_names_its_target_unless_it_is_for_this_linux_or_macos() -> Result<(), Failure> {
         let (scratch, _) = project("build-target", RenderPath::Native)?;
 
-        let host_steps = Flags::default().plan(scratch.path(), &complete(), true, Platform::host());
-        ensure!(
-            !host_steps[0]
-                .args
-                .iter()
-                .any(|arg| arg.starts_with("-Dtarget")),
-            "a host build should not name a target: {:?}",
-            host_steps[0].args
-        );
-        // Not this machine's CPU either: a package goes to other machines.
-        assert_contains!(&host_steps[0].args.join(" "), "-Dcpu=baseline");
-
-        // Whatever the host is, at least one platform is not it, and that one must
-        // carry a triple or the build would silently produce a binary for this machine
-        // when the developer asked for another.
+        // Whatever the host is, a platform that is not it carries a triple, or the build
+        // would silently produce a binary for this machine when the developer asked for
+        // another; and Windows carries one on Windows too, with its oldest version.
         for platform in [Platform::Linux, Platform::Windows, Platform::MacOs] {
-            if platform == Platform::host() {
-                continue;
+            for native in [true, false] {
+                let steps = Flags::default().plan(scratch.path(), &complete(), native, platform);
+                let core = steps
+                    .last()
+                    .map(|step| step.args.join(" "))
+                    .unwrap_or_default();
+                // Not this machine's CPU either: a package goes to other machines.
+                assert_contains!(&core, "-Dcpu=baseline");
+                match platform.build_target(native) {
+                    Some(triple) => assert_contains!(&core, &format!("-Dtarget={triple}")),
+                    None => ensure!(
+                        platform == Platform::host() && !core.contains("-Dtarget"),
+                        "{platform:?} names no target only on its own machine: {core}"
+                    ),
+                }
             }
-            let steps = Flags::default().plan(scratch.path(), &complete(), true, platform);
-            assert_contains!(
-                &steps[0].args.join(" "),
-                &format!("-Dtarget={}", platform.zig_triple())
-            );
         }
+        assert_eq!(
+            Platform::Windows.build_target(true),
+            Some("x86_64-windows.win7-gnu")
+        );
+        assert_eq!(
+            Platform::Windows.build_target(false),
+            Some("x86_64-windows.win10-gnu")
+        );
         Ok(())
     }
 
