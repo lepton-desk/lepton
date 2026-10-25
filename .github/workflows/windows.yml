@@ -229,7 +229,9 @@ jobs:
             }
             $zip.Dispose()
           }
-          $msi =(Get-ChildItem "$from\*.msi" | Select-Object -First 1).FullName
+          # The Windows-made package itself, to set its `.exe` beside the Linux-made one.
+          Copy-Item "$here\*.zip" $out
+          $msi = (Get-ChildItem "$from\*.msi" | Select-Object -First 1).FullName
           $install = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v `"$out\install.log`"" -Wait -PassThru
           "install: exit $($install.ExitCode)" | Tee-Object -Append "$out\result.txt"
           if ($install.ExitCode) { exit 1 }
