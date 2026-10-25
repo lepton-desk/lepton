@@ -345,6 +345,7 @@ impl Flags {
             let label = match part {
                 Part::Entry => "main.zig",
                 Part::Build => "build.zig",
+                Part::Native => "native.zig",
                 Part::Commands => "command list",
             };
             match decision {

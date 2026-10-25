@@ -115,10 +115,11 @@ function bump(version) {
 	mkdirSync(history, { recursive: true });
 	copyFileSync(join(assets, "main.zig"), join(history, "main.zig"));
 	copyFileSync(join(assets, "lepton-build.zig"), join(history, "build.zig"));
+	copyFileSync(join(assets, "native.zig"), join(history, "native.zig"));
 	replaceOnce(
 		at("crates", "template_injector", "src", "update.rs"),
 		/(pub const RELEASES: &\[Release\] = &\[\n[\s\S]*?)(\n\];)/,
-		`$1\n    Release {\n        version: "${version}",\n        entry: include_str!("../assets/history/${version}/main.zig"),\n        build: include_str!("../assets/history/${version}/build.zig"),\n    },$2`,
+		`$1\n    Release {\n        version: "${version}",\n        entry: include_str!("../assets/history/${version}/main.zig"),\n        build: include_str!("../assets/history/${version}/build.zig"),\n        native: Some(include_str!("../assets/history/${version}/native.zig")),\n    },$2`,
 	);
 
 	// The AUR packages follow releases only: pacman refuses a `-` in `pkgver`, and a beta

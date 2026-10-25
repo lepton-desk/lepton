@@ -101,6 +101,10 @@ pub const BIOME_CONFIG: &str = include_str!("../assets/biome.json");
 /// core's own build logic, and the path to that core is the one thing about a project
 /// that is not known until the project exists.
 pub const ZIG_BUILD: &str = include_str!("../assets/lepton-build.zig");
+/// The `--target native` program (`src-lepton/native.zig`), apart from `main.zig` so the
+/// developer's file stays the application's commands, state and events. Plain Zig, no
+/// placeholders: it reads who the application is from `main.zig` (`@import("root")`).
+pub const ZIG_NATIVE: &str = include_str!("../assets/native.zig");
 /// A new project's icon: Lepton's mark (the site's favicon).
 pub const ICON_SVG: &str = include_str!("../assets/icon.svg");
 

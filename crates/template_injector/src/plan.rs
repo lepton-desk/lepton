@@ -148,6 +148,11 @@ pub fn plan(manifest: &Manifest) -> Result<Plan, InjectionError> {
             contents: crate::assets::ZIG_BUILD.to_owned(),
             mode: Mode::Write,
         },
+        Injection {
+            path: "src-lepton/native.zig".to_owned(),
+            contents: crate::assets::ZIG_NATIVE.to_owned(),
+            mode: Mode::Write,
+        },
         // The app's icon, Lepton's mark until replaced: the desktop entry and the Linux
         // package use it (`desktop_entry.rs` in the CLI).
         Injection {

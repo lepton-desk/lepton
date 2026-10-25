@@ -63,6 +63,7 @@ fn a_plan_covers_the_configuration_the_sdk_and_the_core_entry_points() -> Result
         // `src/` would make the frontend's own watcher try to compile it.
         "src-lepton/main.zig",
         "src-lepton/build.zig",
+        "src-lepton/native.zig",
         "src-lepton/icon.svg",
     ] {
         ensure!(

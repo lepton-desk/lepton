@@ -3,7 +3,8 @@
 //! `lepton new` writes the core's files once; a fix to the template after that (the page
 //! woken by `published()`, the window size from `lepton.config.json`, the coloured start-up
 //! lines, the channel unlinked on SIGTERM) reached an existing project only by hand. The
-//! framework's files there are `main.zig`, `build.zig` and `lepton-commands.zig`, and
+//! framework's files there are `main.zig`, `build.zig`, `native.zig` and
+//! `lepton-commands.zig`, and
 //! `main.zig` is also the developer's: their commands, state and events live in it. So a
 //! file is never just overwritten: it is compared with the template it was made from — the
 //! released templates are kept in `assets/history/` — and
@@ -14,7 +15,7 @@
 //!   (the developer's changes) and today's template (the framework's); a clean merge keeps
 //!   both, a conflict is handed back with markers and nothing is written.
 
-use crate::assets::{COMMAND_TYPES, ZIG_BUILD, fill, zig_entry};
+use crate::assets::{COMMAND_TYPES, ZIG_BUILD, ZIG_NATIVE, fill, zig_entry};
 
 /// A released template set, as `lepton new` of that version wrote it.
 pub struct Release {
@@ -24,6 +25,8 @@ pub struct Release {
     pub entry: &'static str,
     /// `src-lepton/build.zig`.
     pub build: &'static str,
+    /// `src-lepton/native.zig`; `None` before it was split out of `main.zig`.
+    pub native: Option<&'static str>,
 }
 
 /// Oldest first. Add the outgoing version's files here at each release (`docs/yayin.md`);
@@ -33,42 +36,50 @@ pub const RELEASES: &[Release] = &[
         version: "0.1.3",
         entry: include_str!("../assets/history/0.1.3/main.zig"),
         build: include_str!("../assets/history/0.1.3/build.zig"),
+        native: None,
     },
     Release {
         version: "0.1.4",
         entry: include_str!("../assets/history/0.1.4/main.zig"),
         build: include_str!("../assets/history/0.1.4/build.zig"),
+        native: None,
     },
     // 0.1.5 shipped the same files.
     Release {
         version: "0.1.6",
         entry: include_str!("../assets/history/0.1.6/main.zig"),
         build: include_str!("../assets/history/0.1.6/build.zig"),
+        native: None,
     },
     Release {
         version: "0.1.7",
         entry: include_str!("../assets/history/0.1.7/main.zig"),
         build: include_str!("../assets/history/0.1.7/build.zig"),
+        native: None,
     },
     Release {
         version: "0.1.8",
         entry: include_str!("../assets/history/0.1.8/main.zig"),
         build: include_str!("../assets/history/0.1.8/build.zig"),
+        native: None,
     },
     Release {
         version: "0.1.9-beta.0",
         entry: include_str!("../assets/history/0.1.9-beta.0/main.zig"),
         build: include_str!("../assets/history/0.1.9-beta.0/build.zig"),
+        native: None,
     },
     Release {
         version: "0.1.9-beta.1",
         entry: include_str!("../assets/history/0.1.9-beta.1/main.zig"),
         build: include_str!("../assets/history/0.1.9-beta.1/build.zig"),
+        native: None,
     },
     Release {
         version: "0.1.9-beta.2",
         entry: include_str!("../assets/history/0.1.9-beta.2/main.zig"),
         build: include_str!("../assets/history/0.1.9-beta.2/build.zig"),
+        native: None,
     },
 ];
 
@@ -152,17 +163,19 @@ impl Values {
 pub enum Part {
     Entry,
     Build,
+    Native,
     Commands,
 }
 
 impl Part {
-    pub const ALL: [Part; 3] = [Part::Entry, Part::Build, Part::Commands];
+    pub const ALL: [Part; 4] = [Part::Entry, Part::Build, Part::Native, Part::Commands];
 
     /// The file, relative to the project.
     pub fn path(self) -> &'static str {
         match self {
             Self::Entry => "src-lepton/main.zig",
             Self::Build => "src-lepton/build.zig",
+            Self::Native => "src-lepton/native.zig",
             Self::Commands => "src-lepton/lepton-commands.zig",
         }
     }
@@ -177,6 +190,7 @@ impl Part {
                 &values.identifier,
             ),
             Self::Build => ZIG_BUILD.to_owned(),
+            Self::Native => ZIG_NATIVE.to_owned(),
             Self::Commands => COMMAND_TYPES.to_owned(),
         }
     }
@@ -185,14 +199,16 @@ impl Part {
     fn released(self, values: &Values) -> Vec<(&'static str, String)> {
         RELEASES
             .iter()
-            .map(|release| {
+            .filter_map(|release| {
                 let text = match self {
                     Self::Entry => values.released_entry(release.entry),
                     Self::Build => release.build.to_owned(),
+                    // Not in the releases before it was split out of `main.zig`.
+                    Self::Native => release.native?.to_owned(),
                     // Unchanged since it was added.
                     Self::Commands => COMMAND_TYPES.to_owned(),
                 };
-                (release.version, text)
+                Some((release.version, text))
             })
             .collect()
     }
@@ -241,7 +257,7 @@ pub fn decide(part: Part, values: &Values, existing: Option<&str>) -> Decision {
             text: today,
         };
     }
-    // Only an `Entry` and a `Build` reach here with a choice of ancestor; the nearest one
+    // Only an `Entry`, a `Build` and a released `Native` reach here with a choice of ancestor; the nearest one
     // leaves the fewest lines looking like the developer's own changes.
     let Some((from, ancestor)) = released
         .iter()
