@@ -33,7 +33,7 @@ pub const builtin = [_][]const u8{ window_state, window_resized, download_starte
 /// The events an application emits, declared once in its `main.zig`:
 ///
 ///     pub const events = core.webviewEvents.Declared(&.{ "notes.saved" });
-///     _ = try events.emit(&view.bridge, "notes.saved", bytes);
+///     _ = try events.emit(view.bridge.eventTarget(), "notes.saved", bytes);
 ///
 /// `emit` takes the name at compile time, so an event that was not declared — a typo —
 /// is a build error, and the declared list is what the page's TypeScript is generated
@@ -54,17 +54,30 @@ pub fn Declared(comptime names: []const []const u8) type {
     return struct {
         pub const list = names;
 
-        /// Publishes `name` with `data` to the page through `bridge` (a `*Bridge`).
-        pub fn emit(bridge: anytype, comptime name: []const u8, data: []const u8) EmitError!u64 {
+        /// Publishes `name` with `data` through `target`: a `Target` (`view.bridge.eventTarget()`),
+        /// or the `*Bridge` itself, as a `main.zig` from before 0.1.9-beta.3 passes it.
+        pub fn emit(target: anytype, comptime name: []const u8, data: []const u8) EmitError!u64 {
             comptime {
                 for (names) |declared| {
                     if (std.mem.eql(u8, declared, name)) break;
                 } else @compileError("event \"" ++ name ++ "\" is not declared in this application's `events`");
             }
-            return bridge.emit(name, data);
+            return target.emit(name, data);
         }
     };
 }
+
+/// Where events go, whatever carries them: a web view's page (`Bridge.eventTarget()`), and
+/// in 0.2.0 a native app's script. What `Declared.emit` and a plugin's `tick` receive, so
+/// neither names the web view.
+pub const Target = struct {
+    context: *anyopaque,
+    emit_fn: *const fn (context: *anyopaque, name: []const u8, data: []const u8) EmitError!u64,
+
+    pub fn emit(self: Target, name: []const u8, data: []const u8) EmitError!u64 {
+        return self.emit_fn(self.context, name, data);
+    }
+};
 
 // The page's address for this is `transport.zig`'s, under the run's key (`secret.zig`).
 

@@ -328,6 +328,17 @@ pub const Bridge = struct {
         _ = self.emit(events.window_title, kept) catch {};
     }
 
+    /// This bridge as an engine-neutral event target (`events.Target`): what the template's
+    /// `main.zig` hands its events and plugins.
+    pub fn eventTarget(self: *Bridge) events.Target {
+        return .{ .context = self, .emit_fn = &emitThrough };
+    }
+
+    fn emitThrough(context: *anyopaque, name: []const u8, data: []const u8) events.EmitError!u64 {
+        const self: *Bridge = @ptrCast(@alignCast(context));
+        return self.emit(name, data);
+    }
+
     pub fn emit(self: *Bridge, name: []const u8, data: []const u8) events.EmitError!u64 {
         const number = try self.events.emit(name, data);
         if (self.recorder) |*recorder| {
@@ -782,4 +793,16 @@ test "the shown title is kept for window.title and sent once per change" {
     @memcpy(long[max_title - 1 ..], "ğ");
     bridge.showTitle(&long);
     try std.testing.expectEqual(@as(usize, max_title - 1), bridge.title_len);
+}
+
+test "an application's declared event reaches the page through the bridge's event target" {
+    // `eventTarget` is what the template's `main.zig` and plugins' `tick` are handed;
+    // nothing else calls it, so this is what compiles and runs it.
+    if (comptime !@import("root.zig").is_available()) return error.SkipZigTest;
+    var bridge = Bridge{};
+    const declared = events.Declared(&.{"notes.saved"});
+    try std.testing.expectEqual(@as(u64, 1), try declared.emit(bridge.eventTarget(), "notes.saved", "ok"));
+    // A `main.zig` from before the target still hands the bridge itself.
+    try std.testing.expectEqual(@as(u64, 2), try declared.emit(&bridge, "notes.saved", "ok"));
+    try std.testing.expectEqual(@as(u64, 2), bridge.events.latest);
 }

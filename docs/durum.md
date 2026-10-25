@@ -6,6 +6,8 @@ Bu dosya, sürüm hazırlığının nerede durduğunu herhangi bir makineden (Wi
 
 **2026-10-25 öğleden sonra (ölçüldü):** (1) PE başlığı 10.0'ın bozduğu A/B ile kesinleşti (CI 40196245288: aynı baytlar 6.0 ile pencere açtı, 10.0 ile süreç çalıştı, pencere ve alt süreç yok). Başlık 6.0'a döndü (`pe_version.zig` silindi, `windows.yml` 6.0'ı denetliyor); Windows 10 şartı açılışta (`webview2/view.zig`: `detectRuntimeVersion` < win10 → ileti kutusu, `OldWindows`; eksik WebView2 de ileti kutusu). 10.0'ın Windows içindeki mekanizması ölçülmedi (Windows'ta hata ayıklama gerekir). Aynı çalıştırmada Linux ve Windows paketleri **bayt bayt aynı** (`zip`, `msi`). (2) Dondurma öncesi: SDK iç ayrıntıları `wire.ts`/`payloads.ts`'e (dışa açık değil, ölçüldü); başlık çekirdeğin (`window.title` komutu ve olayı, `Bridge.showTitle`, WPE/Servo ekranda ölçüldü, WebView2 derlendi); `sdkScope` artık `lepton update` ve `linked`'de kullanılıyor (+ CLI ve şema kuralı); şema `frameRate`, `bundle.icon` (`.ico`/`.svg`/liste), `sdkScope` açıklaması (Biome ile biçimlendi, ajv ile 6 durumda doğrulandı). Kalan dondurma işi: Zig yüzeyi (`core.commands`/`core.events`, olay hedefi, eklenti `tick`) — QuickJS araştırmasından sonra.
 
+**Zig yüzeyi (2026-10-25 gece, ölçüldü):** `core.commands`, `core.events`, `events.Target`, `Bridge.eventTarget()` test edildi (0.16/0.17, webview/native; `eventTarget` testi eklendi); `plugin-fs`'li proje güncellenip `fs.changed` WPE'de sayfaya ulaştı; Windows ve native derlemesi geçti. Bu sırada bulunan: Linux beta.2 projelerinde `lepton update` yanlış çakışma veriyordu (iki farklı beta.2 şablonu); `history/0.1.9-beta.2-linux/` eklendi.
+
 beta.3 = son beta ve API dondurması. Sıra: (1) PE başlığı 10.0 ile WebView2 uygulamasının penceresi açılmıyor (CI, süreç çalışıyor) — A/B ölçümü; (2) **0.2.0 uyumluluk denetimi**: dondurulacak her API (`@lepton-desk/api`, `lepton.config.json`, eklenti sözleşmesi, `main.zig`'in çekirdek yüzeyi) QuickJS'li native yolda ve Lepton'ın kendi WPE platformunda aynı şekliyle çalışır mı; örnek: `window.title()`/`onTitleChanged` DOM'a dayanıyor; (3) WebView2 WASM ölçümü CI'da; (4) WASM threads isteğe bağlı ayar; (5) WASM şablonları (desteklenenlerin çoğu/hepsi) ve eklenti sözleşmesi (`docs/plans/wasm.md`); (6) çalışma zamanı izin sorusu; (7) arm64 paketleme. 0.2.0'da beta.3 çıkana kadar kod yok, yalnız prob (QuickJS). Sertifika/imzalama yok. Sonra sürüm artırımı ve tam ön kontrol (elle çalıştırılan adımlar 2026-10-25'te geçti; yalnız şablon geçmişi artırımı bekliyor).
 
 ## Sıradaki ilk iş (kullanıcı, 2026-10-24)
@@ -337,6 +339,10 @@ Yeni:
 - **`bundle.icon` SVG Linux paketinde (ölçüldü):** `tar.gz` ve pacman paketinde `share/icons/hicolor/scalable/apps/<id>.svg`, özgün dosyayla bayt bayt aynı; `.png` gerekçesiyle reddediliyor.
 - **Linux'tan Windows paketi (ölçüldü):** `lepton package --windows`: PE32+ GUI exe, `zip` ve `msi`; iki derleme bayt bayt aynı; `--verify` Linux'ta gerekçesiyle reddediliyor. CI: `windows.yml`'e `linux-package` işi (Ubuntu'da paketler), Windows işi o MSI'yi kurup `measure.ps1` ile ölçüp kaldırıyor ve iki makinenin `zip`/`msi`'sini karşılaştırıyor. **CI'da çalışacak.**
 - **Paketlere eski ön yüz dosyaları giriyordu (bulundu, düzeltildi, ölçüldü):** Vite `dist/`'i boşaltıyor ama `zig build` onu `zig-out/share/<ad>/dist`'e kurarken eski dosyaları silmiyor; Windows `.zip`'inde iki `index-*.js` vardı. CLI artık ön yüz verilen çekirdek derlemesinden önce o klasörü boşaltıyor (`launch::clear_installed_frontend`, test); pakette tek dosya.
+
+## beta.3 işi: Servo kitaplığı Release'te kendiliğinden (2026-10-25)
+
+- `servo-bridge.yml` `workflow_call` olsun; `release.yml` aynı commit'te başarılı çalıştırma bulamazsa onu çağırıp kitaplığı kendisi derlesin (elle tetikleme ve deneme uyarısı kalksın).
 
 ## Sağ tık menüsü: ölçülecekler (2026-10-25)
 

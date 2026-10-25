@@ -91,6 +91,16 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   draws the list in `menu_x11.zig`; `lepton_servo_context_menu_select` answers. WebView2:
   its own menu, kept to the editing items (`webview2/context_menu.zig`); before, release
   builds had none and Debug builds a browser's. Labels are Turkish for a `tr` locale.
+- Engine-neutral names for what `main.zig` and plugins use (API freeze for 0.2.0's native
+  apps): `core.commands` (`checkedWith`, `pluginCommands`, `permissionList`, `HandlerError`,
+  `PluginCommand`, `Later`, `takeLater`; `zig/src/commands.zig`) and `core.events`
+  (`Declared`, `Target`). `events.Target` is where events go, whatever carries them;
+  `Bridge.eventTarget()` makes one, the template's `main.zig` hands it to `Declared.emit` and
+  to plugins' `tick`. The `webview…` names stay, and `emit`/`tick` still take the bridge
+  itself, so older `main.zig` files and published plugins build unchanged. Measured: Zig
+  0.16 and 0.17, webview and native tests; a project with `plugin-fs` updated, its page
+  received `fs.changed` (`created`, `modified`) through the target on WPE; Windows and
+  native builds of it compile.
 
 ### Changed
 
@@ -124,6 +134,12 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
 
 ### Fixed
 
+- `lepton update` in a project made by the Linux 0.1.9-beta.2 CLI reported the framework's
+  own changes as the developer's (a conflict "since 0.1.6"): beta.2 went out from Windows
+  with the template before `main.zig` was split and from Linux with the one after it
+  (d1a67df), and `assets/history` had only the first. The second is
+  `history/0.1.9-beta.2-linux/` (measured: the published binaries embed exactly these
+  files); such a project's `main.zig` and `build.zig` are now replaced as untouched.
 - WPE windows showed `org.webkit.app-<sha256>` in the dock, with no icon: the core now
   calls `g_set_prgname(<identifier>)` before the engine starts
   (`useApplicationDirectories`).

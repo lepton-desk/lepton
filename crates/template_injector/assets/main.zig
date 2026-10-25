@@ -64,24 +64,24 @@ const AppState = struct {
 ///
 /// Plugins (`@lepton-desk/plugin-*` in `package.json`) add their commands after yours;
 /// they too run only when listed under `permissions`.
-pub const commands = core.webviewRegistry.checkedWith(
+pub const commands = core.commands.checkedWith(
     AppState,
     &.{{
         .{{ .name = "app.name", .run = &appName }},
     }},
-    core.webviewRegistry.pluginCommands(@import("lepton_plugins").all),
-    core.webviewRegistry.permissionList(@import("build_options").permissions),
+    core.commands.pluginCommands(@import("lepton_plugins").all),
+    core.commands.permissionList(@import("build_options").permissions),
 );
 
 /// Your events: what the core may send the page beyond its own (`window.state`,
 /// `window.resized`). Declare a name here, then emit it from Zig —
-/// `_ = try events.emit(&view.bridge, "notes.saved", bytes);` — and the page receives it
+/// `_ = try events.emit(view.bridge.eventTarget(), "notes.saved", bytes);` — and the page receives it
 /// with `listen("notes.saved", ...)` (`@lepton-desk/api/event`). An undeclared name does
 /// not compile, and the list reaches TypeScript in `src/lepton-commands.d.ts`.
-pub const events = core.webviewEvents.Declared(&.{{}});
+pub const events = core.events.Declared(&.{{}});
 
 /// `app.name`: the product's name, as UTF-8.
-fn appName(state: *AppState, _: []const u8, out: []u8) core.webviewRegistry.HandlerError!usize {{
+fn appName(state: *AppState, _: []const u8, out: []u8) core.commands.HandlerError!usize {{
     if (state.product.len > out.len) return error.TooLarge;
     @memcpy(out[0..state.product.len], state.product);
     return state.product.len;
@@ -292,7 +292,7 @@ fn run(init: std.process.Init.Minimal) !void {{
 
         // Plugins that watch something (`fs.watch`) emit what changed.
         inline for (@import("lepton_plugins").all) |plugin| {{
-            if (comptime @hasDecl(plugin, "tick")) plugin.tick(&view.bridge);
+            if (comptime @hasDecl(plugin, "tick")) plugin.tick(view.bridge.eventTarget());
         }}
 
         if (instance) |*held| {{
@@ -300,7 +300,7 @@ fn run(init: std.process.Init.Minimal) !void {{
             while (held.take(&opened)) |message| {{
                 var number: [4]u8 = undefined;
                 std.mem.writeInt(u32, &number, core.singleInstance.remember(message), .little);
-                _ = view.bridge.emit(core.webviewEvents.app_opened, &number) catch {{}};
+                _ = view.bridge.emit(core.events.app_opened, &number) catch {{}};
             }}
         }}
 

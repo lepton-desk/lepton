@@ -81,6 +81,18 @@ pub const RELEASES: &[Release] = &[
         build: include_str!("../assets/history/0.1.9-beta.2/build.zig"),
         native: None,
     },
+    // 0.1.9-beta.2 went out twice, with two templates: from Windows before `main.zig`
+    // was split (the entry above), and from Linux after it (d1a67df). Without this one a
+    // project the Linux CLI made matched no release, and `lepton update` called the
+    // framework's own changes the developer's (measured: a conflict "since 0.1.6").
+    Release {
+        version: "0.1.9-beta.2",
+        entry: include_str!("../assets/history/0.1.9-beta.2-linux/main.zig"),
+        build: include_str!("../assets/history/0.1.9-beta.2-linux/build.zig"),
+        native: Some(include_str!(
+            "../assets/history/0.1.9-beta.2-linux/native.zig"
+        )),
+    },
 ];
 
 /// `tsconfig.json` as a TypeScript project gets it, and as a React one does.
@@ -307,6 +319,40 @@ mod tests {
             RELEASES.iter().any(|release| release.version == built),
             "assets/history has no {built}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn both_beta_2_builds_are_known_releases() -> Result<(), Failure> {
+        // A project made by either beta.2 CLI is the framework's own files, untouched: each
+        // part is replaced, never merged or called a conflict.
+        let builds: Vec<_> = RELEASES
+            .iter()
+            .filter(|release| release.version == "0.1.9-beta.2")
+            .collect();
+        assert_eq!(builds.len(), 2);
+        for release in builds {
+            let entry = values().released_entry(release.entry);
+            let parts = [
+                (Part::Entry, Some(entry)),
+                (Part::Build, Some(release.build.to_owned())),
+                (Part::Native, release.native.map(str::to_owned)),
+            ];
+            for (part, existing) in parts {
+                let Some(existing) = existing else { continue };
+                let decision = decide(part, &values(), Some(&existing));
+                ensure!(
+                    matches!(
+                        decision,
+                        Decision::Replaced {
+                            from: "0.1.9-beta.2",
+                            ..
+                        } | Decision::Current
+                    ),
+                    "{part:?} of a beta.2 project: {decision:?}"
+                );
+            }
+        }
         Ok(())
     }
 

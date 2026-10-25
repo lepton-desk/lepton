@@ -56,8 +56,8 @@ polling, no JSON). Listening starts at "now". Built-in: `window.state`, `window.
 The application declares its own in `src-lepton/main.zig` and emits them from Zig:
 
 ```zig
-pub const events = core.webviewEvents.Declared(&.{"app.saved"});
-_ = try events.emit(&view.bridge, "app.saved", bytes); // an undeclared name does not compile
+pub const events = core.events.Declared(&.{"app.saved"});
+_ = try events.emit(view.bridge.eventTarget(), "app.saved", bytes); // an undeclared name does not compile
 ```
 
 Their names reach TypeScript in the generated `src/lepton-commands.d.ts`, so

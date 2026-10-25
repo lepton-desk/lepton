@@ -120,6 +120,10 @@ pub const activation = @import("render/webview/activation.zig");
 pub const webviewPageReplay = @import("render/webview/page_replay.zig");
 /// The event log the page reads from (`/__lepton/events`).
 pub const webviewEvents = @import("render/webview/events.zig");
+/// An application's commands and events by engine-neutral names: what `main.zig` and
+/// plugins use (`commands.zig`). The `webview…` names above are the same declarations.
+pub const commands = @import("commands.zig");
+pub const events = webviewEvents;
 /// `src/lepton-commands.d.ts` for an application's commands and events.
 pub const webviewDeclarations = @import("render/webview/declarations.zig");
 /// The system clipboard as text, for `@lepton-desk/plugin-clipboard`; `Failed` without WPE.

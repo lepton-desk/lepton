@@ -30,5 +30,5 @@ host name and `locale()` the user's locale (`GetUserDefaultLocaleName`).
 The package carries both halves. `package.json` points at the Zig side —
 `"lepton": { "plugin": "zig/plugin.zig" }` — and `lepton build`/`run`/`dev` find it among
 the project's dependencies and compile it into the core (`-Dplugins`). `zig/plugin.zig`
-exports `commands` (`core.webviewRegistry.PluginCommand`); `zig/os.zig` holds the facts
+exports `commands` (`core.commands.PluginCommand`); `zig/os.zig` holds the facts
 and is tested alone (`zig test zig/os.zig -lc`). Requires `lepton` 0.1.2 or newer.
