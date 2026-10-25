@@ -1,0 +1,362 @@
+# The GitHub release of a version: every file built from the tag in this one run, each
+# with its `.sha256`, attached to a draft release whose text is docs/release/<version>.md
+# (below its first `---`). The draft is published by hand. A `-beta.N` version is marked
+# as a pre-release.
+#
+# Run by hand (workflow_dispatch) on a tag or commit, it is a trial: the same files are
+# kept as the `release-trial` artifact and no release is made.
+#
+# The Servo library is not built here: it is the `liblepton_servo` artifact of a
+# successful servo-bridge run on the same commit (docs/yayin.md), so run that first.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or commit to build (a trial: artifacts only, no release)"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  REF: ${{ inputs.ref || github.ref }}
+
+jobs:
+  # The CLI for Linux, on Ubuntu 24.04: its glibc (2.39) is older than a rolling
+  # distribution's, so the binary starts on more systems than one built on Arch.
+  cli-linux:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - name: Version
+        id: version
+        run: |
+          version=$(node -p 'require("./packages/cli/package.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # A tag names the version it releases; any other is a mistake, not a release.
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the version in the tree, $version" >&2
+            exit 1
+          fi
+
+      - name: CLI
+        run: |
+          cargo build --release --bin lepton
+          ./target/release/lepton --version
+
+      - name: Archive
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          name="lepton-$version-linux-x64"
+          mkdir -p "$RUNNER_TEMP/$name" "$RUNNER_TEMP/out"
+          cp target/release/lepton LICENSE-MIT LICENSE-APACHE README.md "$RUNNER_TEMP/$name/"
+          epoch=$(git log -1 --format=%ct)
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$epoch" \
+            -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/out/$name.tar.gz" "$name"
+          cp target/release/lepton "$RUNNER_TEMP/lepton"
+
+      # Ubuntu has dpkg, which names the package of each library the binary links.
+      - name: Debian package
+        run: tools/ci/cli-deb.sh target/release/lepton "${{ steps.version.outputs.version }}" "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-linux
+          path: ${{ runner.temp }}/out
+
+      # The binary itself, for the jobs that make the example apps.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lepton-binary
+          path: ${{ runner.temp }}/lepton
+
+  cli-windows:
+    runs-on: windows-2025
+    needs: cli-linux
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - name: CLI
+        run: |
+          cargo build --release --bin lepton
+          ./target/release/lepton.exe --version
+
+      - name: Archive
+        run: |
+          $name = "lepton-${{ needs.cli-linux.outputs.version }}-windows-x64"
+          $dir = Join-Path $env:RUNNER_TEMP $name
+          $out = Join-Path $env:RUNNER_TEMP "out"
+          New-Item -ItemType Directory -Force -Path $dir, $out | Out-Null
+          Copy-Item target/release/lepton.exe, LICENSE-MIT, LICENSE-APACHE, README.md $dir
+          Compress-Archive -Path $dir -DestinationPath (Join-Path $out "$name.zip")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-windows
+          path: ${{ runner.temp }}/out
+
+  cli-pacman:
+    runs-on: ubuntu-24.04
+    needs: cli-linux
+    container: archlinux:base
+    steps:
+      - name: Packages
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cli-linux
+          path: /tmp/cli
+
+      - name: Arch package
+        run: tools/ci/cli-pacman.sh "/tmp/cli/lepton-${{ needs.cli-linux.outputs.version }}-linux-x64.tar.gz" "${{ needs.cli-linux.outputs.version }}" /tmp/out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-pacman
+          path: /tmp/out
+
+  # The example apps as Debian packages, made where WPE WebKit 2.54 is packaged for
+  # Debian: forky (testing) has 2.54.1 and trixie 2.48.3; Ubuntu packages none
+  # (Launchpad, measured 2026-10-25). The runner is Ubuntu, the container Debian.
+  examples-debian:
+    runs-on: ubuntu-24.04
+    needs: cli-linux
+    container: debian:forky
+    strategy:
+      matrix:
+        template: [vanilla-ts, react-ts]
+    steps:
+      - name: Packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git xz-utils nodejs npm \
+            pkgconf libwpewebkit-2.0-dev libwayland-dev wayland-protocols libxcb1-dev \
+            libxcb-randr0-dev libcairo2-dev libxkbcommon-dev
+          npm install -g pnpm@10
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - name: Zig 0.16
+        run: |
+          curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz"
+          mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+          echo /opt/zig >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: lepton-binary
+          path: /opt/lepton
+
+      - name: Package
+        run: |
+          chmod +x /opt/lepton/lepton
+          /opt/lepton/lepton info || true
+          tools/ci/release-example.sh /opt/lepton/lepton "${{ matrix.template }}" "${{ needs.cli-linux.outputs.version }}" debian /tmp/out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: example-debian-${{ matrix.template }}
+          path: /tmp/out
+
+  # The example apps as Linux packages, made where WPE WebKit 2.54 is packaged: Arch.
+  # `lepton package` reads each library's owner from pacman for the package's depends.
+  examples-linux:
+    runs-on: ubuntu-24.04
+    needs: cli-linux
+    container: archlinux:base
+    strategy:
+      matrix:
+        template: [vanilla-ts, react-ts]
+    steps:
+      - name: Packages
+        run: |
+          pacman -Syu --noconfirm --needed git nodejs npm pnpm pkgconf wpewebkit wayland libxcb cairo xz
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - name: Zig 0.16
+        run: |
+          curl -fsSL -o /tmp/zig.tar.xz "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz"
+          mkdir -p /opt/zig && tar -xJf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+          echo /opt/zig >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: lepton-binary
+          path: /opt/lepton
+
+      - name: Package
+        run: |
+          chmod +x /opt/lepton/lepton
+          tools/ci/release-example.sh /opt/lepton/lepton "${{ matrix.template }}" "${{ needs.cli-linux.outputs.version }}" linux /tmp/out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: example-linux-${{ matrix.template }}
+          path: /tmp/out
+
+  # The same apps for Windows, made on Linux: the CLI cross-builds the core with Zig and
+  # writes the zip and the msi itself (as windows.yml's linux-package job does).
+  examples-windows:
+    runs-on: ubuntu-24.04
+    needs: cli-linux
+    strategy:
+      matrix:
+        template: [vanilla-ts, react-ts]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - name: Zig 0.16
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zig.tar.xz" "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz"
+          mkdir -p "$RUNNER_TEMP/zig" && tar -xJf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: lepton-binary
+          path: ${{ runner.temp }}/lepton
+
+      - name: Package
+        run: |
+          npm install -g pnpm@10
+          chmod +x "$RUNNER_TEMP/lepton/lepton"
+          tools/ci/release-example.sh "$RUNNER_TEMP/lepton/lepton" "${{ matrix.template }}" "${{ needs.cli-linux.outputs.version }}" windows "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: example-windows-${{ matrix.template }}
+          path: ${{ runner.temp }}/out
+
+  # Servo's library from the servo-bridge run on this commit; without one, the release
+  # stops here with the reason instead of going out without it.
+  servo:
+    runs-on: ubuntu-24.04
+    needs: cli-linux
+    steps:
+      - name: Library
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.cli-linux.outputs.sha }}
+        run: |
+          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow servo-bridge.yml --commit "$SHA" \
+            --status success --json databaseId -q '.[0].databaseId')
+          # A trial takes trunk's latest instead, and says so; a release never does.
+          if [ -z "$run" ] && [ "$GITHUB_EVENT_NAME" != push ]; then
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow servo-bridge.yml --branch trunk \
+              --status success --json databaseId -q '.[0].databaseId')
+            echo "::warning::trial: no servo-bridge run on $SHA, using trunk's run $run"
+          fi
+          if [ -z "$run" ]; then
+            echo "no successful servo-bridge run on $SHA: run it first (docs/yayin.md)" >&2
+            exit 1
+          fi
+          echo "servo-bridge run $run"
+          gh run download "$run" --repo "$GITHUB_REPOSITORY" -n liblepton_servo -D "$RUNNER_TEMP/out"
+          ls -l "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: servo
+          path: ${{ runner.temp }}/out
+
+  release:
+    runs-on: ubuntu-24.04
+    needs: [cli-linux, cli-windows, cli-pacman, examples-linux, examples-debian, examples-windows, servo]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REF }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Files
+        run: |
+          dist="$RUNNER_TEMP/dist"
+          mkdir -p "$dist"
+          for kept in cli-linux cli-windows cli-pacman servo \
+            example-linux-vanilla-ts example-linux-react-ts example-debian-vanilla-ts example-debian-react-ts \
+            example-windows-vanilla-ts example-windows-react-ts; do
+            cp "$RUNNER_TEMP/artifacts/$kept"/* "$dist/"
+          done
+          # The AUR recipes follow releases only (pacman takes no `-` in pkgver, and a beta
+          # would reach everyone on the stable package): a pre-release carries none.
+          case "${{ needs.cli-linux.outputs.version }}" in
+            *-*) ;;
+            *)
+              cp packaging/aur/lepton-desk/PKGBUILD "$dist/lepton-desk.PKGBUILD"
+              cp packaging/aur/lepton-desk-bin/PKGBUILD "$dist/lepton-desk-bin.PKGBUILD"
+              ;;
+          esac
+          cd "$dist"
+          for file in *; do sha256sum "$file" > "$file.sha256"; done
+          ls -l
+
+      - name: Notes
+        run: |
+          notes="docs/release/${{ needs.cli-linux.outputs.version }}.md"
+          if [ ! -f "$notes" ]; then
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              echo "no $notes: the release's text is written before its tag" >&2
+              exit 1
+            fi
+            echo "::warning::trial: no $notes"
+            echo "(no notes for this version yet)" > "$RUNNER_TEMP/notes.md"
+            exit 0
+          fi
+          # Below the first `---`: the paragraph above it is about the draft.
+          awk 'found { print } /^---$/ && !found { found = 1 }' "$notes" > "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md"
+
+      - name: Draft release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.cli-linux.outputs.version }}
+        run: |
+          prerelease=""
+          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "v$VERSION" --draft --verify-tag $prerelease \
+            --title "Lepton $VERSION" --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/dist/*
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'push'
+        with:
+          name: release-trial
+          path: |
+            ${{ runner.temp }}/dist
+            ${{ runner.temp }}/notes.md

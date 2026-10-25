@@ -157,6 +157,25 @@ npx @lepton-desk/cli@latest --version
 
 Beklenen: `lepton <sürüm>` (yukarıdaki "Şu anki sürüm").
 
+## 5b. GitHub Release
+
+Notu önceden yazılır: `docs/release/<sürüm>.md` (ilk `---`'ün altı Release metnidir). Aynı commit'te
+başarılı bir `servo-bridge` çalıştırması olmalı (Servo kitaplığı oradan alınır). Sonra etiket:
+
+```bash
+git tag v<sürüm>
+```
+
+```bash
+git push origin v<sürüm>
+```
+
+`release` iş akışı her dosyayı o etiketten derler (CLI Linux/Windows ve pacman/deb paketleri, vanilla ve React örnek
+uygulamaları Linux `tar.gz`/pacman/deb ve Windows `msi`/`zip`, Servo kitaplığı; PKGBUILD'ler yalnız kararlı sürümde), her
+birine `.sha256` ekler ve **taslak** bir Release açar (`-beta.N` ön sürüm olarak işaretli).
+Taslağı GitHub'da gözden geçirip yayımlamak sizin işiniz. Etiketsiz deneme: Actions'ta
+`release`'i bir commit için elle çalıştırın; dosyalar `release-trial` artifact'ı olur, Release açılmaz.
+
 ## 6. Geri alma
 - 72 saat içinde: `npm unpublish @lepton-desk/<paket>@<sürüm>` (aynı sürüm bir daha kullanılamaz).
 - Sonrası: `npm deprecate @lepton-desk/<paket>@<sürüm> "<neden>"`.

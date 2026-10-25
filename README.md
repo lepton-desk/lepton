@@ -51,14 +51,21 @@ own system layer is planned to change.
 
 ### Arch Linux
 
-The CLI is packaged for Arch as `lepton-desk` (built from source) and `lepton-desk-bin`
-(the npm binary). Until they are on the AUR (new AUR accounts are closed for now), build
-them from this repository. The packaged release (0.1.8) builds with Zig 0.16 only and Arch's
-`zig` is 0.17, so the packages depend on the AUR's `zig0.16-bin`, installed beside the system Zig (`makepkg`
-does not fetch AUR dependencies itself); pacman pulls in WPE WebKit:
+Each GitHub release carries the CLI as an Arch package, on Arch's own `zig` (0.17), so
+pacman pulls in Zig and WPE WebKit. For 0.1.9-beta.3:
 
 ```bash
-paru -S zig0.16-bin
+curl -LO https://github.com/lepton-desk/lepton/releases/download/v0.1.9-beta.3/lepton-desk-0.1.9beta.3-1-x86_64.pkg.tar.zst
+curl -LO https://github.com/lepton-desk/lepton/releases/download/v0.1.9-beta.3/lepton-desk-0.1.9beta.3-1-x86_64.pkg.tar.zst.sha256
+sha256sum -c lepton-desk-0.1.9beta.3-1-x86_64.pkg.tar.zst.sha256
+sudo pacman -U lepton-desk-0.1.9beta.3-1-x86_64.pkg.tar.zst
+```
+
+From 0.1.9 the AUR recipes in `packaging/aur/` build it too: `lepton-desk` from source and
+`lepton-desk-bin` from the npm binary. Until they are on the AUR (new AUR accounts are
+closed for now), build them from this repository:
+
+```bash
 git clone https://github.com/lepton-desk/lepton.git
 cd lepton/packaging/aur/lepton-desk-bin && makepkg -si
 ```

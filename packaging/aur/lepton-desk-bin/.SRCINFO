@@ -7,7 +7,7 @@ pkgbase = lepton-desk-bin
 	license = MIT OR Apache-2.0
 	depends = glibc
 	depends = libgcc
-	depends = zig0.16
+	depends = zig
 	depends = pkgconf
 	depends = wpewebkit>=2.54
 	optdepends = nodejs: frontend builds for npm, pnpm and Yarn projects

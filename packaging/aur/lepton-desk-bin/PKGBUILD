@@ -8,12 +8,12 @@ arch=('x86_64')
 url="https://github.com/lepton-desk/lepton"
 license=('MIT OR Apache-2.0')
 # The CLI builds each application's Zig core and probes libraries with pkg-config.
-# Lepton builds with Zig 0.16: Zig 0.17 stops at Lepton's own build.zig (measured
-# 2026-10-20), and Arch's `zig` is 0.17. So the Zig is `zig0.16` (AUR `zig0.16-bin`,
-# /opt/zig0.16, beside the system's `zig`), never `zig` itself, and the system can upgrade.
-# zig0.16, pkgconf and wpewebkit are run or built against, not linked, so namcap reports
-# them as possibly unneeded; they are needed.
-depends=('glibc' 'libgcc' 'zig0.16' 'pkgconf' 'wpewebkit>=2.54')
+# From 0.1.9 the CLI builds with Zig 0.16 and 0.17 and finds `zig` on PATH itself
+# (crates/orchestrator/src/zig.rs), so Arch's own `zig` (0.17) is enough. 0.1.8 and older
+# built with 0.16 only and needed the AUR's zig0.16 and a wrapper; these recipes are for
+# 0.1.9 and later. zig, pkgconf and wpewebkit are run or built against, not linked, so
+# namcap reports them as possibly unneeded; they are needed.
+depends=('glibc' 'libgcc' 'zig' 'pkgconf' 'wpewebkit>=2.54')
 optdepends=(
   'nodejs: frontend builds for npm, pnpm and Yarn projects'
   'pnpm: the default package manager when installed'
@@ -36,16 +36,7 @@ sha512sums=('4575775f9c9c716b8eb22f1e97bf505b6d06cf5e60bef20b3cb91002ea05e589ea3
 options=('!strip' '!debug')
 
 package() {
-  install -Dm755 package/bin/lepton "$pkgdir/usr/lib/lepton-desk/lepton"
-  # /usr/bin/lepton-desk hands the CLI Zig 0.16: LEPTON_ZIG for a CLI that reads it
-  # (0.1.9 and later), and first on PATH for one that runs `zig` (0.1.8 and earlier).
-  install -dm755 "$pkgdir/usr/bin"
-  printf '%s\n' \
-    '#!/bin/sh' \
-    'export LEPTON_ZIG="${LEPTON_ZIG:-/opt/zig0.16/zig}"' \
-    'export PATH="/opt/zig0.16:$PATH"' \
-    'exec /usr/lib/lepton-desk/lepton "$@"' >"$pkgdir/usr/bin/lepton-desk"
-  chmod 755 "$pkgdir/usr/bin/lepton-desk"
+  install -Dm755 package/bin/lepton "$pkgdir/usr/bin/lepton-desk"
   install -Dm644 package/LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
   install -Dm644 package/LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
 }

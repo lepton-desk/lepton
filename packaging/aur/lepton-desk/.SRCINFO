@@ -10,7 +10,7 @@ pkgbase = lepton-desk
 	makedepends = git
 	depends = glibc
 	depends = libgcc
-	depends = zig0.16
+	depends = zig
 	depends = pkgconf
 	depends = wpewebkit>=2.54
 	optdepends = nodejs: frontend builds for npm, pnpm and Yarn projects

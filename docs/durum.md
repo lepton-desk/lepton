@@ -170,7 +170,7 @@ Servo yalnız Linux içindir ve öyle kalacak: Windows'ta motor WebView2'dir (Ch
 
 - Windows: simgenin 256 px çerçevesi kabukta (Gezgin'in büyük simgeleri) gözle bakılmadı; `fs.watch` ve panodaki düzeltme Linux'ta yeniden koşturulmadı (Linux yarıları değişmedi).
 - Servo: Wayland'de XWayland üzerinden. Servo kapanışta sürecin sonuna bırakılıyor (`_exit`): kendi kapanışı worker'ları süresiz bekliyor.
-- AUR paketleri 0.1.8'i paketliyor ve `zig0.16`'ya bağlı; bir sonraki kararlı sürümde Arch'ın `zig`'ine geçilecek.
+- AUR tarifleri 0.1.9 için yazıldı (2026-10-25): Arch'ın `zig`'ine bağlı, sarmalayıcısız (`/usr/bin/lepton-desk` ikilinin kendisi). `pkgver` 0.1.9'un kararlı artırımına kadar 0.1.8; o arada 0.1.8 ikilisi 0.17 ile çalışmaz; README Arch kullanıcısını beta.3 Release'indeki CLI pacman paketine (`pacman -U`) gönderiyor, bağlantılar taslak yayımlanınca çalışır. `-bin` yerelde `makepkg` ile paketlendi.
 - Beta.3 adayları: WASM eklentileri (önce tasarım belgesi), arm64+x64 paketleme, Windows imzalama, çalışma zamanı yetki sorusunun genel mekanizması (`fs` ile başlayarak).
 
 ## Sabah buradan devam (2026-10-21 gecesi bırakıldı)
@@ -340,6 +340,7 @@ Yeni:
 
 ## Sağ tık menüsü: ölçülecekler (2026-10-25)
 
+- Servo, CI kitaplığıyla (run 40223407188): menü düz metinde Türkçe etiketlerle açılıyor, Kes/Kopyala/Yapıştır pasif, Tümünü seç etkin; **Tümünü seç seçiyor (kullanıcı ekranda denedi)**. Benim aynı anda yaptığım deneme kullanıcının denemesiyle çakıştı, geçersiz. Metin kutusu içi ve Kopyala henüz denenmedi.
 - Servo: köprü (`servo/bridge`) yalnız CI'da derlenir; `context_menu` callback'i, metin kutusunda Kes/Kopyala/Yapıştır/Tümünü seç ve kutu dışında seçim + Kopyala, Tümünü seç (JS `selectAllChildren`) yeni `liblepton_servo.so` ile ölçülecek. Kutu dışında Servo'nun `ContextMenuAction::Copy`'si sayfa seçimini kopyalıyor mu bilinmiyor.
 - WebView2: öğe adları `selectAll`, `inspect`/`inspectElement` belgedeki kurala göre yazıldı (yalnız `cut`/`copy`/`paste` belgede örnek); Windows'ta sağ tıkla ölçülecek.
 
