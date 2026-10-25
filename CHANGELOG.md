@@ -115,8 +115,9 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
 - The Windows `.zip` and `.msi` made on Linux install and pass the same checks on Windows
   as the ones made there. The two machines' files differed only in the `.exe` (CI,
   2026-10-25, `members.txt`: 1 239 040 bytes from Linux, 1 303 040 from Windows; the
-  frontend and icon identical) — the CPU difference above, fixed; whether they are now
-  identical is for the next `windows` run to show.
+  frontend and icon identical). It is not the CPU difference above: with
+  `-Dcpu=baseline` on both sides the Windows-made `.exe` is still different (1 307 136
+  bytes, run 40188220214); the cause is not measured yet.
 
 ## 0.1.9-beta.1 *2026-10-19*
 

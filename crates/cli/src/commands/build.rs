@@ -261,8 +261,7 @@ impl Flags {
             // Zig's native target used every extension this one has (2253 AVX
             // instructions in a native app built on an i3-2120, none with `baseline`),
             // and a package carrying them stops with "illegal instruction" on a CPU
-            // without them. A cross-compile was already baseline, which is why the
-            // Windows `.exe` made on Linux differed from the one made on Windows.
+            // without them. A cross-compile was already baseline.
             .arg("-Dcpu=baseline")
             .in_dir(root.join(CORE_DIR));
 
