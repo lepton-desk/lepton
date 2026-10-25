@@ -223,7 +223,7 @@ pub fn main() !u8 {
     };
     comptime std.debug.assert(@sizeOf(c.LeptonServoSurface) == 40);
     comptime std.debug.assert(@offsetOf(c.LeptonServoSurface, "window") == 24);
-    comptime std.debug.assert(@sizeOf(c.LeptonServoCallbacks) == 64);
+    comptime std.debug.assert(@sizeOf(c.LeptonServoCallbacks) == 72);
     comptime std.debug.assert(@offsetOf(c.LeptonServoCallbacks, "loaded") == 40);
     const callbacks: c.LeptonServoCallbacks = .{
         .context = &state,
@@ -234,6 +234,7 @@ pub fn main() !u8 {
         .loaded = onLoaded,
         .navigation = null,
         .cursor = null,
+        .context_menu = null,
     };
 
     var error_text: [512]u8 = @splat(0);
