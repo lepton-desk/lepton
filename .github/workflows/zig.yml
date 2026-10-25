@@ -22,6 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Ubuntu mirror
+        # The image's apt mirror, azure.archive.ubuntu.com, crawled: 125 of 540 packages in
+        # about 20 minutes on 2026-10-25 (actions/runner-images#14823). The global archive
+        # instead; the mirror list is printed before and after.
+        run: |
+          cat /etc/apt/apt-mirrors.txt || true
+          grep -rl azure.archive.ubuntu.com /etc/apt | xargs -r sudo sed -i 's/azure\.archive\.ubuntu\.com/archive.ubuntu.com/g'
+          cat /etc/apt/apt-mirrors.txt || true
+
       - name: Libraries
         run: |
           sudo apt-get update
