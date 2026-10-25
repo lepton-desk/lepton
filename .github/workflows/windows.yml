@@ -198,7 +198,8 @@ jobs:
           path: ${{ runner.temp }}/linux-package
 
       # The MSI made on Linux, installed, run, measured and removed as the one made here;
-      # then both machines' files compared (reproducible: the same project, the same bytes).
+      # then both machines' files compared. Each machine's own builds are reproducible; the
+      # two machines' were not identical on 2026-10-24 (`members.txt` says where).
       - name: The Linux-made package
         if: ${{ !cancelled() }}
         run: |
@@ -213,7 +214,22 @@ jobs:
             $b = (Get-FileHash $windows.FullName).Hash
             "$kind  linux $($linux.Length) $a  windows $($windows.Length) $b  identical: $($a -eq $b)" | Tee-Object -Append "$out\compare.txt"
           }
-          $msi = (Get-ChildItem "$from\*.msi" | Select-Object -First 1).FullName
+          # Which files differ: the two .zip files were not identical (2026-10-24), and only
+          # the reports leave this machine.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          foreach ($side in @(@("linux", $from), @("windows", $here))) {
+            $zip = [System.IO.Compression.ZipFile]::OpenRead((Get-ChildItem "$($side[1])\*.zip" | Select-Object -First 1).FullName)
+            foreach ($entry in $zip.Entries) {
+              if ($entry.FullName.EndsWith("/")) { continue }
+              $stream = $entry.Open()
+              $hash = [BitConverter]::ToString($sha.ComputeHash($stream)).Replace("-", "")
+              $stream.Close()
+              "$($side[0])  $($entry.FullName)  $($entry.Length)  $hash" | Tee-Object -Append "$out\members.txt"
+            }
+            $zip.Dispose()
+          }
+          $msi =(Get-ChildItem "$from\*.msi" | Select-Object -First 1).FullName
           $install = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v `"$out\install.log`"" -Wait -PassThru
           "install: exit $($install.ExitCode)" | Tee-Object -Append "$out\result.txt"
           if ($install.ExitCode) { exit 1 }

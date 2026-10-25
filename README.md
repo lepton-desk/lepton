@@ -10,22 +10,23 @@ No browser ships with the app: it uses the system's web engine.
 - **Permissions are explicit**: a page may call only the commands listed in
   `lepton.config.json` (`"permissions"`), and an unknown name fails the build.
 - **Pure native mode**: no web engine. Linux: GLES with an shm/Cairo fallback; Windows:
-  a Win32 window with DirectWrite text (CPU for now, D3D11 next).
+  Vulkan, Direct3D 11 or OpenGL 3.3 with a CPU fallback, and DirectWrite text.
 
 > **Status: beta.** Stable is **0.1.8** (Linux). **0.1.9** (in beta, `@beta` on npm) adds
-> Windows. macOS is not supported (see [Platforms](#platforms)). What was measured, and where, is in
-> [`docs/durum.md`](docs/durum.md).
+> Windows; 0.1.9-beta.3 is its last beta, and its API holds to 0.1.9. macOS is not
+> supported (see [Platforms](#platforms)). Every change is in [`CHANGELOG.md`](CHANGELOG.md);
+> what was measured, and where, in [`docs/durum.md`](docs/durum.md).
 
 ## Platforms
 
 | | Linux | Windows 10 / 11 *0.1.9 beta* |
 |---|---|---|
 | Web engine | WPE WebKit 2.54+ (`wpe-platform`; never WebKitGTK). Servo, experimental, with `--servo` | WebView2, the runtime that comes with Windows (no `WebView2Loader.dll`) |
-| Native render path | yes: GLES 3 on the GPU, shared memory without one | yes, on the CPU for now: a Win32 window, GDI, DirectWrite text, 60 frames a second; the GPU path (D3D11) is next |
+| Native render path | yes: GLES 3 on the GPU, shared memory without one | yes: Vulkan, Direct3D 11 or OpenGL 3.3 on the GPU, GDI without one; DirectWrite text |
 | Packages | `.tar.gz`, `.deb`, Arch `.pkg.tar.zst` | `.zip`, `.msi` (per user, no admin, written without WiX) |
 | Plugins | `os`, `fs`, `clipboard`, `dialog` | the same four, measured end to end |
 | Single instance, deep links (`deepLinks`) | yes (a unix socket; the desktop entry claims the scheme) | yes (a named pipe; the scheme is registered per user) |
-| Your own title bar (`window.decorations: false`), moving it, native menus | Servo's X11 window; WPE: not yet (Lepton's own WPE platform, next) | yes: resize borders, snap and shadow stay |
+| Your own title bar (`window.decorations: false`), moving it, native menus | Servo's X11 window; WPE: not yet (Lepton's own WPE platform, 0.2.0) | yes: resize borders, snap and shadow stay |
 | System title bar follows the page's `theme-color` / `color-scheme` | no (no compositor protocol for it) | dark/light on Windows 10; the colour itself on Windows 11 (measured on Server 2025, build 26100, by the `windows` workflow) |
 | Small screens (1280 × 800 and below) | the window is centred (X11; Wayland places it itself) | the window is fitted to the work area and centred |
 
@@ -101,9 +102,10 @@ Templates: `vanilla`, `react`, `vue`, `svelte`, `solid`, `preact`, `lit`, `astro
 | `lepton replay --page <file>` | opens the application and answers the page's calls from the recording |
 | `lepton info` | the toolchain, the web engine and the display, and what is missing |
 
-`lepton package --windows` on Linux writes the same `.zip` and `.msi` Windows does (both
-writers are plain Rust). It is in the beta and not yet measured on Linux; a Windows
-package is verified on Windows, never claimed from Linux.
+`lepton package --windows` on Linux writes a `.zip` and an `.msi` (both writers are plain
+Rust), the same bytes on every run. CI installs that MSI on Windows and runs it through the
+checks a Windows-made one passes; the two machines' files are not yet byte-identical
+(measured; `windows.yml` lists which member differs). `--verify` runs on Windows only.
 
 ## Recording a session
 
@@ -132,19 +134,24 @@ a recording from a release build.
 ## Calling the core from the page
 
 ```ts
+import { info } from "@lepton-desk/api/app";
 import { invoke } from "@lepton-desk/api/core";
 import { listen } from "@lepton-desk/api/event";
-import { dragRegion, maximize, popupMenu } from "@lepton-desk/api/window";
+import { dragRegion, maximize, popupMenu, title } from "@lepton-desk/api/window";
 
-const name = new TextDecoder().decode(await invoke("app.name"));
+const reply = await invoke("app.name"); // an application command from main.zig
 await listen("window.state", (event) => console.log(event.payload));
 await maximize();
 const bar = document.querySelector<HTMLElement>("#titlebar");
-if (bar) dragRegion(bar); // with "window": { "decorations": false }
+if (bar) {
+  dragRegion(bar); // with "window": { "decorations": false }
+  bar.textContent = `${info().name} — ${title()}`; // no permission, no waiting
+}
 const chosen = await popupMenu([{ id: 1, label: "Copy" }, { separator: true }, { id: 2, label: "Delete" }]);
 ```
 
-Application commands and events are declared in `src-lepton/main.zig`; their names are
+Application commands and events are declared in `src-lepton/main.zig` (the native
+program is `src-lepton/native.zig`, Lepton's own file like `build.zig`); their names are
 generated into `src/lepton-commands.d.ts` on every build, so a typo is a type error.
 See [`packages/api`](packages/api/README.md).
 
