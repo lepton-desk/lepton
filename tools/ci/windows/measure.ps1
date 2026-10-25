@@ -158,10 +158,18 @@ if ($running.Count) {
   $running | Stop-Process -Force
   [void](Until { -not (Get-Process $name -ErrorAction SilentlyContinue) } 10)
 }
+$started = Get-Date
 $app = Start-Process -FilePath $Exe -PassThru
 # Whatever stops this script, the app does not outlive it.
 trap { if ($app -and -not $app.HasExited) { $app.Kill() }; break }
-if (-not (Until { Window } 60)) { Say "FAIL no window after 60 s"; exit 1 }
+if (-not (Until { Window } 60)) {
+  Say "FAIL no window after 60 s"
+  # What happened instead: the process, and what Windows logged about it.
+  if ($app.HasExited) { Say ("  process exited: 0x{0:X8}" -f $app.ExitCode) } else { Say "  process still running, no window" }
+  Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $started; Level = 1, 2, 3 } -ErrorAction SilentlyContinue |
+    Select-Object -First 8 | ForEach-Object { Say "  event $($_.Id) $($_.ProviderName): $(($_.Message -split "`n")[0..3] -join ' | ')" }
+  exit 1
+}
 Start-Sleep -Seconds 3
 $first = Facts "opened"
 
