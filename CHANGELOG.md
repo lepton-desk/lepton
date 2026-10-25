@@ -104,12 +104,19 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
 - Names in `lepton.config.json` are checked for control characters and path separators,
   and escaped wherever they are written.
 - Plugin tests link on glibc 2.44 with Zig 0.16 (`-fllvm -flld` in CI).
+- Release builds were made for the building machine's CPU: with no `-Dtarget`, Zig's
+  native target uses every extension that CPU has (2253 AVX instructions in a native app
+  built on an i3-2120, none with `-Dcpu=baseline`), so a package could stop with "illegal
+  instruction" elsewhere. `lepton build` (and `package`, which builds through it) now
+  passes `-Dcpu=baseline`.
 
 ### Measured, not yet the same
 
 - The Windows `.zip` and `.msi` made on Linux install and pass the same checks on Windows
-  as the ones made there, but the two machines' files are not byte-identical (CI,
-  2026-10-24); `windows.yml` now lists each member's hash to say which file differs.
+  as the ones made there. The two machines' files differed only in the `.exe` (CI,
+  2026-10-25, `members.txt`: 1 239 040 bytes from Linux, 1 303 040 from Windows; the
+  frontend and icon identical) — the CPU difference above, fixed; whether they are now
+  identical is for the next `windows` run to show.
 
 ## 0.1.9-beta.1 *2026-10-19*
 

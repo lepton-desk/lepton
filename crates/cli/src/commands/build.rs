@@ -257,6 +257,13 @@ impl Flags {
             // undefined behaviour rather than a caught error.
             .arg("--release=safe")
             .arg("-Doptimize=ReleaseSmall")
+            // The plain x86-64 the build is for, not the CPU of the machine building it:
+            // Zig's native target used every extension this one has (2253 AVX
+            // instructions in a native app built on an i3-2120, none with `baseline`),
+            // and a package carrying them stops with "illegal instruction" on a CPU
+            // without them. A cross-compile was already baseline, which is why the
+            // Windows `.exe` made on Linux differed from the one made on Windows.
+            .arg("-Dcpu=baseline")
             .in_dir(root.join(CORE_DIR));
 
         // Only for a platform that is not this one. Naming the host's own triple turns
@@ -528,6 +535,8 @@ mod tests {
             "a host build should not name a target: {:?}",
             host_steps[0].args
         );
+        // Not this machine's CPU either: a package goes to other machines.
+        assert_contains!(&host_steps[0].args.join(" "), "-Dcpu=baseline");
 
         // Whatever the host is, at least one platform is not it, and that one must
         // carry a triple or the build would silently produce a binary for this machine

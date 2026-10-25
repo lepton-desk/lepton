@@ -104,8 +104,9 @@ Templates: `vanilla`, `react`, `vue`, `svelte`, `solid`, `preact`, `lit`, `astro
 
 `lepton package --windows` on Linux writes a `.zip` and an `.msi` (both writers are plain
 Rust), the same bytes on every run. CI installs that MSI on Windows and runs it through the
-checks a Windows-made one passes; the two machines' files are not yet byte-identical
-(measured; `windows.yml` lists which member differs). `--verify` runs on Windows only.
+checks a Windows-made one passes. The two machines' packages differed only in the `.exe`,
+built for the Windows machine's own CPU there; release builds are now for the plain x86-64
+(`-Dcpu=baseline`). `--verify` runs on Windows only.
 
 ## Recording a session
 
