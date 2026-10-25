@@ -9,9 +9,10 @@
 //! - `bundle.icon` → `-Dicon=<path>`, for a Windows build only: the Windows program's
 //!   icon — its title bar, taskbar button and Explorer icon. Without it, Lepton's own
 //!   (written into the build cache).
-//! - `identifier`, `productName`, `channel.name`, `window.title` → `-Didentifier=…`,
-//!   `-Dproduct=…`, `-Dchannel=…`, `-Dtitle=…`: who the application is, so an edit after
-//!   `lepton new` reaches the program.
+//! - `identifier`, `productName`, `channel.name`, `window.title`, `version` →
+//!   `-Didentifier=…`, `-Dproduct=…`, `-Dchannel=…`, `-Dtitle=…`, `-Dapp-version=…`: who
+//!   the application is, so an edit after `lepton new` reaches the program (and the page,
+//!   through `@lepton-desk/api/app` `info()`).
 //!
 //! A project whose `src-lepton/build.zig` predates an option keeps building without it
 //! and is told what it misses, as `size_window` does for the size.
@@ -119,7 +120,7 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
     // a build option, so an edit reaches the program, and Zig 0.17's cached configuration
     // with it. An older `build.zig` has the values written into `main.zig` instead.
     if build.contains("\"identifier\"") {
-        args.extend(identity_args(&text)?);
+        args.extend(identity_args(&text, build.contains("\"app-version\""))?);
     }
     for step in steps.iter_mut() {
         if is_core_build(step) {
@@ -132,9 +133,10 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-/// `-Didentifier=…`, `-Dproduct=…`, and `-Dchannel=…` / `-Dtitle=…` when the configuration
-/// names them (the template derives them otherwise, as `lepton new` does).
-fn identity_args(text: &str) -> Result<Vec<String>, CliError> {
+/// `-Didentifier=…`, `-Dproduct=…`, and `-Dchannel=…` / `-Dtitle=…` / `-Dapp-version=…`
+/// when the configuration names them (the template derives them otherwise, as `lepton new`
+/// does). `-Dapp-version` only for a `build.zig` that takes it (`versioned`).
+fn identity_args(text: &str, versioned: bool) -> Result<Vec<String>, CliError> {
     let config: Value = serde_json::from_str(text).map_err(|error| {
         CliError::Invalid(format!("lepton.config.json is not valid JSON: {error}"))
     })?;
@@ -154,6 +156,9 @@ fn identity_args(text: &str) -> Result<Vec<String>, CliError> {
     }
     if let Some(title) = at(&["window", "title"]) {
         args.push(format!("-Dtitle={title}"));
+    }
+    if let Some(version) = at(&["version"]).filter(|_| versioned) {
+        args.push(format!("-Dapp-version={version}"));
     }
     Ok(args)
 }
@@ -225,7 +230,8 @@ mod tests {
     fn the_build_is_handed_who_the_application_is() -> Result<(), Failure> {
         let args = assert_ok!(
             super::identity_args(
-                r#"{"identifier":"dev.lepton.notes","productName":"Notes","channel":{"name":"/lepton-dev.lepton.notes"},"window":{"title":"My Notes"}}"#
+                r#"{"identifier":"dev.lepton.notes","productName":"Notes","version":"1.2.3","channel":{"name":"/lepton-dev.lepton.notes"},"window":{"title":"My Notes"}}"#,
+                true
             ),
             "a full configuration"
         );
@@ -236,16 +242,25 @@ mod tests {
                 "-Dproduct=Notes".to_owned(),
                 "-Dchannel=/lepton-dev.lepton.notes".to_owned(),
                 "-Dtitle=My Notes".to_owned(),
+                "-Dapp-version=1.2.3".to_owned(),
             ]
+        );
+        // A `build.zig` from before `-Dapp-version` would refuse the option.
+        assert_eq!(
+            assert_ok!(
+                super::identity_args(r#"{"identifier":"a.b","version":"1.2.3"}"#, false),
+                "an older build.zig"
+            ),
+            vec!["-Didentifier=a.b".to_owned()]
         );
         assert_eq!(
             assert_ok!(
-                super::identity_args(r#"{"identifier":"a.b"}"#),
+                super::identity_args(r#"{"identifier":"a.b"}"#, true),
                 "only the identifier"
             ),
             vec!["-Didentifier=a.b".to_owned()]
         );
-        assert_err!(super::identity_args("{}"), "no identifier");
+        assert_err!(super::identity_args("{}", true), "no identifier");
         Ok(())
     }
 

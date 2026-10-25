@@ -111,6 +111,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption([]const u8, "product", app.product);
     options.addOption([]const u8, "channel", app.channel);
     options.addOption([]const u8, "title", app.title);
+    options.addOption([]const u8, "app_version", app.version);
 
     const root = b.createModule(.{
         .root_source_file = b.path("main.zig"),
@@ -286,20 +287,23 @@ fn check_render_options(render: []const u8, servo: bool) !void {
 }
 
 /// Who the application is: `lepton.config.json`'s `identifier`, `productName`,
-/// `channel.name` (`/lepton-<identifier>` without one) and `window.title` (the product's
-/// name without one). `lepton new` once wrote them into `main.zig`, and an identifier
+/// `channel.name` (`/lepton-<identifier>` without one), `window.title` (the product's
+/// name without one) and `version` (`0.1.0` without one, as the CLI reads it). `lepton new` once wrote them into `main.zig`, and an identifier
 /// changed afterwards left the program claiming the old one while its installer
 /// registered the new (measured: a notification name and icon on a key the program
 /// never used). The CLI hands them over on every build (`-Didentifier` …), as it does the
 /// window's size, so they are part of the build's options and Zig 0.17's cached
 /// configuration follows an edit; a bare `zig build` reads the file itself.
-const Identity = struct { identifier: []const u8, product: []const u8, channel: []const u8, title: []const u8 };
+const Identity = struct { identifier: []const u8, product: []const u8, channel: []const u8, title: []const u8, version: []const u8 };
 
 fn identity(b: *std.Build) !Identity {
     const given_identifier = b.option([]const u8, "identifier", "lepton.config.json's identifier");
     const given_product = b.option([]const u8, "product", "lepton.config.json's productName");
     const given_channel = b.option([]const u8, "channel", "lepton.config.json's channel.name");
     const given_title = b.option([]const u8, "title", "lepton.config.json's window.title");
+    // Its own name, not "version": the CLI finds the options a project's `build.zig`
+    // takes by their quoted names in this file.
+    const given_version = b.option([]const u8, "app-version", "lepton.config.json's version");
     if (given_identifier) |identifier| {
         const product = given_product orelse identifier;
         return .{
@@ -307,6 +311,8 @@ fn identity(b: *std.Build) !Identity {
             .product = product,
             .channel = given_channel orelse b.fmt("/lepton-{s}", .{identifier}),
             .title = given_title orelse product,
+            // A CLI from before `-Dapp-version` hands over the rest without it.
+            .version = given_version orelse versionFromFile(b),
         };
     }
     const text = configText(b) catch |err| {
@@ -345,6 +351,19 @@ fn identity(b: *std.Build) !Identity {
         .product = product,
         .channel = channel orelse b.fmt("/lepton-{s}", .{identifier}),
         .title = title orelse product,
+        .version = given_version orelse textAt(root, "version") orelse default_version,
+    };
+}
+
+/// The CLI's own default for a configuration without `version` (`read.rs`).
+const default_version = "0.1.0";
+
+fn versionFromFile(b: *std.Build) []const u8 {
+    const text = configText(b) catch return default_version;
+    const parsed = std.json.parseFromSliceLeaky(std.json.Value, b.allocator, text, .{}) catch return default_version;
+    return switch (parsed) {
+        .object => |object| textAt(object, "version") orelse default_version,
+        else => default_version,
     };
 }
 

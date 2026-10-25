@@ -72,7 +72,8 @@ await toggleMaximize();
 ```
 
 `close`, `minimize`, `maximize`, `unmaximize`, `toggleMaximize`, `state()`,
-`onStateChanged`, `onResized`, `startDragging`, `dragRegion`, `windowControls`, `popupMenu`.
+`onStateChanged`, `onResized`, `startDragging`, `dragRegion`, `windowControls`, `popupMenu`,
+`title()`, `onTitleChanged`.
 
 **Your own title bar.** `"window": { "decorations": false }` in `lepton.config.json`
 removes the system's (Windows, where the window keeps its resize borders, shadow and snap;
@@ -103,6 +104,20 @@ const bar = document.querySelector<HTMLElement>("#titlebar");
 if (bar) { dragRegion(bar); windowControls(bar); }
 ```
 
+The application's name in the bar: `info()` (`@lepton-desk/api/app`) is `productName`,
+`version` and `identifier`; `title()` is the window's name — `document.title`, or
+`window.title` while the page has none, as the system's title bar shows it — and
+`onTitleChanged` follows it. None of them needs a permission or waits: the core writes them
+into the page before its scripts run.
+
+```ts
+import { info } from "@lepton-desk/api/app";
+import { onTitleChanged, title } from "@lepton-desk/api/window";
+const show = (name: string) => (label.textContent = `${info().name} — ${name}`);
+show(title());
+await onTitleChanged(show);
+```
+
 The bar carries `data-maximized` while the window is maximized (`#titlebar[data-maximized]`
 for the restore icon). Needs `window.minimize`, `window.maximize`, `window.unmaximize`,
 `window.state` and `window.close` under `permissions`. Measured on Windows 10 with real
@@ -124,6 +139,15 @@ addEventListener("contextmenu", async (event) => {
 **A title bar that follows the page.** Nothing to call: the system title bar takes the
 page's `<meta name="theme-color">` and CSS `color-scheme` as they change — dark or
 light on Windows 10, the colour itself on Windows 11.
+
+## `@lepton-desk/api/app`
+
+```ts
+import { info, launchArgs, onOpened } from "@lepton-desk/api/app";
+const { name, version, identifier } = info(); // from lepton.config.json, no waiting
+const args = await launchArgs(); // needs app.args under permissions
+await onOpened((later) => console.log(later)); // a second start's arguments
+```
 
 ## `@lepton-desk/api/download`
 

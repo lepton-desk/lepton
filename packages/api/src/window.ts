@@ -1,15 +1,64 @@
 /**
  * `@lepton-desk/api/window` — the application's window.
  *
- * Every function is an `invoke` of a built-in command, so each must be listed under
- * `permissions` in `lepton.config.json` (`window.close`, `window.minimize`,
- * `window.maximize`, `window.unmaximize`, `window.state`, `window.start_drag`, `window.menu`).
+ * Every function but {@link title} and {@link onTitleChanged} is an `invoke` of a built-in
+ * command, so each must be listed under `permissions` in `lepton.config.json`
+ * (`window.close`, `window.minimize`, `window.maximize`, `window.unmaximize`,
+ * `window.state`, `window.start_drag`, `window.menu`).
  *
  * @module
  */
 
 import { invoke, wireLayout } from "./core.ts";
 import { listen, type UnlistenFn } from "./event.ts";
+import { identity } from "./identity.ts";
+
+/**
+ * The window's name now, for a title bar the page draws itself: the page's
+ * `document.title`, or `window.title` from `lepton.config.json` (the product's name
+ * without one) while the page has none. The rule every engine's window follows (WPE,
+ * Servo, WebView2), read here rather than asked of the core: no permission, no waiting.
+ * Outside a Lepton window, or under a core from before 0.1.9-beta.3, `document.title`.
+ */
+export function title(): string {
+  return document.title !== "" ? document.title : (identity()?.title ?? "");
+}
+
+/**
+ * Calls `handler` with the window's new name ({@link title}) whenever it changes: the
+ * page set `document.title`, or cleared it. Resolves with a function that stops
+ * listening.
+ */
+export function onTitleChanged(handler: (title: string) => void): Promise<UnlistenFn> {
+  let shown = title();
+  let element: Element | null = null;
+  const check = (): void => {
+    const now = title();
+    if (now === shown) return;
+    shown = now;
+    handler(now);
+  };
+  // The `<title>`'s own text, and the head, where `document.title` adds one.
+  const text = new MutationObserver(check);
+  const watch = (): void => {
+    const current = document.querySelector("title");
+    if (current !== element) {
+      text.disconnect();
+      element = current;
+      if (current !== null) {
+        text.observe(current, { childList: true, characterData: true, subtree: true });
+      }
+    }
+    check();
+  };
+  const head = new MutationObserver(watch);
+  head.observe(document.head ?? document.documentElement, { childList: true });
+  watch();
+  return Promise.resolve(() => {
+    head.disconnect();
+    text.disconnect();
+  });
+}
 
 /** The window's state, from WPE's toplevel state bits. */
 export interface WindowState {

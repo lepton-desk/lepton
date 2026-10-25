@@ -393,7 +393,7 @@ pub const View = struct {
     pub fn addTransportTo(self: *View, core: *c.ICoreWebView2) bool {
         if (self.transport_len == 0) return false;
         var source: [16384]u8 = undefined;
-        const text = transport.script(&source, self.transport_len, &self.bridge.registry, self.bridge.pageOrigin()) catch return false;
+        const text = transport.script(&source, self.transport_len, &self.bridge.registry, self.bridge.pageOrigin(), self.bridge.application) catch return false;
         var wide: [16384:0]u16 = undefined;
         const units = std.unicode.utf8ToUtf16Le(wide[0 .. wide.len - 1], text) catch return false;
         wide[units] = 0;

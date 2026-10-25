@@ -187,6 +187,74 @@ fn withoutCommentLines(comptime source: []const u8) []const u8 {
     return kept;
 }
 
+/// Who the application is, as the page reads it from `__lepton.app`
+/// (`@lepton-desk/api/app` `info()`, `@lepton-desk/api/window` `title()`). The template's
+/// `main.zig` sets it on the bridge (`Bridge.application`) from `lepton.config.json`; a
+/// `main.zig` that predates it leaves every field empty. Fixed for the run, so the page
+/// reads it without asking the core.
+pub const Application = struct {
+    /// `productName`.
+    name: []const u8 = "",
+    /// `version`.
+    version: []const u8 = "",
+    identifier: []const u8 = "",
+    /// `window.title`: the window's name while the page has no `document.title`.
+    title: []const u8 = "",
+};
+
+/// Longest field written into the page, in bytes; a longer one is cut at a character.
+const max_application_field = 256;
+
+/// `application` as a frozen object literal of JSON strings into `out`.
+pub fn writeApplication(out: []u8, application: Application) error{NoSpaceLeft}![]const u8 {
+    var used: usize = 0;
+    const fields = [_]struct { []const u8, []const u8 }{
+        .{ "name", application.name },
+        .{ "version", application.version },
+        .{ "identifier", application.identifier },
+        .{ "title", application.title },
+    };
+    used += (try std.fmt.bufPrint(out[used..], "Object.freeze({{", .{})).len;
+    for (fields, 0..) |field, index| {
+        if (index != 0) used += (try std.fmt.bufPrint(out[used..], ",", .{})).len;
+        used += (try std.fmt.bufPrint(out[used..], "{s}:", .{field[0]})).len;
+        used += (try writeJsonString(out[used..], cutAtCharacter(field[1], max_application_field))).len;
+    }
+    used += (try std.fmt.bufPrint(out[used..], "}})", .{})).len;
+    return out[0..used];
+}
+
+/// `text`, at most `limit` bytes, never ending inside a UTF-8 sequence.
+fn cutAtCharacter(text: []const u8, limit: usize) []const u8 {
+    if (text.len <= limit) return text;
+    var end = limit;
+    while (end > 0 and text[end] & 0xc0 == 0x80) end -= 1;
+    return text[0..end];
+}
+
+/// `text` as a double-quoted string the script can carry whatever the configuration says:
+/// quotes, backslashes, control characters and the two line separators escaped.
+fn writeJsonString(out: []u8, text: []const u8) error{NoSpaceLeft}![]const u8 {
+    var used: usize = 0;
+    used += (try std.fmt.bufPrint(out[used..], "\"", .{})).len;
+    var at: usize = 0;
+    while (at < text.len) : (at += 1) {
+        const char = text[at];
+        if (char == '"' or char == '\\') {
+            used += (try std.fmt.bufPrint(out[used..], "\\{c}", .{char})).len;
+        } else if (char < 0x20) {
+            used += (try std.fmt.bufPrint(out[used..], "\\u{x:0>4}", .{char})).len;
+        } else if (char == 0xe2 and at + 2 < text.len and text[at + 1] == 0x80 and (text[at + 2] == 0xa8 or text[at + 2] == 0xa9)) {
+            used += (try std.fmt.bufPrint(out[used..], "\\u202{c}", .{@as(u8, if (text[at + 2] == 0xa8) '8' else '9')})).len;
+            at += 2;
+        } else {
+            used += (try std.fmt.bufPrint(out[used..], "{c}", .{char})).len;
+        }
+    }
+    used += (try std.fmt.bufPrint(out[used..], "\"", .{})).len;
+    return out[0..used];
+}
+
 /// Writes the user script for a ring of `region_len` bytes into `out`.
 ///
 /// Frozen object, fixed buffer: the SDK builds one `DataView` over `bytes` when its
@@ -198,11 +266,13 @@ fn withoutCommentLines(comptime source: []const u8) []const u8 {
 /// page the window navigated to, `about:srcdoc`, an embedded frame — it defines nothing,
 /// so that document has neither `__lepton` nor the run's key (`secret.zig`), nor the
 /// cookie shim.
-pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, page_origin: []const u8) error{NoSpaceLeft}![:0]const u8 {
+pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, page_origin: []const u8, application: Application) error{NoSpaceLeft}![:0]const u8 {
     // The application's commands are known when the application is built, not when the
     // core is, so their table is written here at run time beside the comptime layout.
     var app_table: [2048]u8 = undefined;
     const app = try registry.writeAppTable(commands, &app_table);
+    var who_buffer: [4 * (max_application_field * 6 + 16) + 32]u8 = undefined;
+    const who = try writeApplication(&who_buffer, application);
     const written = try std.fmt.bufPrintSentinel(out,
         \\(() => {{
         \\  "use strict";
@@ -265,6 +335,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, 
         \\    value: Object.freeze({{
         \\      layout,
         \\      appCommands: Object.freeze({s}),
+        \\      app: {s},
         \\      bytes,
         \\      newestSequence: () => newest,
         \\      onPublished(listener) {{
@@ -281,7 +352,7 @@ pub fn script(out: []u8, region_len: usize, commands: *const registry.Registry, 
         \\  refresh();
         \\}})();
         \\
-    , .{ core_origin, quotableOrigin(page_origin), quotableOrigin(page_origin), cookie_shim, layout_object, region_len, coreUrl(region_name), retry_ms, app, coreUrl(close_name) }, 0);
+    , .{ core_origin, quotableOrigin(page_origin), quotableOrigin(page_origin), cookie_shim, layout_object, region_len, coreUrl(region_name), retry_ms, app, who, coreUrl(close_name) }, 0);
     secret.fill(out[0..written.len]);
     return written;
 }
@@ -326,7 +397,7 @@ pub fn inject(web_view: ?*anyopaque, source: [:0]const u8) bool {
 const no_commands: registry.Registry = .{};
 
 fn scriptFor(out: []u8, region_len: usize) error{NoSpaceLeft}![:0]const u8 {
-    return script(out, region_len, &no_commands, "");
+    return script(out, region_len, &no_commands, "", .{});
 }
 
 /// `text` with this run's key where the URLs carry it.
@@ -339,7 +410,7 @@ test "the application's commands reach the page by name" {
     var notes: Notes = .{};
     const commands = (comptime registry.checked(Notes, &app, registry.permissionList("notes.save"))).bind(&notes);
     var buffer: [16384]u8 = undefined;
-    const text = try script(&buffer, 1, &commands, "");
+    const text = try script(&buffer, 1, &commands, "", .{});
     try std.testing.expect(std.mem.indexOf(u8, text, "appCommands: Object.freeze({\"notes.save\":1000})") != null);
 }
 
@@ -427,17 +498,33 @@ test "a page on the core's scheme gets document.cookie, without the shim's comme
 
 test "the transport defines itself only in the application's own page" {
     var buffer: [8192]u8 = undefined;
-    const packaged = try script(&buffer, 1, &no_commands, "");
+    const packaged = try script(&buffer, 1, &no_commands, "", .{});
     try std.testing.expect(std.mem.indexOf(u8, packaged, "location.href.startsWith(\"" ++ core_origin ++ "/\")") != null);
     try std.testing.expect(std.mem.indexOf(u8, packaged, "if (!own) return;") != null);
     // Every core URL carries the key; none is left as the marker.
     try std.testing.expect(std.mem.indexOf(u8, packaged, secret.marker) == null);
 
     var dev_buffer: [8192]u8 = undefined;
-    const dev = try script(&dev_buffer, 1, &no_commands, "http://127.0.0.1:5173");
+    const dev = try script(&dev_buffer, 1, &no_commands, "http://127.0.0.1:5173", .{});
     try std.testing.expect(std.mem.indexOf(u8, dev, "location.origin === \"http://127.0.0.1:5173\"") != null);
     // An origin with a quote is not quoted into the script.
     var odd_buffer: [8192]u8 = undefined;
-    const odd = try script(&odd_buffer, 1, &no_commands, "http://x\"+alert(1)+\"");
+    const odd = try script(&odd_buffer, 1, &no_commands, "http://x\"+alert(1)+\"", .{});
     try std.testing.expect(std.mem.indexOf(u8, odd, "alert") == null);
+}
+
+test "the page reads who the application is, whatever the configuration's text" {
+    var buffer: [16384]u8 = undefined;
+    const text = try script(&buffer, 1, &no_commands, "", .{ .name = "Notes \"2\"", .version = "1.2.3", .identifier = "dev.lepton.notes", .title = "a\\b\nc\u{2028}" });
+    try std.testing.expect(std.mem.indexOf(u8, text, "app: Object.freeze({name:\"Notes \\\"2\\\"\",version:\"1.2.3\",identifier:\"dev.lepton.notes\",title:\"a\\\\b\\u000ac\\u2028\"})") != null);
+    // Cut at a character, never inside one: 255 ASCII bytes and a two-byte "ğ".
+    // (Built with `@memset`: Zig 0.17 has no `**`.)
+    var long: [257]u8 = undefined;
+    @memset(long[0..255], 'x');
+    @memcpy(long[255..], "ğ");
+    var cut_buffer: [16384]u8 = undefined;
+    const cut = try script(&cut_buffer, 1, &no_commands, "", .{ .name = &long });
+    var needle: [270]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&needle, "name:\"{s}\",", .{long[0..255]});
+    try std.testing.expect(std.mem.indexOf(u8, cut, expected) != null);
 }

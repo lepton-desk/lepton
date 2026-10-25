@@ -486,7 +486,7 @@ pub const View = struct {
     pub fn injectTransport(self: *View, region_len: usize) bool {
         if (!comptime @import("build_options").wpe_platform_abi) return false;
         var source: [16384]u8 = undefined;
-        const text = transport.script(&source, region_len, &self.bridge.registry, self.bridge.pageOrigin()) catch return false;
+        const text = transport.script(&source, region_len, &self.bridge.registry, self.bridge.pageOrigin(), self.bridge.application) catch return false;
         return transport.inject(@ptrCast(self.web_view), text);
     }
 

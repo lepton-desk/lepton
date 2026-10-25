@@ -127,6 +127,9 @@ pub const Bridge = struct {
     /// The commands a page may call. Empty until the application sets it: nothing is
     /// granted by default.
     registry: invoke.Registry = .{},
+    /// Who the application is, written into the page as `__lepton.app`; set by the
+    /// template's `main.zig` before `startBridge`.
+    application: transport.Application = .{},
     /// The window the `window.*` commands act on; set by the view that owns it.
     window: invoke.Window = .{},
     /// Events for the page, and the one events request waiting for the next of them.

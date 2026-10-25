@@ -10,11 +10,40 @@
  * `lepton.config.json` (a new project lists it; a recording keeps its bytes masked). A
  * scheme the application opens is listed under `deepLinks`.
  *
+ * Who the application is — its name, version and identifier — is {@link info}.
+ *
  * @module
  */
 
 import { invoke } from "./core.ts";
 import { listen, type UnlistenFn } from "./event.ts";
+import { identity } from "./identity.ts";
+
+/** Who the application is, from `lepton.config.json`. */
+export interface AppInfo {
+  /** `productName`: the name a title bar the page draws itself shows. */
+  readonly name: string;
+  /** `version`. */
+  readonly version: string;
+  /** `identifier`, as the desktop knows the application. */
+  readonly identifier: string;
+}
+
+/**
+ * Who the application is. Fixed for the run: the core writes it into the page before
+ * the page's own scripts run, so this asks nothing, needs no permission and returns at
+ * once. Throws outside a Lepton window, and under a core from before it (`lepton update`
+ * brings the project's core and `main.zig` up to date).
+ */
+export function info(): AppInfo {
+  const app = identity();
+  if (app === undefined) {
+    throw new Error(
+      "info() needs a Lepton window whose core writes __lepton.app (0.1.9-beta.3 or newer)",
+    );
+  }
+  return Object.freeze({ name: app.name, version: app.version, identifier: app.identifier });
+}
 
 /** NUL-ended arguments, as the core packs them. */
 function unpack(bytes: Uint8Array): string[] {

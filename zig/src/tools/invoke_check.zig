@@ -1,7 +1,8 @@
 //! The core's `invoke` handler, outside a window, for the SDK's tests.
 //!
 //! `lepton-invoke-check layout` prints the layout object the page receives as
-//! `__lepton.layout`. `lepton-invoke-check serve` reads request frames from stdin —
+//! `__lepton.layout`, `app …` the `__lepton.app` object for the given values.
+//! `lepton-invoke-check serve` reads request frames from stdin —
 //! each preceded by its length as a little-endian `u32` — and answers each with the
 //! reply frame `invoke.handle` writes, framed the same way. The SDK's tests drive this
 //! with frames built by `@lepton-desk/api/core`, so both ends of a test are the shipped
@@ -54,6 +55,19 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (std.mem.eql(u8, mode, "app-commands")) {
         var table: [1024]u8 = undefined;
         try writeAll(try registry.writeAppTable(&granted, &table));
+        try writeAll("\n");
+        return;
+    }
+    if (std.mem.eql(u8, mode, "app")) {
+        // `__lepton.app` for a name, version, identifier and title given here.
+        const given = core.webviewTransport.Application{
+            .name = args.next() orelse return usage(),
+            .version = args.next() orelse return usage(),
+            .identifier = args.next() orelse return usage(),
+            .title = args.next() orelse return usage(),
+        };
+        var object: [8192]u8 = undefined;
+        try writeAll(try core.webviewTransport.writeApplication(&object, given));
         try writeAll("\n");
         return;
     }
@@ -120,7 +134,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 }
 
 fn usage() error{Usage}!void {
-    std.debug.print("usage: lepton-invoke-check layout | app-commands | types | app-types | events | download-events | permission-events | serve\n", .{});
+    std.debug.print("usage: lepton-invoke-check layout | app-commands | app <name> <version> <identifier> <title> | types | app-types | events | download-events | permission-events | serve\n", .{});
     return error.Usage;
 }
 

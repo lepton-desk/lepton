@@ -22,13 +22,14 @@
 //! engine changes.
 
 const std = @import("std");
-/// Who the application is: `lepton.config.json`'s `identifier`, `productName`, `channel.name` and
-/// `window.title`, read by `build.zig` on every build, so an edit there reaches the program.
+/// Who the application is: `lepton.config.json`'s `identifier`, `productName`, `channel.name`,
+/// `window.title` and `version`, read by `build.zig` on every build, so an edit there reaches the program.
 const who = struct {{
     const identifier = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").identifier}});
     const product = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").product}});
     const channel = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").channel}});
     const title = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").title}});
+    const version = std.fmt.comptimePrint("{{s}}", .{{@import("build_options").app_version}});
 }};
 const builtin = @import("builtin");
 const core = @import("lepton_core");
@@ -229,6 +230,9 @@ fn run(init: std.process.Init.Minimal) !void {{
     // Before the transport is written: the page learns the application's command names
     // from it, and the bridge answers only what `permissions` grants.
     view.bridge.registry = commands.bind(&app_state);
+    // Who the application is, for the page's `info()` (`@lepton-desk/api/app`) and the
+    // window's name in a title bar it draws itself (`title()`, `@lepton-desk/api/window`).
+    view.bridge.application = .{{ .name = who.product, .version = who.version, .identifier = who.identifier, .title = who.title }};
     // The dev server's origin before the transport: the transport defines itself only in
     // the application's own page, which under `lepton dev` is the dev server's.
     const from_dev_server = !std.mem.startsWith(u8, address, "file://");
@@ -559,6 +563,9 @@ fn runNative(allocator: std.mem.Allocator, channel: *core.channel.Channel) !void
         if (comptime !windows) switch (opened) {{
             inline else => |handle| {{
                 core.waylandChrome.paintTitlebar(handle.input, frame);
+                if (comptime core.render.can_draw_text) {{
+                    if (subject) |*type_face| titleOnBar(type_face, handle.input);
+                }}
                 core.waylandChrome.paintMenu(handle.menu, frame);
             }},
         }};
@@ -612,6 +619,28 @@ fn paint(frame: *core.surface.Surface, subject: ?*core.render.Text, frames: u32,
     while (y < height - baseline) : (y += baseline * 3) {{
         frame.hLine(baseline, y, width - baseline * 2, ink.groove);
     }}
+}}
+
+/// The window's name on the bar `paintTitlebar` drew, which leaves the text to a caller
+/// that has a font (the GPU path's is `chromeScene.titlebar`). Cut with "…" before the
+/// controls.
+fn titleOnBar(type_face: *core.render.Text, state: core.waylandInput.Input) void {{
+    const bar: i32 = @intCast(state.titlebar_height);
+    if (bar == 0) return;
+    const room: i32 = @as(i32, @intFromFloat(core.waylandChrome.controlBounds(state).minimize.x)) - 24;
+    var cut: [core.render.Text.max_bytes]u8 = undefined;
+    var shown: []const u8 = who.title[0..@min(who.title.len, cut.len - 3)];
+    var extent = type_face.measure(shown) orelse return;
+    var text = shown;
+    while (extent.width > room and shown.len > 0) {{
+        shown.len -= 1;
+        while (shown.len > 0 and shown[shown.len] & 0xc0 == 0x80) shown.len -= 1;
+        @memcpy(cut[0..shown.len], shown);
+        @memcpy(cut[shown.len..][0..3], "…");
+        text = cut[0 .. shown.len + 3];
+        extent = type_face.measure(text) orelse return;
+    }}
+    _ = type_face.draw(12, @divTrunc(bar + extent.ascent - extent.descent, 2), text, core.waylandChrome.palette.glyph);
 }}
 
 /// The screen's type: the name, the frame counter and the resident set.
@@ -685,7 +714,7 @@ const GpuScreen = if (core.gles3.available) struct {{
             try self.list.rect(allocator, .{{ .x = b, .y = y, .width = w - b * 2, .height = 1 }}, .{{ .fill = scene.rgba(0x1f252bff) }});
         }}
 
-        try core.chromeScene.titlebar(handle.input, who.product, &self.body, allocator, &self.glyphs, &self.list);
+        try core.chromeScene.titlebar(handle.input, who.title, &self.body, allocator, &self.glyphs, &self.list);
         try core.chromeScene.menu(handle.menu, &self.body, allocator, &self.glyphs, &self.list);
         try handle.presentScene(&self.list, &self.glyphs, scene.rgba(0x14181cff), size, null);
     }}

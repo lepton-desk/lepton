@@ -534,7 +534,7 @@ pub const View = struct {
     /// `globalThis.__lepton` before every document's own scripts, sized for the ring.
     pub fn injectTransport(self: *View, region_len: usize) bool {
         var source: [16384]u8 = undefined;
-        const text = transport.script(&source, region_len, &self.bridge.registry, self.bridge.pageOrigin()) catch return false;
+        const text = transport.script(&source, region_len, &self.bridge.registry, self.bridge.pageOrigin(), self.bridge.application) catch return false;
         return c.lepton_servo_add_user_script(self.servo, text.ptr, text.len) == 0;
     }
 
