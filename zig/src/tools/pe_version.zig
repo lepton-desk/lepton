@@ -32,7 +32,10 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("pe-version: {s} is not a PE32+ program ({t})\n", .{ from, err });
         return err;
     };
-    try cwd.writeFile(init.io, .{ .sub_path = to, .data = bytes });
+    // Executable, as an installed artifact is: a package made on Linux takes the mode
+    // from the file, and a 0644 program was the one difference left between it and the
+    // package made on Windows (measured).
+    try cwd.writeFile(init.io, .{ .sub_path = to, .data = bytes, .flags = .{ .permissions = .executable_file } });
 }
 
 fn usage() error{Usage} {

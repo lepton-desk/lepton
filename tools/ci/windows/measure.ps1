@@ -165,7 +165,12 @@ trap { if ($app -and -not $app.HasExited) { $app.Kill() }; break }
 if (-not (Until { Window } 60)) {
   Say "FAIL no window after 60 s"
   # What happened instead: the process, and what Windows logged about it.
-  if ($app.HasExited) { Say ("  process exited: 0x{0:X8}" -f $app.ExitCode) } else { Say "  process still running, no window" }
+  if ($app.HasExited) { Say ("  process exited: 0x{0:X8}" -f $app.ExitCode) } else {
+    $app.Refresh()
+    Say "  process still running, no window; main window handle $($app.MainWindowHandle), title '$($app.MainWindowTitle)'"
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($app.Id)" | ForEach-Object { $_.Name })
+    Say "  child processes: $($children.Count) $($children -join ', ')"
+  }
   Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $started; Level = 1, 2, 3 } -ErrorAction SilentlyContinue |
     Select-Object -First 8 | ForEach-Object { Say "  event $($_.Id) $($_.ProviderName): $(($_.Message -split "`n")[0..3] -join ' | ')" }
   exit 1
