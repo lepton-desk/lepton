@@ -17,6 +17,7 @@
 //! response names the page's origin. One origin, never `*`.
 
 const std = @import("std");
+const wasm_threads = @import("wasm_threads.zig");
 
 const e_memory_stream = @extern(
     *const fn (?*const anyopaque, usize, ?*const anyopaque) callconv(.c) ?*anyopaque,
@@ -82,7 +83,7 @@ pub fn bytes(
     };
     defer e_object_unref(stream);
 
-    if (allow_origin.len == 0) {
+    if (allow_origin.len == 0 and !wasm_threads.enabled) {
         e_request_finish(request, stream, @intCast(len), content_type);
         return true;
     }
@@ -94,9 +95,12 @@ pub fn bytes(
     defer e_object_unref(response);
     e_response_content_type(response, content_type);
     if (e_headers_new(soup_headers_response)) |headers| {
-        e_headers_append(headers, "Access-Control-Allow-Origin", allow_origin.ptr);
-        e_headers_append(headers, "Vary", "Origin");
-        e_headers_append(headers, "Cache-Control", "no-store");
+        if (allow_origin.len != 0) {
+            e_headers_append(headers, "Access-Control-Allow-Origin", allow_origin.ptr);
+            e_headers_append(headers, "Vary", "Origin");
+            e_headers_append(headers, "Cache-Control", "no-store");
+        }
+        if (wasm_threads.enabled) for (wasm_threads.headers) |header| e_headers_append(headers, header[0], header[1]);
         e_response_headers(response, headers); // transfer full: the response owns them now
     }
     e_request_finish_response(request, response);

@@ -19,6 +19,19 @@ const SOURCE: &str = "lepton.config.json";
 pub const PORT: &str = "{port}";
 /// Replaced by the address the core loads the page from.
 pub const HOST: &str = "{host}";
+/// With `wasm.threads` on, replaced by the flags that make the server send COOP and COEP,
+/// in the Angular CLI's spelling (`--headers Name=value`, measured on `ng serve` 22.2: a
+/// JSON `angular.json` cannot read `lepton.config.json`, as the other templates' files do);
+/// removed with it off.
+pub const ISOLATION: &str = "{isolation}";
+
+/// What [`ISOLATION`] becomes.
+const ISOLATION_FLAGS: [&str; 4] = [
+    "--headers",
+    "Cross-Origin-Opener-Policy=same-origin",
+    "--headers",
+    "Cross-Origin-Embedder-Policy=require-corp",
+];
 
 /// How a project's frontend is built and served.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +40,8 @@ pub struct Frontend {
     pub dist: String,
     /// `frontend.devArgs`: the flags after `<manager> run dev`, with [`PORT`] and [`HOST`].
     pub dev_args: Vec<String>,
+    /// `wasm.threads`: what [`ISOLATION`] becomes.
+    pub isolated: bool,
 }
 
 impl Default for Frontend {
@@ -48,6 +63,7 @@ impl Default for Frontend {
             ]
             .map(String::from)
             .to_vec(),
+            isolated: false,
         }
     }
 }
@@ -58,7 +74,11 @@ impl Frontend {
         let port = port.to_string();
         self.dev_args
             .iter()
-            .map(|arg| arg.replace(PORT, &port).replace(HOST, host))
+            .flat_map(|arg| match arg.as_str() {
+                ISOLATION if self.isolated => ISOLATION_FLAGS.map(String::from).to_vec(),
+                ISOLATION => Vec::new(),
+                _ => vec![arg.replace(PORT, &port).replace(HOST, host)],
+            })
             .collect()
     }
 }
@@ -71,8 +91,17 @@ pub fn parse_frontend(text: &str) -> Result<Frontend, ManifestError> {
     let root: Value = serde_json::from_str(text).map_err(|error| ManifestError {
         reason: format!("{SOURCE} is not valid JSON: {error}"),
     })?;
+    let isolated = matches!(
+        root.get("wasm").and_then(|wasm| wasm.get("threads")),
+        Some(Value::Bool(true))
+    );
     let section = match root.get("frontend") {
-        None => return Ok(Frontend::default()),
+        None => {
+            return Ok(Frontend {
+                isolated,
+                ..Frontend::default()
+            });
+        }
         Some(section @ Value::Object(_)) => section,
         Some(_) => return Err(invalid("\"frontend\" must be an object")),
     };
@@ -85,7 +114,11 @@ pub fn parse_frontend(text: &str) -> Result<Frontend, ManifestError> {
         None => Frontend::default().dev_args,
         Some(list) => dev_args(list)?,
     };
-    Ok(Frontend { dist, dev_args })
+    Ok(Frontend {
+        dist,
+        dev_args,
+        isolated,
+    })
 }
 
 /// A directory inside the project: not empty, not absolute, never above the root.
@@ -165,6 +198,30 @@ mod tests {
                 String::from("--hostname"),
                 String::from("127.0.0.1")
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn isolation_becomes_angulars_header_flags_only_with_threads_on() -> Result<(), Failure> {
+        let args = r#""devArgs":["--port","{port}","--host","{host}","{isolation}"]"#;
+        let off = assert_ok!(
+            parse_frontend(&format!(r#"{{"frontend":{{{args}}}}}"#)),
+            "threads off"
+        );
+        assert_eq!(
+            off.dev_args_for(4200, "127.0.0.1").join(" "),
+            "--port 4200 --host 127.0.0.1"
+        );
+        let on = assert_ok!(
+            parse_frontend(&format!(
+                r#"{{"wasm":{{"threads":true}},"frontend":{{{args}}}}}"#
+            )),
+            "threads on"
+        );
+        assert_eq!(
+            on.dev_args_for(4200, "127.0.0.1").join(" "),
+            "--port 4200 --host 127.0.0.1 --headers Cross-Origin-Opener-Policy=same-origin --headers Cross-Origin-Embedder-Policy=require-corp"
         );
         Ok(())
     }

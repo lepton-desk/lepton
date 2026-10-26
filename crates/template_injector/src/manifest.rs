@@ -161,7 +161,11 @@ impl Target {
                 &["--port", "{port}", "--host", "{host}", "--ignore-lock"],
             )),
             Self::Next => Some(("out", &["--port", "{port}", "--hostname", "{host}"])),
-            Self::Angular => Some(("dist", &["--port", "{port}", "--host", "{host}"])),
+            // `{isolation}`: COOP/COEP for `wasm.threads` (`frontend::ISOLATION`).
+            Self::Angular => Some((
+                "dist",
+                &["--port", "{port}", "--host", "{host}", "{isolation}"],
+            )),
             _ => None,
         }
     }

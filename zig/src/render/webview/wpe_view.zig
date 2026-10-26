@@ -275,6 +275,8 @@ pub const View = struct {
     /// means the next WebKit update breaks this build with no change on this side; the
     /// legacy path remains reachable with `-Dwpe-abi=legacy` for machines still on 2.52.
     pub fn open() Error!View {
+        // Before the engine starts its web process, which reads it from the environment.
+        @import("wasm_threads.zig").prepareJavaScriptCore();
         if (comptime @import("build_options").wpe_platform_abi) return platformOpen();
         return legacyOpen();
     }

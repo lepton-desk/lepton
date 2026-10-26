@@ -8,6 +8,9 @@
 //!   `LEPTON_FRAME_RATE` overrides it when the program runs.
 //! - `window.contextMenu: false` → `-Dcontext-menu=false`: no default right-click menu
 //!   (Cut, Copy, Paste, Select All; Inspect in a developer's build).
+//! - `wasm.threads: true` → `-Dwasm-threads=true`: the page is cross-origin isolated
+//!   (`Cross-Origin-Opener-Policy`/`-Embedder-Policy` on every core answer) and, on WPE,
+//!   JavaScriptCore's `SharedArrayBuffer` is on, so WebAssembly threads work.
 //! - `bundle.icon` → `-Dicon=<path>`, for a Windows build only: the Windows program's
 //!   icon — its title bar, taskbar button and Explorer icon. Without it, Lepton's own
 //!   (written into the build cache).
@@ -35,6 +38,8 @@ pub struct Shape {
     pub unlimited: bool,
     /// `window.contextMenu` (`true` when absent).
     pub context_menu: bool,
+    /// `wasm.threads` (`false` when absent).
+    pub wasm_threads: bool,
     /// The project's `.ico`, absolute.
     pub icon: Option<std::path::PathBuf>,
 }
@@ -81,12 +86,22 @@ pub fn read(root: &Path, text: &str) -> Result<Shape, CliError> {
             ));
         }
     };
+    let wasm_threads = match config.get("wasm").and_then(|wasm| wasm.get("threads")) {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => {
+            return Err(CliError::Invalid(
+                "\"wasm.threads\" must be true or false".to_owned(),
+            ));
+        }
+    };
     let bundle = lepton_template_injector::parse_bundle(text)
         .map_err(|error| CliError::Invalid(error.reason))?;
     Ok(Shape {
         decorated,
         unlimited,
         context_menu,
+        wasm_threads,
         icon: bundle.icon.map(|icon| root.join(icon)),
     })
 }
@@ -125,6 +140,15 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
         } else {
             eprintln!(
                 "lepton: src-lepton/build.zig predates window.contextMenu; the default right-click menu stays (run `lepton update`)"
+            );
+        }
+    }
+    if shape.wasm_threads {
+        if build.contains("\"wasm-threads\"") {
+            args.push("-Dwasm-threads=true".to_owned());
+        } else {
+            eprintln!(
+                "lepton: src-lepton/build.zig predates wasm.threads; WebAssembly threads stay off (run `lepton update`)"
             );
         }
     }
@@ -234,6 +258,7 @@ mod tests {
                 decorated: true,
                 unlimited: false,
                 context_menu: true,
+                wasm_threads: false,
                 icon: None
             }
         );
@@ -264,6 +289,18 @@ mod tests {
         assert_err!(
             read(root, r#"{"window":{"contextMenu":"no"}}"#),
             "a string is not a boolean"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn wasm_threads_are_off_unless_turned_on() -> Result<(), Failure> {
+        let root = Path::new("project");
+        let on = assert_ok!(read(root, r#"{"wasm":{"threads":true}}"#), "turned on");
+        assert_eq!(on.wasm_threads, true);
+        assert_err!(
+            read(root, r#"{"wasm":{"threads":1}}"#),
+            "a number is not a boolean"
         );
         Ok(())
     }

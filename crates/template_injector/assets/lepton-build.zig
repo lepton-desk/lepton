@@ -83,6 +83,8 @@ pub fn build(b: *std.Build) !void {
     const frame_rate = b.option(enum { display, unlimited }, "frame-rate", "Native frames: display (default) or unlimited") orelse .display;
     // `window.contextMenu: false`: no default right-click menu (Cut, Copy, Paste, Select All).
     const context_menu = b.option(bool, "context-menu", "Show the default right-click menu (default: true)") orelse true;
+    // `wasm.threads: true`: a cross-origin isolated page with SharedArrayBuffer (WebAssembly threads).
+    const wasm_threads = b.option(bool, "wasm-threads", "WebAssembly threads in the page (default: false)") orelse false;
     // The Windows program's icon (`.ico`): `bundle.icon`, or Lepton's own, named by the CLI.
     const icon = b.option([]const u8, "icon", "The program's icon, an .ico file (Windows)");
 
@@ -100,6 +102,7 @@ pub fn build(b: *std.Build) !void {
         .servo_lib = servo_lib,
         .servo_bundle = if (servo_bundle) name else null,
         .context_menu = context_menu,
+        .wasm_threads = wasm_threads,
     });
 
     // The program's own build options. `lepton dev` passes the server address through

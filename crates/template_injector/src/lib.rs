@@ -20,6 +20,7 @@
 pub mod assets;
 pub mod base;
 pub mod bundle;
+pub mod dev_headers;
 pub mod frame_pages;
 pub mod frontend;
 pub mod manifest;

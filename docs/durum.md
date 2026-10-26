@@ -349,6 +349,14 @@ Yeni:
 
 - Sınırı aşan dört dosya bölündü: `build.rs` 862 → 745 (`Platform` → `build_platform.rs`), `package.rs` 801 → 685 (paket klasörü → `package_tree.rs`), `manifest.rs` 849 → 708 (denetimler → `manifest_check.rs`, `manifest::` yolları yeniden dışa aktarılıyor), `bridge.zig` 808 → 715 (sayfa tekrarının cevapları → `bridge_replay.zig`; `hostOf`'un yanlış yerdeki belge satırı yerine kondu). Ölçüldü: `cargo test --workspace` geçti, clippy Linux ve `x86_64-pc-windows-msvc` için 0 uyarı; Zig 0.16 webview 276/277, native 272/282, 0.17 webview geçti; Windows test kökü (`-Dtarget=x86_64-windows-gnu`) 155/161. `history/` ve `servo/patches/` dışarıdan kopya, sayılmadı.
 
+## beta.3 işi: `wasm.threads` (2026-10-26)
+
+- **Kararlar (kullanıcı):** isteyen açar, varsayılan kapalı. Eski `build.zig` reddedilmez, uyarılır. Dev sunucusu başlıkları şablonun dev ayarından gelir (ayar dosyası `lepton.config.json`'u okur); Angular'da `frontend.devArgs`'taki `{isolation}` yer tutucusu `lepton dev`'de `--headers` olur. Servo'da önce ölçülür.
+- **Yazıldı:** çekirdek COOP/COEP'yi WPE ve WebView2 yanıtlarına koyuyor, WPE'de `JSC_useSharedArrayBuffer=1` (`wasm_threads.zig`); `-Dwasm-threads` (`window_shape.rs`, şablonun ve çekirdeğin `build.zig`'i); 19 şablonun dev ayarı; `lepton update` yayımlanmış dev ayarını değiştiriyor, düzenlenmişse satırları gösteriyor, Angular'a `{isolation}` ekliyor (`dev_headers.rs`); şema `wasm.threads` (site).
+- **Ölçüldü (WPE 2.54.2, bu makine):** açık → `crossOriginIsolated=true`, `SharedArrayBuffer` var, paylaşımlı `WebAssembly.Memory`, Worker `Atomics` ile 41 → 42; kapalı → `SharedArrayBuffer` yok. 19 şablonun hepsinde `biome check` ve `build` geçti, dev sunucusu açıkken iki başlığı gönderiyor, kapalıyken hiçbirini (curl). TS şablonlarında tür hatası bulundu (her alanı isteğe bağlı tür, TS2559), düzeltildi. Zig testleri `-Dwasm-threads` açık/kapalı, Windows test kökü ikisinde de geçti.
+- **CI'da ölçülecek:** WebView2 (`windows.yml` "WebAssembly" adımı: özellik listesi ve threads, pencere başlığından) ve Servo (`servo-bridge.yml` "WebAssembly on Servo"). Dev modunda WPE'de sayfanın Vite'tan gelip çekirdeğe CORS ile ulaşması pencerede ölçülmedi.
+- **Sonra:** site belgeleri (yapılandırma sayfası, güvenlik notu: seçenek JavaScriptCore genelinde), CI sonuçlarıyla.
+
 ## Sağ tık menüsü: ölçülecekler (2026-10-25)
 
 - Servo, CI kitaplığıyla (run 40223407188): menü düz metinde Türkçe etiketlerle açılıyor, Kes/Kopyala/Yapıştır pasif, Tümünü seç etkin; **Tümünü seç seçiyor (kullanıcı ekranda denedi)**. Benim aynı anda yaptığım deneme kullanıcının denemesiyle çakıştı, geçersiz. Metin kutusu içi ve Kopyala henüz denenmedi.

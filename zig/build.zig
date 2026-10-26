@@ -65,6 +65,9 @@ pub const CoreOptions = struct {
     servo_bundle: ?[]const u8 = null,
     /// `window.contextMenu`: the default right-click menu (`render/webview/context_menu.zig`).
     context_menu: bool = true,
+    /// `wasm.threads`: COOP/COEP on the core's answers and, on WPE, JavaScriptCore's
+    /// `SharedArrayBuffer` (`render/webview/wasm_threads.zig`).
+    wasm_threads: bool = false,
 };
 
 /// Configures the core module and returns it.
@@ -351,6 +354,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     opts.addOption(bool, "have_webview2", have_webview2);
     opts.addOption(bool, "have_servo", have_servo);
     opts.addOption(bool, "context_menu", options.context_menu);
+    opts.addOption(bool, "wasm_threads", options.wasm_threads);
     opts.addOption(bool, "wpe_platform_abi", use_platform_abi);
     opts.addOption([]const u8, "wpe_backend_library", wpe_backend_library orelse "");
 
@@ -434,12 +438,15 @@ pub fn build(b: *std.Build) void {
     const render = b.option([]const u8, "render", "Render path: webview or native (default: webview)") orelse "webview";
 
     const servo_lib = b.option([]const u8, "servo-lib", "Directory holding liblepton_servo.so: Servo renders the pages");
+    // The template's option of the same name; here so the tests run with it on too.
+    const wasm_threads = b.option(bool, "wasm-threads", "WebAssembly threads in the page (default: false)") orelse false;
     const configured = configureCore(b, .{
         .root = ".",
         .target = target,
         .optimize = optimize,
         .servo_lib = servo_lib,
         .render = render,
+        .wasm_threads = wasm_threads,
     });
     const core = configured.module;
     if (servo_lib) |dir| @import("src/build_servo.zig").windowCheck(b, target, core, configured.protocol_step, dir);

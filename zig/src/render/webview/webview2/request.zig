@@ -13,6 +13,7 @@
 
 const std = @import("std");
 const wv = @import("c.zig");
+const wasm_threads = @import("../wasm_threads.zig");
 const c = wv.c;
 
 pub const Request = ?*anyopaque;
@@ -236,14 +237,18 @@ fn finish(pending: *Pending, stream: *c.IStream, status: c_int, reason: [*:0]con
 }
 
 fn headerBlock(out: []u8, content_type: []const u8, allow_origin: []const u8) error{NoSpaceLeft}![]const u8 {
-    if (allow_origin.len == 0) {
-        return std.fmt.bufPrint(out, "Content-Type: {s}\r\nCache-Control: no-store", .{content_type});
-    }
-    return std.fmt.bufPrint(
-        out,
-        "Content-Type: {s}\r\nAccess-Control-Allow-Origin: {s}\r\nVary: Origin\r\nCache-Control: no-store",
-        .{ content_type, allow_origin },
-    );
+    // `wasm.threads`: COOP and COEP first, each line already ended.
+    const isolation = try wasm_threads.headerLines(out);
+    const rest = out[isolation.len..];
+    const tail = if (allow_origin.len == 0)
+        try std.fmt.bufPrint(rest, "Content-Type: {s}\r\nCache-Control: no-store", .{content_type})
+    else
+        try std.fmt.bufPrint(
+            rest,
+            "Content-Type: {s}\r\nAccess-Control-Allow-Origin: {s}\r\nVary: Origin\r\nCache-Control: no-store",
+            .{ content_type, allow_origin },
+        );
+    return out[0 .. isolation.len + tail.len];
 }
 
 // --- one-shot timers, the counterpart of `g_timeout_add` returning 0 ----------------------
@@ -287,8 +292,11 @@ test "the path is read from the URL without its query" {
 
 test "an answer names one origin, never a wildcard" {
     var out: [max_headers]u8 = undefined;
+    var lines: [128]u8 = undefined;
+    const isolation = try wasm_threads.headerLines(&lines);
+    var expected: [max_headers]u8 = undefined;
     try std.testing.expectEqualStrings(
-        "Content-Type: text/html\r\nCache-Control: no-store",
+        try std.fmt.bufPrint(&expected, "{s}Content-Type: text/html\r\nCache-Control: no-store", .{isolation}),
         try headerBlock(&out, "text/html", ""),
     );
     const cross = try headerBlock(&out, "application/octet-stream", "http://127.0.0.1:5173");

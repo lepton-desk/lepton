@@ -200,6 +200,7 @@ fn onEvent(_: ?*anyopaque, event: ?*anyopaque, web_view: ?*anyopaque) callconv(.
 }
 
 test {
+    _ = @import("wasm_threads.zig");
     _ = @import("context_menu.zig");
     _ = @import("context_menu_wpe.zig");
 }

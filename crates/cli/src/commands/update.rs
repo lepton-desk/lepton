@@ -4,7 +4,8 @@
 //! project was created never reached it. This command replaces `src-lepton/vendor/
 //! lepton-core` (the framework's alone) and brings `main.zig`, `build.zig` and
 //! `lepton-commands.zig` up to today's template, keeping the developer's edits by a
-//! three-way merge (`lepton_template_injector::update`).
+//! three-way merge (`lepton_template_injector::update`). The dev server's configuration
+//! is given `wasm.threads` when it is still the template's (`dev_headers`).
 //!
 //! First the npm side (`update_packages.rs`): the newest `@lepton-desk/cli` on the
 //! registry (or `--to`), the project's `@lepton-desk/*` dependencies moved to it and
@@ -18,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+use lepton_template_injector::dev_headers::{self, DevHeaders};
 use lepton_template_injector::update::{
     Decision, Part, Values, decide, react_tsconfig, schema_url,
 };
@@ -339,9 +341,14 @@ impl Flags {
             .ok()
             .and_then(|text| react_tsconfig(&text, uses_react(root)));
         let config_path = root.join("lepton.config.json");
-        let config = std::fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|text| schema_url(&text));
+        let config_text = std::fs::read_to_string(&config_path).ok();
+        let moved = config_text.as_deref().and_then(schema_url);
+        let isolation = moved
+            .as_deref()
+            .or(config_text.as_deref())
+            .and_then(dev_headers::angular_dev_args);
+        let config = isolation.clone().or_else(|| moved.clone());
+        let dev = dev_headers::decide(|file| std::fs::read_to_string(root.join(file)).ok());
 
         for (part, _, decision) in &decisions {
             let label = match part {
@@ -385,11 +392,31 @@ impl Flags {
                 "\"jsx\": \"react-jsx\" added (tsc failed without it)",
             );
         }
-        if config.is_some() {
+        if moved.is_some() {
             report.fact(
                 "lepton.config.json",
                 "$schema moved to lepton-desk.vercel.app (the old address never resolved)",
             );
+        }
+        if isolation.is_some() {
+            report.fact(
+                "lepton.config.json",
+                "\"{isolation}\" added to frontend.devArgs (wasm.threads under ng serve)",
+            );
+        }
+
+        match &dev {
+            DevHeaders::Current => {}
+            DevHeaders::Write { file, .. } => {
+                report.fact(file, "reads wasm.threads (the dev server's COOP/COEP)");
+            }
+            DevHeaders::Show { file, lines } => {
+                report.warn(
+                    file,
+                    "edited, left as it is; for wasm.threads under `lepton dev`, add:",
+                );
+                eprintln!("{lines}");
+            }
         }
 
         let conflicts: Vec<_> = decisions
@@ -432,7 +459,8 @@ impl Flags {
             .any(|(_, _, decision)| *decision != Decision::Current)
             || matches!(vendor, Vendor::Replace { .. })
             || tsconfig.is_some()
-            || config.is_some();
+            || config.is_some()
+            || matches!(dev, DevHeaders::Write { .. });
         if !changes {
             return Ok(());
         }
@@ -453,6 +481,9 @@ impl Flags {
         }
         if let Some(text) = &config {
             write(&config_path, text)?;
+        }
+        if let DevHeaders::Write { file, text } = &dev {
+            write(&root.join(file), text)?;
         }
         if let Vendor::Replace { .. } = vendor {
             if vendor_dir.exists() {

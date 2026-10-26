@@ -237,6 +237,46 @@ jobs:
           } | tee -a "$RUNNER_TEMP/report.txt"
           [ "$build" = 0 ] && grep -qE '__lepton/[0-9a-f]{32}/region' "$RUNNER_TEMP/app-run.log"
 
+      # WebAssembly on Servo: the engine's features and what `wasm.threads` gives the page
+      # (tools/ci/wasm-page.ts writes them into the window's name), threads off, then on.
+      # A measurement: only a failed build or no result fails it.
+      - name: WebAssembly on Servo
+        if: ${{ !cancelled() }}
+        run: |
+          lepton="$GITHUB_WORKSPACE/target/release/lepton"
+          cd "$RUNNER_TEMP"
+          "$lepton" new wasm-app --template vanilla-ts --target webview --package-manager npm --non-interactive > /dev/null
+          cd wasm-app
+          sed -i "s|\"@lepton-desk/api\": \"[^\"]*\"|\"@lepton-desk/api\": \"file:$GITHUB_WORKSPACE/packages/api\"|; s|\"@lepton-desk/cli\": \"[^\"]*\"|\"@lepton-desk/cli\": \"file:$GITHUB_WORKSPACE/packages/cli\"|" package.json
+          cp "$GITHUB_WORKSPACE/tools/ci/wasm-page.ts" src/main.ts
+          npm install --no-audit --no-fund > /dev/null
+          npm install --no-audit --no-fund --save-exact wasm-feature-detect@1.9.0 > /dev/null
+          export LEPTON_SERVO_LIB="$GITHUB_WORKSPACE/servo/bridge/target/release"
+          export DISPLAY=:97
+          Xvfb :97 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+          sleep 1
+          for threads in false true; do
+            node -e 'const f="lepton.config.json";const c=JSON.parse(require("fs").readFileSync(f,"utf8"));c.wasm={threads:process.argv[1]==="true"};require("fs").writeFileSync(f,JSON.stringify(c,null,2)+"\n")' "$threads"
+            if ! NO_COLOR=1 "$lepton" build --linux --servo > "$RUNNER_TEMP/wasm-build-$threads.log" 2>&1; then
+              tail -20 "$RUNNER_TEMP/wasm-build-$threads.log"
+              exit 1
+            fi
+            app=$(ls src-lepton/zig-out/bin/ | head -1)
+            RUST_LOG=warn timeout 40 "src-lepton/zig-out/bin/$app" > "$RUNNER_TEMP/wasm-run-$threads.log" 2>&1 &
+            pid=$!
+            name=""
+            for _ in $(seq 1 60); do
+              name=$(xdotool search --name '^WASM' getwindowname 2>/dev/null | head -1)
+              [ -n "$name" ] && break
+              sleep 0.5
+            done
+            echo "## WebAssembly on Servo, threads $threads: ${name:-no result}" | tee -a "$RUNNER_TEMP/report.txt"
+            # GitHub runs this with `bash -e`: a killed program's status would end the step.
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            [ -n "$name" ] || { tail -20 "$RUNNER_TEMP/wasm-run-$threads.log"; exit 1; }
+          done
+
       - name: Report
         if: always()
         uses: actions/upload-artifact@v4
@@ -255,4 +295,6 @@ jobs:
             ${{ runner.temp }}/app-windows.txt
             ${{ runner.temp }}/app-build.log
             ${{ runner.temp }}/app-run.log
+            ${{ runner.temp }}/wasm-run-false.log
+            ${{ runner.temp }}/wasm-run-true.log
           if-no-files-found: warn

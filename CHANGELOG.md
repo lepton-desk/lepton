@@ -91,6 +91,23 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   draws the list in `menu_x11.zig`; `lepton_servo_context_menu_select` answers. WebView2:
   its own menu, kept to the editing items (`webview2/context_menu.zig`); before, release
   builds had none and Debug builds a browser's. Labels are Turkish for a `tr` locale.
+- `wasm.threads` (`lepton.config.json`, default off): WebAssembly threads in the page.
+  The core sends `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp` on its answers (`respond_wpe.zig`,
+  `webview2/request.zig`, `render/webview/wasm_threads.zig`) and, on WPE, sets
+  `JSC_useSharedArrayBuffer=1` before the web process starts: WPE 2.54.2 has no
+  `SharedArrayBuffer` with the headers alone, and the option is JavaScriptCore-wide, not
+  per origin. `-Dwasm-threads=true` (`window_shape.rs`; an older `build.zig` is warned
+  about, not refused). Under `lepton dev` the page comes from the dev server, so every
+  template's dev configuration reads `wasm.threads` itself (Vite and Astro
+  `server.headers`, Next.js `headers()` for `next dev` only, a new `vite.config` for Lit);
+  Angular's `angular.json` cannot, so its `frontend.devArgs` carry `{isolation}`, which
+  `lepton dev` makes `--headers …` (`frontend::ISOLATION`). `lepton update` replaces a dev
+  configuration still as released (`dev_headers.rs`, `assets/history/dev-config/`), shows
+  the lines for an edited one, and adds `{isolation}` to an Angular project's flags.
+  Measured on WPE 2.54.2: on, `crossOriginIsolated` true, a shared `WebAssembly.Memory`, a
+  worker reading 41 and writing 42 through it; off, no `SharedArrayBuffer`. Every template
+  (19): `biome check` and `build` pass, the dev server sends both headers on and none off.
 - Engine-neutral names for what `main.zig` and plugins use (API freeze for 0.2.0's native
   apps): `core.commands` (`checkedWith`, `pluginCommands`, `permissionList`, `HandlerError`,
   `PluginCommand`, `Later`, `takeLater`; `zig/src/commands.zig`) and `core.events`

@@ -17,6 +17,7 @@ test {
     _ = @import("render/webview/webview2/permissions.zig");
     _ = @import("render/webview/menu.zig");
     _ = @import("render/webview/context_menu.zig");
+    _ = @import("render/webview/wasm_threads.zig");
     _ = @import("render/webview/webview2/context_menu.zig");
     _ = @import("ipc/shm.zig");
     _ = @import("ipc/ring.zig");

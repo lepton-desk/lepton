@@ -270,6 +270,50 @@ jobs:
           $exe = (Get-ChildItem src-lepton\zig-out\bin\*.exe | Select-Object -First 1).FullName
           & "$env:GITHUB_WORKSPACE\tools\ci\windows\measure.ps1" -Exe $exe -Out "$env:RUNNER_TEMP\report\frameless" -Frameless
 
+      # WebAssembly in WebView2: the engine's features and what `wasm.threads` gives the page
+      # (tools/ci/wasm-page.ts writes them into the window's title), with threads off, then on.
+      - name: WebAssembly
+        if: ${{ !cancelled() }}
+        run: |
+          $lepton = "$env:GITHUB_WORKSPACE\target\release\lepton.exe"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\report" | Out-Null
+          Set-Location $env:RUNNER_TEMP
+          & $lepton new wasm-app --template vanilla-ts --target webview --package-manager npm --owner ci --non-interactive
+          Set-Location wasm-app
+          $api = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/api"
+          $cli = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/cli"
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          foreach ($group in "dependencies", "devDependencies") {
+            if ($pkg.$group.'@lepton-desk/api') { $pkg.$group.'@lepton-desk/api' = "file:$api" }
+            if ($pkg.$group.'@lepton-desk/cli') { $pkg.$group.'@lepton-desk/cli' = "file:$cli" }
+          }
+          $pkg | ConvertTo-Json -Depth 20 | Set-Content package.json -Encoding utf8NoBOM
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\ci\wasm-page.ts" src/main.ts -Force
+          npm install --no-audit --no-fund
+          npm install --no-audit --no-fund --save-exact wasm-feature-detect@1.9.0
+          $failed = $false
+          foreach ($threads in $false, $true) {
+            $config = Get-Content lepton.config.json -Raw | ConvertFrom-Json
+            $config | Add-Member -NotePropertyName wasm -NotePropertyValue ([pscustomobject]@{ threads = $threads }) -Force
+            $config | ConvertTo-Json -Depth 20 | Set-Content lepton.config.json -Encoding utf8NoBOM
+            & $lepton build
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            $exe = (Get-ChildItem src-lepton\zig-out\bin\*.exe | Select-Object -First 1).FullName
+            $process = Start-Process $exe -PassThru
+            $title = ""
+            for ($i = 0; $i -lt 60 -and -not $title.StartsWith("WASM"); $i++) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+              $title = "$($process.MainWindowTitle)"
+            }
+            "threads $($threads.ToString().ToLower()): $title" | Tee-Object -Append -FilePath "$env:RUNNER_TEMP\report\wasm.txt"
+            [void]$process.CloseMainWindow()
+            if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
+            $isolated = $title -match "isolated=true sab=function worker=ok value=42"
+            if (-not $title.StartsWith("WASM") -or ($threads -ne $isolated)) { $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
       - name: Report
         if: always()
         uses: actions/upload-artifact@v4
