@@ -6,8 +6,8 @@
 # Run by hand (workflow_dispatch) on a tag or commit, it is a trial: the same files are
 # kept as the `release-trial` artifact and no release is made.
 #
-# The Servo library is not built here: it is the `liblepton_servo` artifact of a
-# successful servo-bridge run on the same commit (docs/yayin.md), so run that first.
+# The Servo library is the `liblepton_servo` artifact of a successful servo-bridge run on
+# the same commit; without one, this run calls servo-bridge and builds it.
 name: release
 
 on:
@@ -260,32 +260,54 @@ jobs:
           name: example-windows-${{ matrix.template }}
           path: ${{ runner.temp }}/out
 
-  # Servo's library from the servo-bridge run on this commit; without one, the release
-  # stops here with the reason instead of going out without it.
-  servo:
+  # A successful servo-bridge run on this commit, if there is one.
+  servo-run:
     runs-on: ubuntu-24.04
     needs: cli-linux
+    outputs:
+      run: ${{ steps.find.outputs.run }}
     steps:
-      - name: Library
+      - name: Find
+        id: find
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.cli-linux.outputs.sha }}
         run: |
           run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow servo-bridge.yml --commit "$SHA" \
             --status success --json databaseId -q '.[0].databaseId')
-          # A trial takes trunk's latest instead, and says so; a release never does.
-          if [ -z "$run" ] && [ "$GITHUB_EVENT_NAME" != push ]; then
-            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow servo-bridge.yml --branch trunk \
-              --status success --json databaseId -q '.[0].databaseId')
-            echo "::warning::trial: no servo-bridge run on $SHA, using trunk's run $run"
-          fi
-          if [ -z "$run" ]; then
-            echo "no successful servo-bridge run on $SHA: run it first (docs/yayin.md)" >&2
-            exit 1
-          fi
-          echo "servo-bridge run $run"
-          gh run download "$run" --repo "$GITHUB_REPOSITORY" -n liblepton_servo -D "$RUNNER_TEMP/out"
-          ls -l "$RUNNER_TEMP/out"
+          echo "servo-bridge run on $SHA: ${run:-none, building it here}"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  # Without one, the library is built in this run.
+  servo-build:
+    needs: [cli-linux, servo-run]
+    if: needs.servo-run.outputs.run == ''
+    uses: ./.github/workflows/servo-bridge.yml
+    with:
+      ref: ${{ needs.cli-linux.outputs.sha }}
+
+  # `servo-build` is skipped when a run was found; `!failure()` lets this job and the
+  # release run then (the default `success()` would skip them too).
+  servo:
+    runs-on: ubuntu-24.04
+    needs: [servo-run, servo-build]
+    if: ${{ !cancelled() && !failure() }}
+    steps:
+      - name: From the earlier run
+        if: needs.servo-run.outputs.run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ needs.servo-run.outputs.run }}
+        run: gh run download "$RUN" --repo "$GITHUB_REPOSITORY" -n liblepton_servo -D "$RUNNER_TEMP/out"
+
+      - name: From this run
+        if: needs.servo-run.outputs.run == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: liblepton_servo
+          path: ${{ runner.temp }}/out
+
+      - run: ls -l "$RUNNER_TEMP/out"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -295,6 +317,7 @@ jobs:
   release:
     runs-on: ubuntu-24.04
     needs: [cli-linux, cli-windows, cli-pacman, examples-linux, examples-debian, examples-windows, servo]
+    if: ${{ !cancelled() && !failure() }}
     steps:
       - uses: actions/checkout@v4
         with:

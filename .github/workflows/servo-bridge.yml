@@ -1,11 +1,18 @@
 # Builds Lepton's Servo bridge (servo/bridge, the C ABI in zig/servo/lepton_servo.h) and
 # runs the check that has Servo draw a lepton:// page into the core's own X11 window,
 # on Xvfb, with a real click from xdotool going through the window's event handling.
-# Run by hand; the project's machine never builds Servo.
+# Run by hand, or by the release (release.yml) when no run on its commit succeeded; the
+# project's machine never builds Servo.
 name: servo-bridge
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to build"
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -19,6 +26,8 @@ jobs:
       CARGO_TERM_COLOR: never
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Free disk
         run: |

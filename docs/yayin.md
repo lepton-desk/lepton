@@ -159,8 +159,8 @@ Beklenen: `lepton <sürüm>` (yukarıdaki "Şu anki sürüm").
 
 ## 5b. GitHub Release
 
-Notu önceden yazılır: `docs/release/<sürüm>.md` (ilk `---`'ün altı Release metnidir). Aynı commit'te
-başarılı bir `servo-bridge` çalıştırması olmalı (Servo kitaplığı oradan alınır). Sonra etiket:
+Notu önceden yazılır: `docs/release/<sürüm>.md` (ilk `---`'ün altı Release metnidir). Servo kitaplığı aynı
+commit'teki başarılı `servo-bridge` çalıştırmasından alınır; yoksa `release` `servo-bridge`'i çağırıp kendisi derler. Sonra etiket:
 
 ```bash
 git tag v<sürüm>

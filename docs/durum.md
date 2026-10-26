@@ -343,6 +343,7 @@ Yeni:
 ## beta.3 işi: Servo kitaplığı Release'te kendiliğinden (2026-10-25)
 
 - `servo-bridge.yml` `workflow_call` olsun; `release.yml` aynı commit'te başarılı çalıştırma bulamazsa onu çağırıp kitaplığı kendisi derlesin (elle tetikleme ve deneme uyarısı kalksın).
+- **Yazıldı (2026-10-26):** `servo-bridge.yml` `workflow_call` (girdi `ref`, checkout o commit). `release.yml`: `servo-run` aynı commit'te başarılı çalıştırmayı arar; yoksa `servo-build` `servo-bridge`'i çağırır; `servo` kitaplığı ikisinden birinden alır; `servo` ve `release` `!cancelled() && !failure()` ile çalışır (atlanan `servo-build` varsayılan `success()`'i düşürür). Deneme sürümündeki trunk'a düşme ve uyarısı kalktı. CI'da ölçülecek.
 
 ## Sağ tık menüsü: ölçülecekler (2026-10-25)
 
