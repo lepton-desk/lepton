@@ -314,6 +314,37 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      # What a Lepton app costs in memory, as Task Manager's Memory column counts it: the
+      # same template as a web view app and as a native one, each packaged and run by
+      # `lepton package --verify` (the tree's private working set after 3 s).
+      - name: Memory
+        if: ${{ !cancelled() }}
+        run: |
+          $lepton = "$env:GITHUB_WORKSPACE\target\release\lepton.exe"
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\report" | Out-Null
+          $api = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/api"
+          $cli = ($env:GITHUB_WORKSPACE -replace '\\', '/') + "/packages/cli"
+          $failed = $false
+          foreach ($target in "webview", "native") {
+            Set-Location $env:RUNNER_TEMP
+            & $lepton new "memory-$target" --template vanilla-ts --target $target --package-manager npm --owner ci --non-interactive
+            Set-Location "memory-$target"
+            $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+            foreach ($group in "dependencies", "devDependencies") {
+              if ($pkg.$group.'@lepton-desk/api') { $pkg.$group.'@lepton-desk/api' = "file:$api" }
+              if ($pkg.$group.'@lepton-desk/cli') { $pkg.$group.'@lepton-desk/cli' = "file:$cli" }
+            }
+            $pkg | ConvertTo-Json -Depth 20 | Set-Content package.json -Encoding utf8NoBOM
+            npm install --no-audit --no-fund
+            $output = & $lepton package --verify
+            $code = $LASTEXITCODE
+            $output
+            $line = $output | Select-String "ok: up"
+            if ($code -or -not $line) { $failed = $true }
+            "${target}: $line" | Tee-Object -Append -FilePath "$env:RUNNER_TEMP\report\memory.txt"
+          }
+          if ($failed) { exit 1 }
+
       - name: Report
         if: always()
         uses: actions/upload-artifact@v4
