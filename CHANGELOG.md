@@ -11,9 +11,9 @@ of a version freezes its API, and fixes after it go into `X.Y.Z` and its patches
 
 ## 0.1.9-beta.3 *not released*
 
-The last beta of 0.1.9 and its API freeze. `0.1.9-beta.2` was published only in part, from
-Windows (`@lepton-desk/cli-win32-x64`, `api`, `plugin-clipboard`, `plugin-dialog`); every
-package moves to beta.3 together, and everything since beta.1 is listed here.
+The last beta of 0.1.9 and its API freeze; every package moves to beta.3 together.
+`@lepton-desk/api` 0.1.9-beta.2 went out from Windows before `info()` and `title()`, so
+both are listed here, though the Linux beta.2 core already answers them.
 
 ### Added
 
@@ -28,38 +28,6 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   what its window shows — the page's `document.title`, else `window.title`). The SDK's
   `title()` and `onTitleChanged()` read them, so a title bar the page draws needs no DOM
   watching, and 0.2.0's native apps can give the same (`docs/plans/uyumluluk-0.2.0.md`).
-- Single instance and deep links: a second start hands its arguments to the running copy
-  (unix socket on Linux, named pipe on Windows), the page hears `app.opened`;
-  `deepLinks` registers schemes (desktop entry; `HKCU\Software\Classes` in the MSI).
-  `@lepton-desk/api/app` `launchArgs()`, `onOpened()`; `app.args` in new projects'
-  permissions, its bytes masked in recordings.
-- `fs.watch` in `plugin-fs`: inotify on Linux; `ReadDirectoryChangesW` on Windows
-  (`fs_windows_watch.zig`, overlapped, drained by the plugin's `tick`, repeated
-  `MODIFIED` from one write merged).
-- The native render path on Windows (`window/windows/`): Vulkan, Direct3D 11 and OpenGL 3.3
-  tried in that order, the CPU and GDI last; `LEPTON_GPU=vulkan|d3d11|gl|cpu`. Text by
-  DirectWrite.
-- `window.frameRate: "unlimited"` (`-Dframe-rate`, `LEPTON_FRAME_RATE`).
-- `window.decorations: false`, `dragRegion`, `windowControls`, `popupMenu` (`window.menu`),
-  `window.start_drag`: WebView2 and Servo's X11 window (`servo/menu_x11.zig`,
-  `_MOTIF_WM_HINTS`, `_NET_WM_MOVERESIZE`). WPE keeps its title bar until Lepton's own WPE
-  platform (0.2.0).
-- Servo: cursors (`servo/cursor_x11.zig`; the bridge's `cursor` callback,
-  `LeptonServoCallbacks` now 64 bytes) and the resize shape over a frameless window's
-  edge band.
-- Servo is the third engine (`--servo`, `@lepton-desk/servo-linux-x64`, built in the
-  `servo-bridge` workflow), with patches carried in `servo/patches/`: `servo-url`
-  (an origin for `lepton://`), `servo` (the cookie jar written before the skipped
-  shutdown), `servo-script` (top-level `await`, below).
-- `document.cookie` on `lepton://` pages (`render/webview/cookie_shim.js`, kept in
-  `localStorage`); real cookies on the dev server's page persist (`cookies.sqlite`).
-- `src-lepton/icon.svg` in new projects; `bundle.icon` takes `.svg` for Linux packages.
-- `--owner` and an identifier of `com.<owner>.<app>`.
-- Zig 0.17 builds Lepton as well as 0.16 (`compat.zig`, `zig_017` in
-  `build_support.zig`, C headers translated by the build under `src/c/`).
-- CI: Rust formatting (`cargo fmt --check`) in `zig.yml`, run on any change under
-  `crates/`; a `linux-package` job in `windows.yml` that makes the Windows packages on
-  Ubuntu, after which the Windows job installs that MSI, measures it and removes it.
 - `lepton package --linux --servo`: the core is built with `-Dservo-bundle`, which installs
   `liblepton_servo.so` into `zig-out/lib/<name>/` and gives the binary only
   `$ORIGIN/../lib/<name>` as its run path (`build_servo.zig`; the template sets
@@ -130,28 +98,6 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   types and `decodeEvents` are `src/wire.ts`; `decodeState`, `encodeMenu`, `decodeDownload`
   and `decodePermissionRequest` are `src/payloads.ts`; neither is in `exports`
   (`ERR_PACKAGE_PATH_NOT_EXPORTED`, measured). No plugin or template used them.
-- `sdkScope` is read: `lepton update` moves the dependencies under it and asks the
-  registry for `<sdkScope>/cli`, and the linked-package watcher looks under it. It was
-  written into every project and read by nothing. The CLI and the schema check it is an npm
-  scope.
-
-- The template's `main.zig` is split: the `--target native` program is
-  `src-lepton/native.zig`, a framework file that reads `who` from `main.zig` through
-  `@import("root")`. `lepton update` manages it (`Part::Native`; added when missing), and
-  `tools/release-version.mjs` keeps it in the template history. `main.zig` was 964 lines.
-- `identifier`, `productName`, `channel.name`, `window.title` reach every build as
-  `-Didentifier`, `-Dproduct`, `-Dchannel`, `-Dtitle`; `main.zig` reads `who.*`. An
-  identifier changed after `lepton new` used to reach the installer but not the program.
-- The core answers the application's own page only: a random key per run under
-  `/__lepton/<key>/`, written only into the transport of that page.
-- Other sites open in the system browser (http, https, mailto only).
-- File grants live in the app's state folder; a save dialog grants the file, not its folder.
-- The app's own folders are narrowed to 0700 when they exist wider
-  (`paths.makeOwnPrivate`: last component only, not through a link, only the user's own).
-- Channel names are per user (`.u<uid>`).
-- `lepton build --macos` is refused with the reason.
-- The CLI picks Zig itself (`LEPTON_ZIG`, else `zig`, `zig-0.17`, `zig-0.16`), and every
-  Linux binary links through LLVM and LLD (`throughLld`).
 
 ### Fixed
 
@@ -161,6 +107,100 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   (d1a67df), and `assets/history` had only the first. The second is
   `history/0.1.9-beta.2-linux/` (measured: the published binaries embed exactly these
   files); such a project's `main.zig` and `build.zig` are now replaced as untouched.
+
+## 0.1.9-beta.2 *2026-10-25*
+
+Published in two parts under `beta`. On 2026-10-24 from Windows at `9fbb8bc`:
+`@lepton-desk/cli-win32-x64`, `api`, `plugin-clipboard`, `plugin-dialog`. On 2026-10-25
+from Linux at `d1a67df`: `@lepton-desk/cli`, `cli-linux-x64`, `plugin-fs`, `plugin-os`,
+`create-lepton-app`, `servo-linux-x64`.
+
+### Added
+
+- Single instance and deep links: a second start hands its arguments to the running copy
+  (unix socket on Linux, named pipe on Windows), the page hears `app.opened`;
+  `deepLinks` registers schemes (desktop entry; `HKCU\Software\Classes` in the MSI).
+  `@lepton-desk/api/app` `launchArgs()`, `onOpened()`; `app.args` in new projects'
+  permissions, its bytes masked in recordings.
+- `fs.watch` in `plugin-fs`: inotify on Linux; `ReadDirectoryChangesW` on Windows
+  (`fs_windows_watch.zig`, overlapped, drained by the plugin's `tick`, repeated
+  `MODIFIED` from one write merged).
+- The native render path on Windows (`window/windows/`): Vulkan, Direct3D 11 and OpenGL 3.3
+  tried in that order, the CPU and GDI last; `LEPTON_GPU=vulkan|d3d11|gl|cpu`. Text by
+  DirectWrite.
+- `window.frameRate: "unlimited"` (`-Dframe-rate`, `LEPTON_FRAME_RATE`).
+- `window.decorations: false`, `dragRegion`, `windowControls`, `popupMenu` (`window.menu`),
+  `window.start_drag`: WebView2 and Servo's X11 window (`servo/menu_x11.zig`,
+  `_MOTIF_WM_HINTS`, `_NET_WM_MOVERESIZE`). WPE keeps its title bar until Lepton's own WPE
+  platform (0.2.0).
+- Servo is the third engine (`--servo`, `@lepton-desk/servo-linux-x64`, built in the
+  `servo-bridge` workflow), with patches carried in `servo/patches/`: `servo-url`
+  (an origin for `lepton://`), `servo` (the cookie jar written before the skipped
+  shutdown), `servo-script` (top-level `await`, below).
+- `document.cookie` on `lepton://` pages (`render/webview/cookie_shim.js`, kept in
+  `localStorage`); real cookies on the dev server's page persist (`cookies.sqlite`).
+- `src-lepton/icon.svg` in new projects; `bundle.icon` takes `.svg` for Linux packages.
+- `--owner` and an identifier of `com.<owner>.<app>`.
+- Zig 0.17 builds Lepton as well as 0.16 (`compat.zig`, `zig_017` in
+  `build_support.zig`, C headers translated by the build under `src/c/`).
+- CI: Rust formatting (`cargo fmt --check`) in `zig.yml`, run on any change under
+  `crates/`; a `linux-package` job in `windows.yml` that makes the Windows packages on
+  Ubuntu, after which the Windows job installs that MSI, measures it and removes it.
+
+### Changed
+
+- `identifier`, `productName`, `channel.name`, `window.title` reach every build as
+  `-Didentifier`, `-Dproduct`, `-Dchannel`, `-Dtitle`; `main.zig` reads `who.*`. An
+  identifier changed after `lepton new` used to reach the installer but not the program.
+- The core answers the application's own page only: a random key per run under
+  `/__lepton/<key>/`, written only into the transport of that page.
+- Other sites open in the system browser (http, https, mailto only).
+- File grants live in the app's state folder; a save dialog grants the file, not its folder.
+- Channel names are per user (`.u<uid>`).
+- `lepton build --macos` is refused with the reason.
+- The CLI picks Zig itself (`LEPTON_ZIG`, else `zig`, `zig-0.17`, `zig-0.16`), and every
+  Linux binary links through LLVM and LLD (`throughLld`).
+
+### Fixed
+
+- Ctrl+C on `lepton dev` left the channel in `/dev/shm`; on `lepton run` it sometimes lost
+  the app's line.
+- Servo: `localStorage` threw `SecurityError`; `window.resized` never arrived; the close
+  button did nothing; the right button never reached the page.
+- MSI: another build of the same version was refused with 1638 (ProductCode now derived
+  from the contents too, the upgrade row covers its own version).
+- Windows notifications carry the app's name and icon (`AppUserModelId` registry key,
+  `IconUri`); `webPermissions` reaches `Notification.permission` before the page asks.
+- Names in `lepton.config.json` are checked for control characters and path separators,
+  and escaped wherever they are written.
+- Plugin tests link on glibc 2.44 with Zig 0.16 (`-fllvm -flld` in CI).
+
+### In the Linux packages only
+
+Between the two commits, so in the 2026-10-25 packages; the Windows CLI gets them with
+beta.3.
+
+#### Added
+
+- Servo: cursors (`servo/cursor_x11.zig`; the bridge's `cursor` callback,
+  `LeptonServoCallbacks` now 64 bytes) and the resize shape over a frameless window's
+  edge band.
+
+#### Changed
+
+- `sdkScope` is read: `lepton update` moves the dependencies under it and asks the
+  registry for `<sdkScope>/cli`, and the linked-package watcher looks under it. It was
+  written into every project and read by nothing. The CLI and the schema check it is an npm
+  scope.
+- The template's `main.zig` is split: the `--target native` program is
+  `src-lepton/native.zig`, a framework file that reads `who` from `main.zig` through
+  `@import("root")`. `lepton update` manages it (`Part::Native`; added when missing), and
+  `tools/release-version.mjs` keeps it in the template history. `main.zig` was 964 lines.
+- The app's own folders are narrowed to 0700 when they exist wider
+  (`paths.makeOwnPrivate`: last component only, not through a link, only the user's own).
+
+#### Fixed
+
 - WPE windows showed `org.webkit.app-<sha256>` in the dock, with no icon: the core now
   calls `g_set_prgname(<identifier>)` before the engine starts
   (`useApplicationDirectories`).
@@ -173,23 +213,11 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
 - The native CPU path's title bar had no title (`chrome.paintTitlebar` leaves the text to
   the caller, which never drew it); the GPU path's showed `productName` instead of the
   window's title.
-- Ctrl+C on `lepton dev` left the channel in `/dev/shm`; on `lepton run` it sometimes lost
-  the app's line.
-- Servo: `localStorage` threw `SecurityError`; `window.resized` never arrived; the close
-  button did nothing; the right button never reached the page.
-- MSI: another build of the same version was refused with 1638 (ProductCode now derived
-  from the contents too, the upgrade row covers its own version).
-- Windows notifications carry the app's name and icon (`AppUserModelId` registry key,
-  `IconUri`); `webPermissions` reaches `Notification.permission` before the page asks.
-- Names in `lepton.config.json` are checked for control characters and path separators,
-  and escaped wherever they are written.
-- Plugin tests link on glibc 2.44 with Zig 0.16 (`-fllvm -flld` in CI).
 - Release builds were made for the building machine's CPU: with no `-Dtarget`, Zig's
   native target uses every extension that CPU has (2253 AVX instructions in a native app
   built on an i3-2120, none with `-Dcpu=baseline`), so a package could stop with "illegal
   instruction" elsewhere. `lepton build` (and `package`, which builds through it) now
   passes `-Dcpu=baseline`.
-
 - A Windows build on Windows was made for that machine's Windows version: Zig's native
   target there names the building machine's version as the oldest, and the standard
   library chooses code by it (`has_unix_sockets` from Windows 10 1803). On the CI
