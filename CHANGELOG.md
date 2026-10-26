@@ -108,6 +108,18 @@ both are listed here, though the Linux beta.2 core already answers them.
   `history/0.1.9-beta.2-linux/` (measured: the published binaries embed exactly these
   files); such a project's `main.zig` and `build.zig` are now replaced as untouched.
 
+### Measured
+
+- Frames inside the app's page (WPE WebKit 2.54, a probe page with three child frames):
+  `__lepton` is injected into the top frame only (`inject_top_frame`), but a same-origin
+  `srcdoc` or `about:blank` frame reads the run's key from `parent.__lepton`, builds a
+  request frame from its `layout` and calls the core: `app.args` answered `ok`, the
+  unlisted `window.title` `denied`, `events?after=latest` 200. A frame sandboxed with
+  `allow-scripts` alone got `SecurityError` on `parent.__lepton` and no key. This is the
+  web's same-origin rule, not something the core can tell apart; the site's Web features
+  page says so and points untrusted content to `sandbox` without `allow-same-origin`.
+  WebView2 and Servo not measured yet.
+
 ## 0.1.9-beta.2 *2026-10-25*
 
 Published in two parts under `beta`. On 2026-10-24 from Windows at `9fbb8bc`:
