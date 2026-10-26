@@ -144,6 +144,17 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
         }
     }
     if shape.wasm_threads {
+        // Servo 0.6 has neither `crossOriginIsolated` nor `SharedArrayBuffer`, headers or
+        // not, and a shared `WebAssembly.Memory` is a `LinkError` (CI, servo-bridge
+        // 40341622993). The build goes on (user's decision); the page runs without threads.
+        if steps
+            .iter()
+            .any(|step| is_core_build(step) && renders_in_servo(step))
+        {
+            eprintln!(
+                "lepton: wasm.threads: Servo has no WebAssembly threads (no SharedArrayBuffer); the page runs without them"
+            );
+        }
         if build.contains("\"wasm-threads\"") {
             args.push("-Dwasm-threads=true".to_owned());
         } else {
@@ -213,6 +224,11 @@ fn identity_args(text: &str, versioned: bool) -> Result<Vec<String>, CliError> {
     Ok(args)
 }
 
+/// Whether a core build renders pages in Servo (`-Dservo-lib`, `build.rs`).
+fn renders_in_servo(step: &Step) -> bool {
+    step.args.iter().any(|arg| arg.starts_with("-Dservo-lib="))
+}
+
 /// Whether a core build makes a Windows program: its `-Dtarget`, or this machine without one.
 pub(super) fn targets_windows(step: &Step) -> bool {
     match step
@@ -243,7 +259,7 @@ fn default_icon(root: &Path) -> Result<std::path::PathBuf, CliError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Shape, read, targets_windows};
+    use super::{Shape, read, renders_in_servo, targets_windows};
     use lepton_orchestrator::Step;
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{assert_eq, assert_err, assert_ok};
@@ -302,6 +318,17 @@ mod tests {
             read(root, r#"{"wasm":{"threads":1}}"#),
             "a number is not a boolean"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_servo_build_is_told_apart() -> Result<(), Failure> {
+        let servo = Step::new("build", "zig")
+            .arg("build")
+            .arg("-Dservo-lib=/opt/servo");
+        let wpe = Step::new("build", "zig").arg("build");
+        assert_eq!(renders_in_servo(&servo), true);
+        assert_eq!(renders_in_servo(&wpe), false);
         Ok(())
     }
 

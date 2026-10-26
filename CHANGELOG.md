@@ -106,8 +106,12 @@ package moves to beta.3 together, and everything since beta.1 is listed here.
   configuration still as released (`dev_headers.rs`, `assets/history/dev-config/`), shows
   the lines for an edited one, and adds `{isolation}` to an Angular project's flags.
   Measured on WPE 2.54.2: on, `crossOriginIsolated` true, a shared `WebAssembly.Memory`, a
-  worker reading 41 and writing 42 through it; off, no `SharedArrayBuffer`. Every template
-  (19): `biome check` and `build` pass, the dev server sends both headers on and none off.
+  worker reading 41 and writing 42 through it; off, no `SharedArrayBuffer`. WebView2 (CI,
+  `tools/ci/wasm-page.ts`): the same; off, posting the shared memory is a `DataCloneError`.
+  Servo 0.6 has no `crossOriginIsolated` and no `SharedArrayBuffer` either way, a shared
+  `WebAssembly.Memory` is a `LinkError`: a Servo build with `wasm.threads` is warned about
+  and goes on. Every template (19): `biome check` and `build` pass, the dev server sends
+  both headers on and none off.
 - Engine-neutral names for what `main.zig` and plugins use (API freeze for 0.2.0's native
   apps): `core.commands` (`checkedWith`, `pluginCommands`, `permissionList`, `HandlerError`,
   `PluginCommand`, `Later`, `takeLater`; `zig/src/commands.zig`) and `core.events`
