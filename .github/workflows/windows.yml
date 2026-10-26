@@ -340,8 +340,7 @@ jobs:
             $runs = if ($target -eq "native") { @("", "cpu") } else { @("") }
             foreach ($gpu in $runs) {
               $env:LEPTON_GPU = $gpu
-              $flags = if ($gpu) { @("--no-build", "--verify") } else { @("--verify") }
-              $output = & $lepton package @flags
+              if ($gpu) { $output = & $lepton package --no-build --verify } else { $output = & $lepton package --verify }
               $code = $LASTEXITCODE
               $output
               $line = $output | Select-String "ok: up"
