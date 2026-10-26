@@ -352,6 +352,40 @@ jobs:
           }
           if ($failed) { exit 1 }
 
+      # Whether a close request reaches the native app: `lepton package --verify` asks
+      # with `taskkill /PID` and the native app did not end (runs 40379633600, 40386074201).
+      # The packaged program is started, asked once each way, and what happened is written
+      # down: the window Windows reports, taskkill's own answer, the exit, the stderr.
+      - name: Native close
+        if: ${{ !cancelled() }}
+        run: |
+          $out = "$env:RUNNER_TEMP\report\close.txt"
+          $exe = (Get-ChildItem "$env:RUNNER_TEMP\memory-native\src-lepton\bundle\*\bin\*.exe" | Select-Object -First 1).FullName
+          "program: $exe" | Tee-Object -Append -FilePath $out
+          foreach ($way in "taskkill", "CloseMainWindow") {
+            $log = "$env:RUNNER_TEMP\close-$way.log"
+            $process = Start-Process $exe -PassThru -RedirectStandardError $log
+            for ($i = 0; $i -lt 30 -and $process.MainWindowHandle -eq 0; $i++) {
+              Start-Sleep -Milliseconds 500
+              $process.Refresh()
+            }
+            Start-Sleep -Seconds 2
+            $process.Refresh()
+            "${way}: window $($process.MainWindowHandle) '$($process.MainWindowTitle)', responding $($process.Responding)" | Tee-Object -Append -FilePath $out
+            if ($way -eq "taskkill") {
+              $answer = cmd /c "taskkill /PID $($process.Id) 2>&1"
+              "${way}: answered '$answer'" | Tee-Object -Append -FilePath $out
+            } else {
+              "${way}: sent $($process.CloseMainWindow())" | Tee-Object -Append -FilePath $out
+            }
+            $ended = $process.WaitForExit(5000)
+            $code = if ($ended) { $process.ExitCode } else { "none" }
+            "${way}: ended within 5 s $ended, exit $code" | Tee-Object -Append -FilePath $out
+            if (-not $ended) { Stop-Process -Id $process.Id -Force }
+            Start-Sleep -Seconds 1
+            Get-Content $log | ForEach-Object { "${way}: stderr $_" } | Tee-Object -Append -FilePath $out
+          }
+
       - name: Report
         if: always()
         uses: actions/upload-artifact@v4
