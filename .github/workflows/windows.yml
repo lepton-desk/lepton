@@ -352,16 +352,16 @@ jobs:
           }
           if ($failed) { exit 1 }
 
-      # Whether a close request reaches the native app: `lepton package --verify` asks
-      # with `taskkill /PID` and the native app did not end (runs 40379633600, 40386074201);
-      # taskkill answered SUCCESS and CloseMainWindow True, the window Windows named had no
-      # title, and the app ran on (40389406515). Here every top-level window of the process
-      # is listed, WM_CLOSE is posted to Lepton's own window class, and what happened is
-      # written down, for the packaged (ReleaseSmall) program and a Debug one (`lepton run`).
-      - name: Native close
+      # Who opens the untitled MicrosoftWindowsTooltip window the native app's process
+      # owns (40392615483: listed before its LeptonWindow, visible; Lepton's code creates
+      # no tooltip). Each program is started and its top-level windows are polled every
+      # 100 ms for 6 s: when each first appeared, on which thread, owned by what. Then the
+      # modules the process has loaded, then WM_CLOSE to its LeptonWindow. The native app
+      # on the GPU and on the CPU, and the web view app beside them.
+      - name: Native windows
         if: ${{ !cancelled() }}
         run: |
-          $out = "$env:RUNNER_TEMP\report\close.txt"
+          $out = "$env:RUNNER_TEMP\report\windows.txt"
           Add-Type -TypeDefinition @"
           using System;
           using System.Collections.Generic;
@@ -374,54 +374,55 @@ jobs:
             [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
             [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder text, int size);
             [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
-            [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
+            [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
             [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
             public static List<IntPtr> Of(uint id) {
               var found = new List<IntPtr>();
               EnumWindows((window, data) => { uint pid; GetWindowThreadProcessId(window, out pid); if (pid == id) found.Add(window); return true; }, IntPtr.Zero);
               return found;
             }
-            public static string Describe(IntPtr window) {
-              var title = new StringBuilder(256); var name = new StringBuilder(256);
-              GetWindowText(window, title, 256); GetClassName(window, name, 256);
-              return window + " class '" + name + "' title '" + title + "' visible " + IsWindowVisible(window);
-            }
             public static string ClassOf(IntPtr window) { var name = new StringBuilder(256); GetClassName(window, name, 256); return name.ToString(); }
+            public static string Describe(IntPtr window) {
+              var title = new StringBuilder(256);
+              GetWindowText(window, title, 256);
+              uint pid;
+              uint thread = GetWindowThreadProcessId(window, out pid);
+              IntPtr owner = GetWindow(window, 4);
+              string ownedBy = owner == IntPtr.Zero ? "none" : ClassOf(owner);
+              return "class '" + ClassOf(window) + "' title '" + title + "' visible " + IsWindowVisible(window) + " thread " + thread + " owner " + ownedBy;
+            }
           }
           "@
-          function Measure-Close($process, $name) {
-            Start-Sleep -Seconds 4
-            $windows = [Wins]::Of([uint32]$process.Id)
-            foreach ($window in $windows) { "${name}: window $([Wins]::Describe($window))" | Tee-Object -Append -FilePath $out }
-            $lepton = $windows | Where-Object { [Wins]::ClassOf($_) -eq "LeptonWindow" } | Select-Object -First 1
-            if (-not $lepton) { "${name}: no LeptonWindow" | Tee-Object -Append -FilePath $out; Stop-Process -Id $process.Id -Force; return }
-            "${name}: WM_CLOSE posted $([Wins]::PostMessage($lepton, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero))" | Tee-Object -Append -FilePath $out
-            $ended = $process.WaitForExit(5000)
-            $code = if ($ended) { try { $process.ExitCode } catch { "unreadable" } } else { "none" }
-            "${name}: ended within 5 s $ended, exit $code, window still exists $([Wins]::IsWindow($lepton))" | Tee-Object -Append -FilePath $out
-            if (-not $ended) { Stop-Process -Id $process.Id -Force }
+          $programs = @(
+            @{ name = "native"; exe = "memory-native"; gpu = "" },
+            @{ name = "native (LEPTON_GPU=cpu)"; exe = "memory-native"; gpu = "cpu" },
+            @{ name = "webview"; exe = "memory-webview"; gpu = "" }
+          )
+          foreach ($program in $programs) {
+            $name = $program.name
+            $exe = (Get-ChildItem "$env:RUNNER_TEMP\$($program.exe)\src-lepton\bundle\*\bin\*.exe" | Select-Object -First 1).FullName
+            $env:LEPTON_GPU = $program.gpu
+            $started = [Diagnostics.Stopwatch]::StartNew()
+            $process = Start-Process $exe -PassThru -RedirectStandardError "$env:RUNNER_TEMP\windows-$($program.exe)-$($program.gpu).log"
+            Remove-Item Env:LEPTON_GPU -ErrorAction SilentlyContinue
+            $seen = @{}
+            while ($started.ElapsedMilliseconds -lt 6000) {
+              foreach ($window in [Wins]::Of([uint32]$process.Id)) {
+                if (-not $seen.ContainsKey($window)) {
+                  $seen[$window] = $true
+                  "${name}: at $($started.ElapsedMilliseconds) ms $([Wins]::Describe($window))" | Tee-Object -Append -FilePath $out
+                }
+              }
+              Start-Sleep -Milliseconds 100
+            }
+            $process.Refresh()
+            "${name}: modules $(($process.Modules | ForEach-Object { $_.ModuleName }) -join ' ')" | Tee-Object -Append -FilePath $out
+            $lepton = [Wins]::Of([uint32]$process.Id) | Where-Object { [Wins]::ClassOf($_) -eq "LeptonWindow" } | Select-Object -First 1
+            if ($lepton) { [void][Wins]::PostMessage($lepton, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
+            "${name}: ended within 5 s of WM_CLOSE $($process.WaitForExit(5000))" | Tee-Object -Append -FilePath $out
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
             Start-Sleep -Seconds 1
           }
-
-          $exe = (Get-ChildItem "$env:RUNNER_TEMP\memory-native\src-lepton\bundle\*\bin\*.exe" | Select-Object -First 1).FullName
-          $log = "$env:RUNNER_TEMP\close-release.log"
-          $process = Start-Process $exe -PassThru -RedirectStandardError $log
-          Measure-Close $process "release"
-          Get-Content $log | ForEach-Object { "release: stderr $_" } | Tee-Object -Append -FilePath $out
-
-          # Debug: `lepton run` builds without optimisation and starts the program itself.
-          Set-Location "$env:RUNNER_TEMP\memory-native"
-          $runLog = "$env:RUNNER_TEMP\close-debug.log"
-          $run = Start-Process "$env:GITHUB_WORKSPACE\target\release\lepton.exe" -ArgumentList "run" -PassThru -RedirectStandardOutput $runLog -RedirectStandardError "$runLog.err"
-          $app = $null
-          for ($i = 0; $i -lt 300 -and -not $app; $i++) {
-            Start-Sleep -Seconds 1
-            $app = Get-Process -Name "memory-native" -ErrorAction SilentlyContinue | Select-Object -First 1
-          }
-          if ($app) { Measure-Close $app "debug" } else { "debug: the program never started" | Tee-Object -Append -FilePath $out }
-          [void]$run.WaitForExit(10000)
-          if (-not $run.HasExited) { Stop-Process -Id $run.Id -Force }
-          Get-Content $runLog, "$runLog.err" -ErrorAction SilentlyContinue | ForEach-Object { "debug: $_" } | Tee-Object -Append -FilePath $out
 
       - name: Report
         if: always()

@@ -10,8 +10,8 @@
 //!   PSS), read once at the end of [`SETTLE`] from the `PerfProc_Process` counters for the
 //!   whole list, plus the application's own peak working set. Sampling the counters every
 //!   200 ms as Linux samples `/proc` would cost a PowerShell start each time.
-//! - **The close** is `WM_CLOSE` (`taskkill /PID` without `/F`), what the user's close
-//!   button sends: the application must end with code 0 and the job must be empty within
+//! - **The close** is `WM_CLOSE` posted to the application's visible windows
+//!   ([`close_windows`]), what the user's close button sends: the application must end with code 0 and the job must be empty within
 //!   [`GRACE`]. The job kills whatever is left when it goes, so a failed verify leaves no
 //!   process behind either.
 
@@ -91,12 +91,26 @@ pub fn run_and_measure(program: &Path, workdir: &Path) -> Result<Report, CliErro
         .map(|counters| counters.peak_working_set_size as u64)
         .unwrap_or(0);
 
+    let posted = match close_windows(pid, workdir) {
+        Ok(posted) => posted,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            lepton_orchestrator::supervise::untrack(pid);
+            return Err(error);
+        }
+    };
+    if posted == 0 {
+        let _ = child.kill();
+        let _ = child.wait();
+        lepton_orchestrator::supervise::untrack(pid);
+        return Err(CliError::Invalid(
+            "the application has no visible window to close".to_owned(),
+        ));
+    }
+    // From the request reaching the windows: PowerShell's own start (about a second, to
+    // compile the script) is not the application's time to close.
     let asked = Instant::now();
-    let _ = Command::new("taskkill")
-        .args(["/PID", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
     let status = loop {
         if let Ok(Some(status)) = child.try_wait() {
             break status;
@@ -139,6 +153,74 @@ pub fn run_and_measure(program: &Path, workdir: &Path) -> Result<Report, CliErro
     }
     Ok(report)
 }
+
+/// Posts `WM_CLOSE` to every visible, unowned top-level window of process `pid` — what
+/// the user's close button sends — and returns how many it reached.
+///
+/// Not `taskkill /PID`: it answered SUCCESS for the native template app on Windows, which
+/// ran on, while `WM_CLOSE` posted to its `LeptonWindow` ended it with code 0 (CI,
+/// 2026-10-26). That process also owns a visible, untitled `MicrosoftWindowsTooltip`
+/// window, listed before its own. `unsafe` is forbidden here, so the calls are
+/// PowerShell's (`Add-Type`), as for the memory counters.
+fn close_windows(pid: u32, workdir: &Path) -> Result<usize, CliError> {
+    let script_path = workdir.join(".verify-close.ps1");
+    std::fs::write(&script_path, CLOSE_SCRIPT)
+        .map_err(|error| io(&script_path, "write", &error))?;
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script_path)
+        .arg(pid.to_string())
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| {
+            CliError::Invalid(format!(
+                "could not ask Windows to close the application: {error}"
+            ))
+        })?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.trim().parse().map_err(|_| {
+        CliError::Invalid(format!(
+            "could not ask Windows to close the application ({:?}, {:?})",
+            text.trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    })
+}
+
+const CLOSE_SCRIPT: &str = r#"param([uint32]$id)
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class LeptonVerifyClose {
+    delegate bool EnumProc(IntPtr window, IntPtr data);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+    public static int Close(uint id) {
+        int posted = 0;
+        EnumWindows((window, data) => {
+            uint pid;
+            GetWindowThreadProcessId(window, out pid);
+            const uint owner = 4, close = 0x0010;
+            if (pid == id && IsWindowVisible(window) && GetWindow(window, owner) == IntPtr.Zero
+                && PostMessage(window, close, IntPtr.Zero, IntPtr.Zero)) posted++;
+            return true;
+        }, IntPtr.Zero);
+        return posted;
+    }
+}
+'@
+[LeptonVerifyClose]::Close($id)
+"#;
 
 /// The summed private working set of `pids`, in bytes, from the `PerfProc_Process`
 /// performance counters (PowerShell's CIM query: no API call needs `unsafe` here).
