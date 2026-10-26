@@ -343,7 +343,11 @@ Yeni:
 ## beta.3 işi: Servo kitaplığı Release'te kendiliğinden (2026-10-25)
 
 - `servo-bridge.yml` `workflow_call` olsun; `release.yml` aynı commit'te başarılı çalıştırma bulamazsa onu çağırıp kitaplığı kendisi derlesin (elle tetikleme ve deneme uyarısı kalksın).
-- **Yazıldı (2026-10-26):** `servo-bridge.yml` `workflow_call` (girdi `ref`, checkout o commit). `release.yml`: `servo-run` aynı commit'te başarılı çalıştırmayı arar; yoksa `servo-build` `servo-bridge`'i çağırır; `servo` kitaplığı ikisinden birinden alır; `servo` ve `release` `!cancelled() && !failure()` ile çalışır (atlanan `servo-build` varsayılan `success()`'i düşürür). Deneme sürümündeki trunk'a düşme ve uyarısı kalktı. CI'da ölçülecek.
+- **Yazıldı (2026-10-26):** `servo-bridge.yml` `workflow_call` (girdi `ref`, checkout o commit). `release.yml`: `servo-run` aynı commit'te başarılı çalıştırmayı arar; yoksa `servo-build` `servo-bridge`'i çağırır; `servo` kitaplığı ikisinden birinden alır; `servo` ve `release` `!cancelled() && !failure()` ile çalışır (atlanan `servo-build` varsayılan `success()`'i düşürür). Deneme sürümündeki trunk'a düşme ve uyarısı kalktı. **Ölçüldü (run 40334337674, `4483c25`):** `servo-run` "none, building it here"; `servo-build / window` 9 dk 37 sn (cargo önbelleği dolu), pencere denetimi ve şablon uygulaması dahil geçti; `servo` ve `release` atlanmadı; 13 iş geçti, toplam 11 dk 13 sn. 15 dosya, `.sha256`'ların hepsi tuttu; indirilen `liblepton_servo.so.xz` açılınca SHA-256 CI raporundakiyle aynı (`4156fe16…`). Bulunan çalıştırmayı kullanan yol (aynı commit'te ayrı `servo-bridge` çalıştırması) henüz denenmedi. İlk deneme (40334083707) benim girdimle düştü: `ref` kısa SHA'ydı, `actions/checkout` onu dal/etiket adı olarak arıyor; tam SHA ile geçti.
+
+## 800 satır sınırı (2026-10-26)
+
+- Sınırı aşan dört dosya bölündü: `build.rs` 862 → 745 (`Platform` → `build_platform.rs`), `package.rs` 801 → 685 (paket klasörü → `package_tree.rs`), `manifest.rs` 849 → 708 (denetimler → `manifest_check.rs`, `manifest::` yolları yeniden dışa aktarılıyor), `bridge.zig` 808 → 715 (sayfa tekrarının cevapları → `bridge_replay.zig`; `hostOf`'un yanlış yerdeki belge satırı yerine kondu). Ölçüldü: `cargo test --workspace` geçti, clippy Linux ve `x86_64-pc-windows-msvc` için 0 uyarı; Zig 0.16 webview 276/277, native 272/282, 0.17 webview geçti; Windows test kökü (`-Dtarget=x86_64-windows-gnu`) 155/161. `history/` ve `servo/patches/` dışarıdan kopya, sayılmadı.
 
 ## Sağ tık menüsü: ölçülecekler (2026-10-25)
 

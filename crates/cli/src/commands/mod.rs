@@ -10,6 +10,7 @@
 pub mod arch;
 pub mod archive;
 pub mod build;
+pub mod build_platform;
 pub mod command_types;
 pub mod deb;
 pub mod deep_links;
@@ -32,6 +33,7 @@ pub mod new_setup;
 pub mod new_view;
 pub mod package;
 pub mod package_manager;
+pub mod package_tree;
 pub mod plugins;
 pub mod record;
 pub mod report;

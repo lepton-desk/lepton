@@ -23,6 +23,7 @@ pub mod bundle;
 pub mod frame_pages;
 pub mod frontend;
 pub mod manifest;
+pub mod manifest_check;
 pub mod merge;
 pub mod permissions;
 pub mod plan;
