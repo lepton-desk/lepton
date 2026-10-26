@@ -355,8 +355,9 @@ jobs:
       # Who opens the untitled MicrosoftWindowsTooltip window the native app's process
       # owns (40392615483: listed before its LeptonWindow, visible; Lepton's code creates
       # no tooltip). Each program is started and its top-level windows are polled every
-      # 100 ms for 6 s: when each first appeared, on which thread, owned by what. Then the
-      # modules the process has loaded, then WM_CLOSE to its LeptonWindow. The native app
+      # 100 ms for 6 s: when each first appeared, on which thread, owned by what, and which
+      # loaded module created it (GWLP_HINSTANCE) and registered its class (GCLP_HMODULE).
+      # Then the modules the process has loaded, then WM_CLOSE to its LeptonWindow. The native app
       # on the GPU and on the CPU, and the web view app beside them.
       - name: Native windows
         if: ${{ !cancelled() }}
@@ -376,6 +377,10 @@ jobs:
             [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
             [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
             [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+            [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+            [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] static extern IntPtr GetClassLongPtr(IntPtr window, int index);
+            public static IntPtr Instance(IntPtr window) { return GetWindowLongPtr(window, -6); }
+            public static IntPtr ClassModule(IntPtr window) { return GetClassLongPtr(window, -16); }
             public static List<IntPtr> Of(uint id) {
               var found = new List<IntPtr>();
               EnumWindows((window, data) => { uint pid; GetWindowThreadProcessId(window, out pid); if (pid == id) found.Add(window); return true; }, IntPtr.Zero);
@@ -416,6 +421,15 @@ jobs:
               Start-Sleep -Milliseconds 100
             }
             $process.Refresh()
+            $byBase = @{}
+            foreach ($module in $process.Modules) { $byBase[[int64]$module.BaseAddress] = $module.FileName }
+            foreach ($window in $seen.Keys) {
+              $instance = [int64][Wins]::Instance($window)
+              $classModule = [int64][Wins]::ClassModule($window)
+              $made = if ($byBase.ContainsKey($instance)) { $byBase[$instance] } else { "0x{0:x} (not a loaded module)" -f $instance }
+              $registered = if ($byBase.ContainsKey($classModule)) { $byBase[$classModule] } else { "0x{0:x} (not a loaded module)" -f $classModule }
+              "${name}: class '$([Wins]::ClassOf($window))' created by $made, class registered by $registered" | Tee-Object -Append -FilePath $out
+            }
             "${name}: modules $(($process.Modules | ForEach-Object { $_.ModuleName }) -join ' ')" | Tee-Object -Append -FilePath $out
             $lepton = [Wins]::Of([uint32]$process.Id) | Where-Object { [Wins]::ClassOf($_) -eq "LeptonWindow" } | Select-Object -First 1
             if ($lepton) { [void][Wins]::PostMessage($lepton, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) }
