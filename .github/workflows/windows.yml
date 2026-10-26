@@ -336,12 +336,20 @@ jobs:
             }
             $pkg | ConvertTo-Json -Depth 20 | Set-Content package.json -Encoding utf8NoBOM
             npm install --no-audit --no-fund
-            $output = & $lepton package --verify
-            $code = $LASTEXITCODE
-            $output
-            $line = $output | Select-String "ok: up"
-            if ($code -or -not $line) { $failed = $true }
-            "${target}: $line" | Tee-Object -Append -FilePath "$env:RUNNER_TEMP\report\memory.txt"
+            # The native app once more on the CPU: whether the GPU is what it costs or keeps.
+            $runs = if ($target -eq "native") { @("", "cpu") } else { @("") }
+            foreach ($gpu in $runs) {
+              $env:LEPTON_GPU = $gpu
+              $flags = if ($gpu) { @("--no-build", "--verify") } else { @("--verify") }
+              $output = & $lepton package @flags
+              $code = $LASTEXITCODE
+              $output
+              $line = $output | Select-String "ok: up"
+              if ($code -or -not $line) { $failed = $true }
+              $name = if ($gpu) { "$target (LEPTON_GPU=$gpu)" } else { $target }
+              "${name}: $line" | Tee-Object -Append -FilePath "$env:RUNNER_TEMP\report\memory.txt"
+            }
+            Remove-Item Env:LEPTON_GPU -ErrorAction SilentlyContinue
           }
           if ($failed) { exit 1 }
 

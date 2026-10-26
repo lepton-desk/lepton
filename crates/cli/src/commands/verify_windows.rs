@@ -106,8 +106,9 @@ pub fn run_and_measure(program: &Path, workdir: &Path) -> Result<Report, CliErro
             let _ = child.wait();
             lepton_orchestrator::supervise::untrack(pid);
             return Err(CliError::Invalid(format!(
-                "the application did not end within {:.0} s of its window being closed",
-                GRACE.as_secs_f64()
+                "the application did not end within {:.0} s of its window being closed; stderr:\n{}",
+                GRACE.as_secs_f64(),
+                tail(&log_path)
             )));
         }
         std::thread::sleep(Duration::from_millis(20));
