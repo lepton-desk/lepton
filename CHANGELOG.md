@@ -101,6 +101,17 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Fixed
 
+- `lepton package --verify` on Windows closed the app with `taskkill /PID`, which
+  answered SUCCESS for the native template app while it ran on (CI 40379633600,
+  40389406515). `close_windows` (`verify_windows.rs`) posts `WM_CLOSE` to every visible,
+  unowned top-level window of the process through PowerShell's `Add-Type`, and the close
+  is timed from there; the timeout now carries the stderr tail, on Linux too. Measured
+  on the runner: `WM_CLOSE` to `LeptonWindow` ends the app with 0 in ReleaseSmall and
+  Debug. The process also has a visible, untitled `MicrosoftWindowsTooltip` window from
+  about 1.6 s to 5.6 s, on the app's thread, created with no instance and its class under
+  the program's module handle; of the 46 loaded modules only `USER32.dll` carries the
+  name, and Lepton's program does not (`windows.yml` "Native windows", "Tooltip class
+  name").
 - `lepton update` in a project made by the Linux 0.1.9-beta.2 CLI reported the framework's
   own changes as the developer's (a conflict "since 0.1.6"): beta.2 went out from Windows
   with the template before `main.zig` was split and from Linux with the one after it
@@ -110,6 +121,10 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Measured
 
+- Memory on Windows (`windows.yml` "Memory", Windows Server 2025, no GPU: Direct3D 11
+  runs on WARP there): the vanilla-ts template packaged and run by `--verify`, the tree's
+  private working set after 3 s. Web view: 69.4 MB, 7 processes (70.6 and 72.9 MB in
+  earlier runs); native: 6.9 MB on Direct3D 11, 5.9 MB with `LEPTON_GPU=cpu`, 1 process.
 - Frames inside the app's page (WPE WebKit 2.54, a probe page with three child frames):
   `__lepton` is injected into the top frame only (`inject_top_frame`), but a same-origin
   `srcdoc` or `about:blank` frame reads the run's key from `parent.__lepton`, builds a
