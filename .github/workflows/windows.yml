@@ -447,6 +447,47 @@ jobs:
             Start-Sleep -Seconds 1
           }
 
+      # Which module carries the tooltip window's class name: Windows reports the class
+      # registered under the program's own module handle and the window created with no
+      # instance (40401878582), and Lepton's program does not contain the name. Every
+      # module the native app has loaded after 3 s is searched for it, as ASCII and UTF-16.
+      - name: Tooltip class name
+        if: ${{ !cancelled() }}
+        run: |
+          $out = "$env:RUNNER_TEMP\report\tooltip.txt"
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Text;
+          public static class Bytes {
+            public static int Count(byte[] data, byte[] what) {
+              int found = 0;
+              for (int i = 0; i + what.Length <= data.Length; i++) {
+                int j = 0;
+                while (j < what.Length && data[i + j] == what[j]) j++;
+                if (j == what.Length) { found++; i += what.Length - 1; }
+              }
+              return found;
+            }
+          }
+          "@
+          $name = "MicrosoftWindowsTooltip"
+          $ascii = [Text.Encoding]::ASCII.GetBytes($name)
+          $wide = [Text.Encoding]::Unicode.GetBytes($name)
+          $exe = (Get-ChildItem "$env:RUNNER_TEMP\memory-native\src-lepton\bundle\*\bin\*.exe" | Select-Object -First 1).FullName
+          $process = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 3
+          $process.Refresh()
+          $files = $process.Modules | ForEach-Object { $_.FileName }
+          Stop-Process -Id $process.Id -Force
+          "modules: $($files.Count)" | Tee-Object -Append -FilePath $out
+          foreach ($file in $files) {
+            $data = [IO.File]::ReadAllBytes($file)
+            $a = [Bytes]::Count($data, $ascii)
+            $w = [Bytes]::Count($data, $wide)
+            if ($a -or $w) { "$file  ascii $a  utf16 $w" | Tee-Object -Append -FilePath $out }
+          }
+          "searched" | Tee-Object -Append -FilePath $out
+
       - name: Report
         if: always()
         uses: actions/upload-artifact@v4
