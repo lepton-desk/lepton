@@ -29,6 +29,7 @@ pub mod installer_read;
 pub mod installer_tables;
 pub mod launch;
 pub mod linked;
+pub mod metainfo;
 pub mod new;
 pub mod new_setup;
 pub mod new_view;

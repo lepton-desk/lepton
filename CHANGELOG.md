@@ -17,6 +17,18 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Added
 
+- AppStream metainfo in every Linux bundle (`commands/metainfo.rs`):
+  `share/metainfo/<identifier>.metainfo.xml` with the required `id`, `name`, `summary`
+  (`bundle.description`, else `productName`), `description` (`bundle.longDescription` in
+  `<p>` blocks), `metadata_license` (`bundle.metadataLicense`, `CC0-1.0` without it) and
+  `launchable`, plus `project_license`, the homepage, the developer
+  (`bundle.maintainer`'s name under the identifier's owner), `<provides><binary>` and the
+  OARS 1.1 `content_rating` (`bundle.contentRating`, checked against the 22 ids of
+  `hughsie/oars` `oars-1.1.rnc`; empty without it). The release is dated by
+  `SOURCE_DATE_EPOCH`, else `bundle.releaseDate`; with neither there is none, since
+  AppStream refuses an undated release (`release-time-missing`, measured). `lepton package`
+  warns then, and when the first paragraph is under 80 characters. `appstreamcli validate`
+  (1.2.1) passes with no date, a configured one and `SOURCE_DATE_EPOCH`.
 - `bundle.description`, `longDescription`, `license`, `homepage`, `copyright`, `category`
   (`template_injector/src/bundle.rs` `Details`; one line each but `longDescription`, no
   control characters, `homepage` http(s), `category` one of the 13 freedesktop main

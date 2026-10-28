@@ -81,6 +81,8 @@ pub struct Spec {
     /// `bundle.description` and the rest: the desktop entry's `Comment` and `Categories`,
     /// the Debian copyright file.
     pub details: Details,
+    /// `bundle.maintainer`: the AppStream developer's name.
+    pub maintainer: Option<String>,
 }
 
 impl Flags {
@@ -142,6 +144,7 @@ impl Flags {
             out: root.join(CORE_DIR).join("bundle"),
             system,
             details: formats.details.clone(),
+            maintainer: formats.maintainer.clone(),
         };
         let bundle = assemble(&spec)?;
         if system == System::Linux && cfg!(target_os = "linux") {
@@ -440,6 +443,7 @@ mod tests {
             out: scratch.path().join("bundle"),
             system: crate::platform::System::Linux,
             details: Details::default(),
+            maintainer: None,
         }
     }
 
@@ -484,6 +488,10 @@ mod tests {
         ))?;
         assert_contains!(&entry, "Exec=notes\n");
         assert_contains!(&entry, "Name=Notes\n");
+        let metainfo = scratch.read(&format!(
+            "bundle/{name}/share/metainfo/dev.example.notes.metainfo.xml"
+        ))?;
+        assert_contains!(&metainfo, "<id>dev.example.notes</id>");
         Ok(())
     }
 
@@ -772,6 +780,7 @@ mod windows_tests {
             out: scratch.path().join("bundle"),
             system: System::Windows,
             details: Details::default(),
+            maintainer: None,
         };
         assert_eq!(
             bundle_name(&spec),

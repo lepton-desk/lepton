@@ -87,6 +87,39 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
         }
     }
 
+    if spec.system == System::Linux {
+        // What software centres show before the app is installed (`metainfo.rs`).
+        let metainfo = bundle.join("share/metainfo");
+        make_dir(&metainfo)?;
+        let component = super::metainfo::Component {
+            app_id: &spec.app_id,
+            product: &spec.product,
+            binary: &spec.binary,
+            version: &spec.version,
+            details: &spec.details,
+            maintainer: spec.maintainer.as_deref(),
+            released: super::archive::release_time(),
+        };
+        if super::metainfo::release_date(&component).is_none() {
+            super::report::Report::new().warn(
+                "metainfo",
+                "no release date (SOURCE_DATE_EPOCH or bundle.releaseDate), so no <releases>; software centres show no version history",
+            );
+        }
+        if let Some(length) = super::metainfo::short_first_paragraph(&component) {
+            super::report::Report::new().warn(
+                "metainfo",
+                &format!(
+                    "the description's first paragraph is {length} characters; software centres want {} or more (bundle.longDescription)",
+                    super::metainfo::SHORTEST_FIRST_PARAGRAPH
+                ),
+            );
+        }
+        write(
+            &metainfo.join(super::metainfo::file_name(&spec.app_id)),
+            super::metainfo::text(&component),
+        )?;
+    }
     if spec.system == System::Linux
         && let (Some(copyright), Some(license)) = (&spec.details.copyright, &spec.details.license)
     {
