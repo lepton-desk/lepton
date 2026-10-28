@@ -308,7 +308,7 @@ mod tests {
   },
   "devDependencies": {
     "@lepton-desk/cli":"~0.1.7",
-    "@biomejs/biome": "2.5.15"
+    "@biomejs/biome": "2.6.3"
   }
 }
 "#;

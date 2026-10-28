@@ -14,7 +14,8 @@
       "!!**/out",
       "!!**/.next",
       "!!**/.astro",
-      "!!**/.angular"
+      "!!**/.angular",
+      "!!**/pnpm-lock.yaml"
     ]
   },
   "formatter": {
@@ -33,13 +34,16 @@
       "correctness": {
         "noUnusedImports": "error",
         "noUnusedVariables": "error"
+      },
+      "security": {
+        "useIframeSandbox": "error"
       }
     }
   },
   "assist": {
     "actions": {
       "source": {
-        "recommended": true
+        "preset": "recommended"
       }
     }
   },
@@ -50,6 +54,14 @@
       "semicolons": "always"
     },
     "globals": ["__lepton"]
+  },
+  "markdown": {
+    "parser": {
+      "frontmatter": true
+    },
+    "formatter": {
+      "enabled": false
+    }
   },
   "html": {
     "experimentalFullSupportEnabled": true

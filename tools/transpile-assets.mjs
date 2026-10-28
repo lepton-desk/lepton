@@ -22,7 +22,7 @@
  *
  * ## Usage
  *
- *   node tools/transpile-assets.mjs <path-to-typescript>
+ *   node tools/transpile-assets.mjs [<typescript-package>] [--check]
  *
  * Exits non-zero if any output differs from what is on disk, which is what makes it
  * usable as a check as well as a generator.
@@ -30,7 +30,6 @@
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,7 +72,7 @@ const SOURCES = [
 
 const banner = (source) =>
   [
-    "// Generated from `" + source.replaceAll("\\", "/") + "` by tools/transpile-assets.mjs.",
+    `// Generated from \`${source.replaceAll("\\", "/")}\` by tools/transpile-assets.mjs.`,
     "//",
     "// Edit the TypeScript source, not this file: this one is rewritten on every run and",
     "// an edit made here is lost without warning. Running the script in check mode is what",
@@ -87,22 +86,52 @@ const markupBanner = (source) =>
   source.replaceAll("\\", "/") +
   "` by tools/transpile-assets.mjs; edit the TypeScript source, not this file. -->\n";
 
-/** TypeScript to JavaScript, JSX and every non-type import kept as written. */
-function transpile(ts, source, fileName) {
-  const output = ts.transpileModule(source, {
-    fileName,
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      jsx: ts.JsxEmit.Preserve,
-      // An import a component's markup uses is not "unused" to TypeScript's eyes only.
-      verbatimModuleSyntax: true,
-      removeComments: false,
-      newLine: ts.NewLineKind.LineFeed,
-    },
-  }).outputText;
-  // `./lepton.ts` in the source is `./lepton.js` in a JavaScript project.
-  return output.replace(/\.ts"/g, '.js"').replace(/\.tsx"/g, '.jsx"');
+/**
+ * TypeScript to JavaScript, JSX and every non-type import kept as written.
+ *
+ * Through TypeScript 7's `tsc`, one file at a time: 7.0 ships no JavaScript API (its
+ * announcement: "it does not ship with an API"; 7.1 is to bring a new one), so
+ * `ts.transpileModule` is gone and the command line is the stable surface. `--noCheck`
+ * emits without type-checking, as `transpileModule` did: the file's imports (React,
+ * `./lepton.ts`) are not there to resolve.
+ */
+function transpile(tsc, source, fileName) {
+  const work = mkdtempSync(join(tmpdir(), "lepton-tsc-"));
+  try {
+    const jsx = fileName.endsWith(".tsx");
+    const input = join(work, jsx ? "input.tsx" : "input.ts");
+    writeFileSync(input, source);
+    const out = join(work, "out");
+    execFileSync(
+      tsc,
+      [
+        "--noCheck",
+        "--target",
+        "es2022",
+        "--module",
+        "esnext",
+        "--jsx",
+        "preserve",
+        // An import a component's markup uses is not "unused" to TypeScript's eyes only.
+        "--verbatimModuleSyntax",
+        "--removeComments",
+        "false",
+        "--newLine",
+        "lf",
+        "--outDir",
+        out,
+        input,
+      ],
+      { cwd: work, stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const output = readFileSync(join(out, jsx ? "input.jsx" : "input.js"), "utf8");
+    // `./lepton.ts` in the source is `./lepton.js` in a JavaScript project.
+    return output.replace(/\.ts"/g, '.js"').replace(/\.tsx"/g, '.jsx"');
+  } catch (error) {
+    throw new Error(`${fileName}: tsc failed (${error.message})`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 /** JavaScript formatted as the projects' Biome formats it, through its stdin. */
@@ -120,13 +149,13 @@ function formatScript(text) {
  * Biome does not format a component's script block, so the block is formatted on its own
  * and put back at the indent the source gives it (Svelte's is indented, Vue's is not).
  */
-function transpileComponent(ts, source, fileName) {
+function transpileComponent(tsc, source, fileName) {
   const pattern = /(<script\b[^>]*?)\s+lang="ts"([^>]*>)([\s\S]*?)(<\/script>)/;
   const match = source.match(pattern);
   if (match === null) throw new Error(`${fileName}: no <script lang="ts"> block`);
   const [whole, open, close, body, end] = match;
   const indent = (body.split("\n").find((line) => line.trim() !== "") ?? "").match(/^\s*/)[0];
-  const script = formatScript(transpile(ts, body, `${fileName}.ts`))
+  const script = formatScript(transpile(tsc, body, `${fileName}.ts`))
     .split("\n")
     .map((line) => (line === "" ? line : indent + line))
     .join("\n");
@@ -134,12 +163,16 @@ function transpileComponent(ts, source, fileName) {
 }
 
 function main() {
-  const tscPath = process.argv[2];
-  if (tscPath === undefined) {
-    process.stderr.write("usage: transpile-assets.mjs <path-to-typescript> [--check]\n");
-    process.exit(2);
-  }
-  const ts = createRequire(import.meta.url)(tscPath);
+  // TypeScript 7's `tsc`: the one `packages/api` installs, unless a package directory
+  // is given (`node tools/transpile-assets.mjs <typescript-package> [--check]`).
+  const given = process.argv.slice(2).find((argument) => !argument.startsWith("--"));
+  const tsc = join(
+    given === undefined
+      ? resolve(root, "packages", "api", "node_modules", "typescript")
+      : resolve(given),
+    "bin",
+    "tsc",
+  );
   const check = process.argv.includes("--check");
 
   // Written to a staging directory and formatted there with the projects' own Biome
@@ -152,8 +185,8 @@ function main() {
       const source = readFileSync(inputPath, "utf8");
       const component = /\.(vue|svelte)$/.test(from);
       const contents = component
-        ? markupBanner(from) + transpileComponent(ts, source, inputPath)
-        : banner(from) + transpile(ts, source, inputPath);
+        ? markupBanner(from) + transpileComponent(tsc, source, inputPath)
+        : banner(from) + transpile(tsc, source, inputPath);
       const stagedPath = join(staging, to);
       mkdirSync(dirname(stagedPath), { recursive: true });
       writeFileSync(stagedPath, contents);
@@ -187,7 +220,7 @@ function main() {
     if (check) {
       if (drifted !== 0) {
         process.stderr.write(
-          `${drifted} generated file(s) differ from their source; run node tools/transpile-assets.mjs <typescript>\n`,
+          `${drifted} generated file(s) differ from their source; run node tools/transpile-assets.mjs\n`,
         );
         process.exit(1);
       }

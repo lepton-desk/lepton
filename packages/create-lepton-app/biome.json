@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!!**/dist", "!!**/zig-out", "!!**/node_modules"]
+    "includes": ["**", "!!**/dist", "!!**/zig-out", "!!**/node_modules", "!!**/pnpm-lock.yaml"]
   },
   "formatter": {
     "enabled": true,
@@ -30,8 +30,16 @@
   "assist": {
     "actions": {
       "source": {
-        "recommended": true
+        "preset": "recommended"
       }
+    }
+  },
+  "markdown": {
+    "parser": {
+      "frontmatter": true
+    },
+    "formatter": {
+      "enabled": false
     }
   },
   "javascript": {

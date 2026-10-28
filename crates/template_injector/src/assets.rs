@@ -159,7 +159,7 @@ pub const COMMAND_TYPES: &str = include_str!("../assets/lepton-commands.zig");
 /// Biome's configuration schema changes between majors and a formatter that moves
 /// under a developer mid-file is worse than no formatter. A project's own upgrade is
 /// one `package.json` edit away, and the schema is validated by the tool itself.
-pub const BIOME_VERSION: &str = "2.5.15";
+pub const BIOME_VERSION: &str = "2.6.3";
 
 /// What Lepton adds to a project's `package.json`.
 ///
@@ -339,8 +339,8 @@ mod tests {
         // catches it without a JavaScript toolchain in the test suite.
         //
         // Byte-equality with the sources is the other half, and it needs `tsc`; that is
-        // what `tools/transpile-assets.mjs --check` is for, and it runs in continuous
-        // integration rather than here.
+        // what `tools/transpile-assets.mjs --check` is for, and it runs in the `templates`
+        // workflow (with TypeScript 7's `tsc`) rather than here.
         for source in [
             super::JS_SDK_ENTRY,
             super::JS_MEASURES,

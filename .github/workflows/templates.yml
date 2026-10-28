@@ -1,0 +1,102 @@
+# Every template `lepton new` writes, as written: each of the 19 is scaffolded with its
+# dependencies installed and must pass `biome check` with the Biome it pins
+# (`BIOME_VERSION`, crates/template_injector/src/assets.rs). And the JavaScript forms of
+# the injected sources must still be what TypeScript 7 makes of their TypeScript
+# (`tools/transpile-assets.mjs --check`).
+name: templates
+
+on:
+  push:
+    branches: [trunk]
+    paths:
+      - "crates/template_injector/**"
+      - "crates/cli/src/commands/new*.rs"
+      - "tools/transpile-assets.mjs"
+      - "packages/api/package.json"
+      - "packages/api/pnpm-lock.yaml"
+      - ".github/workflows/templates.yml"
+  pull_request:
+    paths:
+      - "crates/template_injector/**"
+      - "crates/cli/src/commands/new*.rs"
+      - "tools/transpile-assets.mjs"
+      - "packages/api/package.json"
+      - "packages/api/pnpm-lock.yaml"
+      - ".github/workflows/templates.yml"
+  workflow_dispatch:
+
+jobs:
+  # The generated JavaScript forms, with packages/api's own TypeScript 7 and Biome.
+  assets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: TypeScript and Biome
+        run: |
+          npm install -g pnpm@10
+          pnpm --dir packages/api install --frozen-lockfile
+          packages/api/node_modules/.bin/tsc --version
+          packages/api/node_modules/.bin/biome --version
+      - name: Generated files match their sources
+        run: node tools/transpile-assets.mjs --check
+
+  # The CLI once, for the 19 scaffolds.
+  cli:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --bin lepton
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lepton-cli
+          path: target/release/lepton
+          if-no-files-found: error
+
+  template:
+    needs: cli
+    strategy:
+      fail-fast: false
+      matrix:
+        template:
+          - vanilla-ts
+          - vanilla-js
+          - react-ts
+          - react-js
+          - vue-ts
+          - vue-js
+          - svelte-ts
+          - svelte-js
+          - solid-ts
+          - solid-js
+          - preact-ts
+          - preact-js
+          - lit-ts
+          - lit-js
+          - astro-ts
+          - astro-js
+          - next-ts
+          - next-js
+          - angular-ts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: lepton-cli
+          path: ${{ runner.temp }}/cli
+      - name: Scaffold ${{ matrix.template }}
+        working-directory: ${{ runner.temp }}
+        run: |
+          chmod +x cli/lepton
+          ./cli/lepton new app --template "${{ matrix.template }}" --target webview --package-manager npm --owner ci --install --non-interactive
+      - name: biome check
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          ./node_modules/.bin/biome --version
+          ./node_modules/.bin/biome check .
