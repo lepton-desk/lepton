@@ -20,6 +20,7 @@ pub mod desktop_entry;
 pub mod dev;
 pub mod dev_ready;
 pub mod engine;
+pub mod icon;
 pub mod info;
 pub mod installer;
 pub mod installer_db;
@@ -166,6 +167,9 @@ pub enum Command {
     /// Runs a recording against the core again, with no window, and compares the replies.
     Replay(record::ReplayFlags),
 
+    /// Writes every icon a package needs (PNGs, .ico, SVG) from one square SVG or PNG.
+    Icon(icon::Flags),
+
     /// Brings an existing project's core and `src-lepton/` files to this version.
     Update(update::Flags),
 }
@@ -182,6 +186,7 @@ impl Command {
             Self::Package(_) => "package",
             Self::Record(_) => "record",
             Self::Replay(_) => "replay",
+            Self::Icon(_) => "icon",
             Self::Update(_) => "update",
         }
     }

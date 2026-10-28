@@ -72,14 +72,21 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
             &schemes,
         );
         super::desktop_entry::install(&applications, &spec.app_id, &entry)?;
-        super::desktop_entry::install_icon(
-            &bundle.join("share"),
-            &spec.app_id,
-            &super::desktop_entry::project_icon(root)?,
-        )?;
+        let svg = super::desktop_entry::project_icon(root)?;
+        super::desktop_entry::install_icon(&bundle.join("share"), &spec.app_id, &svg)?;
+        // PNGs beside the SVG: some desktops and stores read no SVG, and the AppImage's
+        // `.DirIcon` must be one.
+        for (size, png) in super::icon::hicolor_pngs(root, &svg)? {
+            let apps = bundle
+                .join("share/icons/hicolor")
+                .join(format!("{size}x{size}"))
+                .join("apps");
+            make_dir(&apps)?;
+            write(&apps.join(format!("{}.png", spec.app_id)), png)?;
+        }
     }
 
-    write(&bundle.join(MARKER), &format!("{}\n", bundle_name(spec)))?;
+    write(&bundle.join(MARKER), format!("{}\n", bundle_name(spec)))?;
     Ok(bundle)
 }
 
@@ -120,6 +127,6 @@ fn make_dir(dir: &Path) -> Result<(), CliError> {
     std::fs::create_dir_all(dir).map_err(|error| io(dir, "create", &error))
 }
 
-fn write(path: &Path, text: &str) -> Result<(), CliError> {
-    std::fs::write(path, text).map_err(|error| io(path, "write", &error))
+fn write(path: &Path, contents: impl AsRef<[u8]>) -> Result<(), CliError> {
+    std::fs::write(path, contents).map_err(|error| io(path, "write", &error))
 }

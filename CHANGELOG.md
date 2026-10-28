@@ -17,6 +17,15 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Added
 
+- `lepton icon [source]` (`commands/icon.rs`): one square SVG, or a square PNG of at
+  least 512 px, drawn by `resvg` (pure Rust, system fonts for lettering) into
+  `src-lepton/icons/`: `<n>x<n>.png` for 16–512, `icon.ico` (PNG entries, 16–256, written
+  without an encoder crate) and the SVG. A large PNG is halved step by step before the
+  last scale. Same source, same bytes (tested). Linux bundles install the PNGs under
+  `share/icons/hicolor/<n>x<n>/apps/<identifier>.png` (`package_tree.rs`): those files
+  when the project has them (a partial set is refused), else drawn from the project's SVG
+  while packaging. Its `icon.ico` is the Windows program's (`-Dicon`) and the MSI's when
+  `bundle.icon` names none.
 - `@lepton-desk/api/app` `info()` → `{ name, version, identifier }`, written into the page
   by the core as `__lepton.app` (`render/webview/transport.zig` `writeApplication`, shared
   by WPE, Servo and WebView2; JSON-escaped, 256 bytes a field, cut at a character);

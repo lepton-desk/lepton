@@ -291,7 +291,11 @@ pub fn write_target(
                 .parent()
                 .and_then(Path::parent)
                 .unwrap_or(&spec.prefix);
-            let icon = formats.icon.as_deref().map(|relative| root.join(relative));
+            // `bundle.icon`, else what `lepton icon` wrote, else Lepton's mark (`installer.rs`).
+            let icon = match formats.icon.as_deref() {
+                Some(relative) => Some(root.join(relative)),
+                None => super::icon::project_ico(root),
+            };
             let program = spec.system.executable(&spec.binary);
             let digest = super::installer::write(&super::installer::Installer {
                 bundle,
@@ -455,6 +459,54 @@ mod tests {
         ))?;
         assert_contains!(&entry, "Exec=notes\n");
         assert_contains!(&entry, "Name=Notes\n");
+        Ok(())
+    }
+
+    #[test]
+    fn a_linux_bundle_carries_png_icons_drawn_or_from_lepton_icon() -> Result<(), Failure> {
+        use crate::commands::icon::PNG_SIZES;
+        // A project as `lepton new` lays it out: the build under `src-lepton/zig-out`.
+        let scratch = Scratch::new("package-png-icons")?;
+        scratch.write("src-lepton/zig-out/bin/notes", "#!/bin/sh\n")?;
+        let spec = Spec {
+            prefix: scratch.path().join("src-lepton/zig-out"),
+            ..spec(&scratch)
+        };
+
+        // No `src-lepton/icons/`: drawn from the project's SVG (Lepton's mark here).
+        let bundle = assert_ok!(assemble(&spec), "drawn");
+        for size in PNG_SIZES {
+            let png = bundle.join(format!(
+                "share/icons/hicolor/{size}x{size}/apps/dev.example.notes.png"
+            ));
+            ensure!(png.is_file(), "no {size} px icon: {}", png.display());
+        }
+
+        // With them, the files `lepton icon` wrote are the ones installed, byte for byte.
+        let icons = scratch.path().join("src-lepton/icons");
+        let source = scratch.path().join("mark.svg");
+        std::fs::write(&source, crate::commands::desktop_entry::DEFAULT_SVG)
+            .map_err(|error| lepton_orchestrator::testing::fail("write", error))?;
+        assert_ok!(
+            crate::commands::icon::write_icons(&source, &icons),
+            "lepton icon"
+        );
+        std::fs::write(icons.join("64x64.png"), b"the developer's own 64 px")
+            .map_err(|error| lepton_orchestrator::testing::fail("write", error))?;
+        let bundle = assert_ok!(assemble(&spec), "from icons");
+        let installed =
+            std::fs::read(bundle.join("share/icons/hicolor/64x64/apps/dev.example.notes.png"))
+                .map_err(|error| lepton_orchestrator::testing::fail("read", error))?;
+        ensure!(
+            installed == b"the developer's own 64 px",
+            "src-lepton/icons/64x64.png installed"
+        );
+
+        // A partial set is a stale one: refused with what to do.
+        std::fs::remove_file(icons.join("24x24.png"))
+            .map_err(|error| lepton_orchestrator::testing::fail("remove", error))?;
+        let refused = assert_err!(assemble(&spec), "partial");
+        assert_contains!(&refused.to_string(), "run `lepton icon` again");
         Ok(())
     }
 

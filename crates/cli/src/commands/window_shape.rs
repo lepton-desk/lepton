@@ -170,9 +170,10 @@ pub fn shape_window(steps: &mut [Step], root: &Path) -> Result<(), CliError> {
             .iter()
             .any(|step| is_core_build(step) && targets_windows(step))
     {
-        Some(match &shape.icon {
-            Some(icon) => icon.clone(),
-            None => default_icon(root)?,
+        Some(match (&shape.icon, super::icon::project_ico(root)) {
+            (Some(icon), _) => icon.clone(),
+            (None, Some(icon)) => icon,
+            (None, None) => default_icon(root)?,
         })
     } else {
         None

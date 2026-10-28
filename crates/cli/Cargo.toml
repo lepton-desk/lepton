@@ -26,6 +26,8 @@ cfb = "0.14"
 time = { version = "0.3", default-features = false }
 uuid = { version = "1", default-features = false }
 inquire = "0.9"
+# `lepton icon`: SVG and PNG sources drawn at every size a package needs (pure Rust).
+resvg = { version = "0.49", default-features = false, features = ["text", "system-fonts"] }
 lepton-core-vendoring = { path = "../core_vendoring" }
 lepton-orchestrator = { path = "../orchestrator" }
 lepton-template-injector = { path = "../template_injector" }
