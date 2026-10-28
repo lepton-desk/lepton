@@ -77,7 +77,40 @@ pub struct Bundle {
     /// The `.svg` in `bundle.icon`, relative to the project: the Linux desktop entry's and
     /// package's icon (`icons/hicolor/scalable/apps`). Without it, `src-lepton/icon.svg`.
     pub svg_icon: Option<String>,
+    /// What the packages say about the application (`bundle.description` and the rest).
+    pub details: Details,
 }
+
+/// What a package tells the system and its stores about the application, each optional:
+/// `description` (one line), `longDescription`, `license` (an SPDX expression),
+/// `homepage` (http or https), `copyright` (one line) and `category` (one of the
+/// freedesktop.org main categories, as the desktop entry's `Categories` takes it).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Details {
+    pub description: Option<String>,
+    pub long_description: Option<String>,
+    pub license: Option<String>,
+    pub homepage: Option<String>,
+    pub copyright: Option<String>,
+    pub category: Option<String>,
+}
+
+/// The desktop entry specification's main categories (Desktop Menu Specification, A.1).
+pub const CATEGORIES: [&str; 13] = [
+    "AudioVideo",
+    "Audio",
+    "Video",
+    "Development",
+    "Education",
+    "Game",
+    "Graphics",
+    "Network",
+    "Office",
+    "Science",
+    "Settings",
+    "System",
+    "Utility",
+];
 
 impl Default for Bundle {
     fn default() -> Self {
@@ -99,6 +132,7 @@ impl Bundle {
             deb_depends: None,
             icon: None,
             svg_icon: None,
+            details: Details::default(),
         }
     }
 }
@@ -170,7 +204,64 @@ pub fn parse_bundle_for(text: &str, windows: bool) -> Result<Bundle, ManifestErr
         deb_depends,
         icon,
         svg_icon,
+        details: details(section)?,
     })
+}
+
+fn details(section: &Value) -> Result<Details, ManifestError> {
+    let line = |key: &str| text(section, key, false);
+    let homepage = line("homepage")?;
+    if let Some(url) = &homepage
+        && !(url.starts_with("https://") || url.starts_with("http://"))
+    {
+        return Err(invalid(
+            "\"bundle.homepage\" must be an http:// or https:// address",
+        ));
+    }
+    let category = line("category")?;
+    if let Some(name) = &category
+        && !CATEGORIES.contains(&name.as_str())
+    {
+        return Err(invalid(&format!(
+            "\"bundle.category\" is {name:?}; one of {}",
+            CATEGORIES.join(", ")
+        )));
+    }
+    Ok(Details {
+        description: line("description")?,
+        long_description: text(section, "longDescription", true)?,
+        license: line("license")?,
+        homepage,
+        copyright: line("copyright")?,
+        category,
+    })
+}
+
+/// A non-empty string at `bundle.<key>`, trimmed. No control characters: these values are
+/// written into control files and desktop entries, where a newline starts a field of its
+/// own; `longDescription` alone may hold newlines (`multiline`), each written as the
+/// format wants it.
+fn text(section: &Value, key: &str, multiline: bool) -> Result<Option<String>, ManifestError> {
+    let rule = if multiline {
+        "a non-empty string, without control characters other than newlines"
+    } else {
+        "a non-empty string on one line"
+    };
+    match section.get(key) {
+        None => Ok(None),
+        Some(Value::String(value)) => {
+            let value = value.trim();
+            let refused = value.is_empty()
+                || value
+                    .chars()
+                    .any(|ch| ch.is_control() && !(multiline && ch == '\n'));
+            if refused {
+                return Err(invalid(&format!("\"bundle.{key}\" must be {rule}")));
+            }
+            Ok(Some(value.to_owned()))
+        }
+        Some(_) => Err(invalid(&format!("\"bundle.{key}\" must be {rule}"))),
+    }
 }
 
 const ICON_RULE: &str = "\"bundle.icon\" must be a path inside the project, or a list of them: an .ico for Windows and an .svg for Linux, one of each at most (Linux icons are scalable: a .png would need one file per size)";
@@ -228,9 +319,51 @@ fn invalid(reason: &str) -> ManifestError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bundle, BundleTarget, parse_bundle, parse_bundle_for};
+    use super::{Bundle, BundleTarget, Details, parse_bundle, parse_bundle_for};
     use lepton_orchestrator::testing::Failure;
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok};
+
+    #[test]
+    fn the_details_are_read_and_checked() -> Result<(), Failure> {
+        let text = r#"{"bundle":{"description":" Take notes ","longDescription":"Notes.\nOffline.","license":"MIT OR Apache-2.0","homepage":"https://example.com","copyright":"© 2026 Example","category":"Office"}}"#;
+        let bundle = assert_ok!(parse_bundle(text), "every detail");
+        assert_eq!(
+            bundle.details,
+            Details {
+                description: Some("Take notes".to_owned()),
+                long_description: Some("Notes.\nOffline.".to_owned()),
+                license: Some("MIT OR Apache-2.0".to_owned()),
+                homepage: Some("https://example.com".to_owned()),
+                copyright: Some("© 2026 Example".to_owned()),
+                category: Some("Office".to_owned()),
+            }
+        );
+        assert_eq!(
+            assert_ok!(parse_bundle("{}"), "none").details,
+            Details::default()
+        );
+        for (bad, says) in [
+            (
+                r#"{"bundle":{"description":"two\nlines"}}"#,
+                "bundle.description",
+            ),
+            (r#"{"bundle":{"description":"  "}}"#, "bundle.description"),
+            (r#"{"bundle":{"license":7}}"#, "bundle.license"),
+            (
+                r#"{"bundle":{"homepage":"example.com"}}"#,
+                "http:// or https://",
+            ),
+            (r#"{"bundle":{"category":"Productivity"}}"#, "AudioVideo"),
+            (
+                r#"{"bundle":{"longDescription":"tab\there"}}"#,
+                "bundle.longDescription",
+            ),
+        ] {
+            let error = assert_err!(parse_bundle(bad), "{bad}");
+            assert_contains!(&error.to_string(), says);
+        }
+        Ok(())
+    }
 
     #[test]
     fn the_icon_stays_inside_the_project() -> Result<(), Failure> {

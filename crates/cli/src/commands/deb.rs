@@ -24,6 +24,9 @@ pub struct Package<'a> {
     pub name: &'a str,
     pub version: &'a str,
     pub description: &'a str,
+    /// `bundle.longDescription`: the extended description under the synopsis.
+    pub long_description: Option<&'a str>,
+    pub homepage: Option<&'a str>,
     pub maintainer: &'a str,
     pub depends: &'a [String],
     pub mtime: u64,
@@ -162,7 +165,21 @@ pub fn control(package: &Package<'_>, installed: u64) -> Result<String, CliError
     }
     let _ = writeln!(text, "Section: misc");
     let _ = writeln!(text, "Priority: optional");
+    if let Some(homepage) = package.homepage {
+        let _ = writeln!(text, "Homepage: {}", one_line(homepage));
+    }
     let _ = writeln!(text, "Description: {}", one_line(package.description));
+    // Each extended line starts with a space; an empty one is ` .` (Debian Policy 5.6.13).
+    if let Some(long) = package.long_description {
+        for line in long.lines() {
+            let line = line.trim_end();
+            if line.is_empty() {
+                let _ = writeln!(text, " .");
+            } else {
+                let _ = writeln!(text, " {line}");
+            }
+        }
+    }
     Ok(text)
 }
 
@@ -269,6 +286,8 @@ mod tests {
             name: "notes_app",
             version: "1.2.0-beta.1+build.7",
             description: "Notes\n app",
+            long_description: Some("Notes keeps them.\n\nOffline too."),
+            homepage: Some("https://example.org/notes"),
             maintainer: "Ada <ada@example.org>",
             depends,
             mtime: 0,
@@ -357,7 +376,12 @@ mod tests {
         assert_contains!(&text, "Depends: libc6, libwayland-client0\n");
         // 10 B + 16 B rounds up to one KiB.
         assert_contains!(&text, "Installed-Size: 1\n");
-        assert_contains!(&text, "Description: Notes app\n");
+        assert_contains!(&text, "Homepage: https://example.org/notes\n");
+        // The synopsis, then the extended lines: a space each, ` .` for the empty one.
+        assert_contains!(
+            &text,
+            "Description: Notes app\n Notes keeps them.\n .\n Offline too.\n"
+        );
 
         let data: Vec<String> = tar_names(&members[2].1)?
             .into_iter()

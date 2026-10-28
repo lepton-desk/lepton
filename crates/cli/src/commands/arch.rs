@@ -31,6 +31,9 @@ pub struct Package<'a> {
     pub name: &'a str,
     pub version: &'a str,
     pub description: &'a str,
+    /// `bundle.homepage`, `bundle.license` (SPDX, as Arch writes licenses since 2023).
+    pub url: Option<&'a str>,
+    pub license: Option<&'a str>,
     /// Package names the binary needs, sorted.
     pub depends: &'a [String],
     pub mtime: u64,
@@ -132,6 +135,12 @@ pub fn pkginfo(package: &Package<'_>, installed: u64) -> String {
     let _ = writeln!(text, "pkgbase = {}", package.name);
     let _ = writeln!(text, "pkgver = {}-1", pkgver(package.version));
     let _ = writeln!(text, "pkgdesc = {}", one_line(package.description));
+    if let Some(url) = package.url {
+        let _ = writeln!(text, "url = {}", one_line(url));
+    }
+    if let Some(license) = package.license {
+        let _ = writeln!(text, "license = {}", one_line(license));
+    }
     let _ = writeln!(text, "builddate = {}", package.mtime);
     let _ = writeln!(text, "packager = Lepton");
     let _ = writeln!(text, "size = {installed}");
@@ -226,6 +235,8 @@ mod tests {
             name: "notes",
             version: "1.2.0-beta.1",
             description: "Notes\n  app",
+            url: Some("https://example.org/notes"),
+            license: Some("MIT"),
             depends,
             mtime: 0,
             out: scratch.path(),
@@ -297,6 +308,8 @@ mod tests {
             .unwrap_or_default();
         assert_contains!(&info, "pkgver = 1.2.0beta.1-1\n");
         assert_contains!(&info, "pkgdesc = Notes app\n");
+        assert_contains!(&info, "url = https://example.org/notes\n");
+        assert_contains!(&info, "license = MIT\n");
         assert_contains!(&info, "depend = glibc\ndepend = wayland\n");
         // bin/notes (10 B) + index.html (16 B) + desktop entry (16 B).
         assert_contains!(&info, "size = 42\n");

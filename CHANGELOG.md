@@ -17,6 +17,15 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Added
 
+- `bundle.description`, `longDescription`, `license`, `homepage`, `copyright`, `category`
+  (`template_injector/src/bundle.rs` `Details`; one line each but `longDescription`, no
+  control characters, `homepage` http(s), `category` one of the 13 freedesktop main
+  categories). The desktop entry gets `Comment` and `Categories` (`Development` without
+  one), Arch `pkgdesc`/`url`/`license`, the `.deb` `Description` with its extended lines
+  (` .` for an empty one) and `Homepage`. With `copyright` and `license` the Linux bundle
+  carries `share/doc/<package>/copyright` (copyright-format 1.0), and a `.deb` now refuses
+  to be written without them, as without a maintainer. The schema follows (ajv: the six
+  accepted, five bad values refused).
 - `lepton icon [source]` (`commands/icon.rs`): one square SVG, or a square PNG of at
   least 512 px, drawn by `resvg` (pure Rust, system fonts for lettering) into
   `src-lepton/icons/`: `<n>x<n>.png` for 16–512, `icon.ico` (PNG entries, 16–256, written

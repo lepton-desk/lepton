@@ -70,6 +70,7 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
             &spec.product,
             Path::new(&spec.binary),
             &schemes,
+            &spec.details,
         );
         super::desktop_entry::install(&applications, &spec.app_id, &entry)?;
         let svg = super::desktop_entry::project_icon(root)?;
@@ -86,8 +87,43 @@ pub fn assemble(spec: &Spec) -> Result<PathBuf, CliError> {
         }
     }
 
+    if spec.system == System::Linux
+        && let (Some(copyright), Some(license)) = (&spec.details.copyright, &spec.details.license)
+    {
+        let doc = bundle
+            .join("share/doc")
+            .join(super::deb::package_name(&spec.binary));
+        make_dir(&doc)?;
+        write(
+            &doc.join("copyright"),
+            copyright_file(
+                &spec.product,
+                spec.details.homepage.as_deref(),
+                copyright,
+                license,
+            ),
+        )?;
+    }
+
     write(&bundle.join(MARKER), format!("{}\n", bundle_name(spec)))?;
     Ok(bundle)
+}
+
+/// The machine-readable Debian copyright file (`copyright-format/1.0`): Debian policy wants
+/// one in every package, and it says who holds the copyright and under which licence to
+/// anyone who installs it on any distribution.
+pub fn copyright_file(
+    product: &str,
+    homepage: Option<&str>,
+    copyright: &str,
+    license: &str,
+) -> String {
+    let source = homepage
+        .map(|url| format!("Source: {url}\n"))
+        .unwrap_or_default();
+    format!(
+        "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\nUpstream-Name: {product}\n{source}\nFiles: *\nCopyright: {copyright}\nLicense: {license}\n"
+    )
 }
 
 /// Copies a directory tree, refusing anything that is neither a file nor a directory.

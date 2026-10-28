@@ -23,6 +23,7 @@ use super::build::{CORE_DIR, read_manifest};
 pub use super::package_tree::{assemble, bundle_name};
 use super::{CliError, Outcome};
 use crate::platform::System;
+use lepton_template_injector::Details;
 
 /// The file that marks a directory as one this command wrote, and may therefore replace.
 pub const MARKER: &str = ".lepton-package";
@@ -77,6 +78,9 @@ pub struct Spec {
     pub out: PathBuf,
     /// The system the build is for, which names the bundle and its executable.
     pub system: System,
+    /// `bundle.description` and the rest: the desktop entry's `Comment` and `Categories`,
+    /// the Debian copyright file.
+    pub details: Details,
 }
 
 impl Flags {
@@ -137,6 +141,7 @@ impl Flags {
             version: manifest.version.clone(),
             out: root.join(CORE_DIR).join("bundle"),
             system,
+            details: formats.details.clone(),
         };
         let bundle = assemble(&spec)?;
         if system == System::Linux && cfg!(target_os = "linux") {
@@ -348,7 +353,13 @@ pub fn write_target(
                 skip: &[MARKER],
                 name: &spec.binary,
                 version: &spec.version,
-                description: &spec.product,
+                description: formats
+                    .details
+                    .description
+                    .as_deref()
+                    .unwrap_or(&spec.product),
+                url: formats.details.homepage.as_deref(),
+                license: formats.details.license.as_deref(),
                 depends,
                 mtime: super::archive::release_time(),
                 out: &spec.out,
@@ -367,6 +378,13 @@ pub fn write_target(
                     "a .deb needs \"bundle.maintainer\" (\"Name <email>\") in lepton.config.json; Debian policy makes it mandatory",
                 ))
             })?;
+            // Debian policy: every package has `/usr/share/doc/<package>/copyright`, written
+            // by `assemble` from these two; refused rather than invented, like the maintainer.
+            if formats.details.copyright.is_none() || formats.details.license.is_none() {
+                return Err(CliError::Invalid(String::from(
+                    "a .deb needs \"bundle.copyright\" and \"bundle.license\" in lepton.config.json: Debian policy requires a copyright file in every package",
+                )));
+            }
             let debian = match &formats.deb_depends {
                 Some(listed) => listed.clone(),
                 None => debian_depends(bundle, &spec.binary)?,
@@ -376,7 +394,13 @@ pub fn write_target(
                 skip: &[MARKER],
                 name: &spec.binary,
                 version: &spec.version,
-                description: &spec.product,
+                description: formats
+                    .details
+                    .description
+                    .as_deref()
+                    .unwrap_or(&spec.product),
+                long_description: formats.details.long_description.as_deref(),
+                homepage: formats.details.homepage.as_deref(),
                 maintainer,
                 depends: &debian,
                 mtime: super::archive::release_time(),
@@ -403,7 +427,7 @@ mod tests {
     use super::{MARKER, Spec, assemble, bundle_name, write_target};
     use lepton_orchestrator::testing::{Failure, Scratch};
     use lepton_orchestrator::{assert_contains, assert_err, assert_ok, ensure};
-    use lepton_template_injector::{Bundle, BundleTarget};
+    use lepton_template_injector::{Bundle, BundleTarget, Details};
     use std::os::unix::fs::PermissionsExt as _;
 
     fn spec(scratch: &Scratch) -> Spec {
@@ -415,6 +439,7 @@ mod tests {
             version: String::from("1.2.0"),
             out: scratch.path().join("bundle"),
             system: crate::platform::System::Linux,
+            details: Details::default(),
         }
     }
 
@@ -636,6 +661,11 @@ mod tests {
             deb_depends: Some(vec![String::from("libc6")]),
             icon: None,
             svg_icon: None,
+            details: Details {
+                copyright: Some(String::from("© 2026 Ada")),
+                license: Some(String::from("MIT")),
+                ..Details::default()
+            },
         };
         let (_, line) = assert_ok!(
             write_target(&spec, &bundle, BundleTarget::Deb, &[], &formats),
@@ -643,6 +673,50 @@ mod tests {
         );
         assert_contains!(&line, "notes_1.2.0_");
         assert_contains!(&line, ".deb");
+        Ok(())
+    }
+
+    #[test]
+    fn the_copyright_file_is_written_and_a_deb_without_it_refused() -> Result<(), Failure> {
+        let scratch = Scratch::new("package-copyright")?;
+        built(&scratch, false)?;
+        let spec = Spec {
+            details: Details {
+                copyright: Some(String::from("© 2026 Ada")),
+                license: Some(String::from("MIT")),
+                homepage: Some(String::from("https://example.org/notes")),
+                ..Details::default()
+            },
+            ..spec(&scratch)
+        };
+        let bundle = assert_ok!(assemble(&spec), "packages");
+        let text = scratch.read(&format!(
+            "bundle/{}/share/doc/notes/copyright",
+            bundle_name(&spec)
+        ))?;
+        assert_contains!(
+            &text,
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n"
+        );
+        assert_contains!(
+            &text,
+            "Upstream-Name: Notes\nSource: https://example.org/notes\n"
+        );
+        assert_contains!(&text, "Files: *\nCopyright: © 2026 Ada\nLicense: MIT\n");
+
+        let unlicensed = Bundle {
+            targets: vec![BundleTarget::Deb],
+            maintainer: Some(String::from("Ada <ada@example.org>")),
+            deb_depends: Some(vec![String::from("libc6")]),
+            icon: None,
+            svg_icon: None,
+            details: Details::default(),
+        };
+        let error = assert_err!(
+            write_target(&spec, &bundle, BundleTarget::Deb, &[], &unlicensed),
+            "no licence"
+        );
+        assert_contains!(&error.to_string(), "bundle.copyright");
         Ok(())
     }
 
@@ -680,7 +754,7 @@ mod windows_tests {
     use crate::platform::System;
     use lepton_orchestrator::testing::{Failure, Scratch};
     use lepton_orchestrator::{assert_contains, assert_eq, assert_ok, ensure};
-    use lepton_template_injector::{Bundle, BundleTarget};
+    use lepton_template_injector::{Bundle, BundleTarget, Details};
 
     #[test]
     fn a_windows_bundle_holds_the_exe_and_the_frontend_and_no_desktop_entry() -> Result<(), Failure>
@@ -697,6 +771,7 @@ mod windows_tests {
             version: String::from("1.2.3"),
             out: scratch.path().join("bundle"),
             system: System::Windows,
+            details: Details::default(),
         };
         assert_eq!(
             bundle_name(&spec),

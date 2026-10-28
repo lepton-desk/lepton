@@ -10,6 +10,8 @@
 
 use std::path::{Path, PathBuf};
 
+use lepton_template_injector::Details;
+
 use super::CliError;
 
 /// The text of the entry, per the Desktop Entry Specification.
@@ -19,8 +21,15 @@ use super::CliError;
 /// `install_icon` writes under the same `app_id`.
 ///
 /// With `schemes` (`deepLinks`), the entry handles them (`MimeType`) and takes the link as
-/// its argument (`%u`).
-pub fn entry_text(app_id: &str, name: &str, exec: &Path, schemes: &[String]) -> String {
+/// its argument (`%u`). `details` gives the `Comment` (`bundle.description`) and the
+/// main category (`bundle.category`, `Development` without one).
+pub fn entry_text(
+    app_id: &str,
+    name: &str,
+    exec: &Path,
+    schemes: &[String],
+    details: &Details,
+) -> String {
     let (field_code, mime) = if schemes.is_empty() {
         (String::new(), String::new())
     } else {
@@ -30,8 +39,15 @@ pub fn entry_text(app_id: &str, name: &str, exec: &Path, schemes: &[String]) -> 
             .collect();
         (" %u".to_owned(), format!("MimeType={kinds}\n"))
     };
+    let comment = details
+        .description
+        .as_deref()
+        .map(|text| format!("Comment={}\n", escape_value(text)))
+        .unwrap_or_default();
+    // A main category from a fixed list (`lepton_template_injector::CATEGORIES`).
+    let category = details.category.as_deref().unwrap_or("Development");
     format!(
-        "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\nExec={exec}{field_code}\nIcon={app_id}\nTerminal=false\nStartupWMClass={app_id}\nCategories=Development;\n{mime}X-Lepton-Generated=true\n",
+        "[Desktop Entry]\nType=Application\nVersion=1.5\nName={name}\n{comment}Exec={exec}{field_code}\nIcon={app_id}\nTerminal=false\nStartupWMClass={app_id}\nCategories={category};\n{mime}X-Lepton-Generated=true\n",
         name = escape_value(name),
         exec = quote_exec(&exec.to_string_lossy()),
         // Escaped too: a newline in it once added keys of its own (`Exec=…`) to the entry.
@@ -137,7 +153,11 @@ pub fn register(root: &Path, app_id: &str, name: &str, exec: &Path) -> Result<Pa
         ))
     })?;
     let schemes = super::deep_links::read(root)?;
-    let entry = install(&dir, app_id, &entry_text(app_id, name, exec, &schemes))?;
+    let entry = install(
+        &dir,
+        app_id,
+        &entry_text(app_id, name, exec, &schemes, &Details::default()),
+    )?;
     if let Some(share) = dir.parent() {
         install_icon(share, app_id, &project_icon(root)?)?;
     }
@@ -251,6 +271,7 @@ mod tests {
     use super::{applications_dir, entry_text, install};
     use lepton_orchestrator::testing::{Failure, Scratch};
     use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok, ensure};
+    use lepton_template_injector::Details;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -260,7 +281,10 @@ mod tests {
             "run-app",
             Path::new("/opt/run-app/bin/run-app"),
             &[],
+            &Details::default(),
         );
+        assert_contains!(&text, "Categories=Development;\n");
+        ensure!(!text.contains("Comment="), "no description, no comment");
         assert_contains!(&text, "[Desktop Entry]\n");
         assert_contains!(&text, "StartupWMClass=run-app\n");
         assert_contains!(&text, "Exec=/opt/run-app/bin/run-app\n");
@@ -269,8 +293,27 @@ mod tests {
     }
 
     #[test]
+    fn the_description_and_category_reach_the_entry() -> Result<(), Failure> {
+        let details = Details {
+            description: Some("Take notes\\offline".to_owned()),
+            category: Some("Office".to_owned()),
+            ..Details::default()
+        };
+        let text = entry_text("a", "a", Path::new("/opt/a"), &[], &details);
+        assert_contains!(&text, "Comment=Take notes\\\\offline\n");
+        assert_contains!(&text, "Categories=Office;\n");
+        Ok(())
+    }
+
+    #[test]
     fn a_deep_link_scheme_is_handled_and_passed_as_the_argument() -> Result<(), Failure> {
-        let text = entry_text("a", "a", Path::new("/opt/a"), &["myapp".to_owned()]);
+        let text = entry_text(
+            "a",
+            "a",
+            Path::new("/opt/a"),
+            &["myapp".to_owned()],
+            &Details::default(),
+        );
         assert_contains!(&text, "Exec=/opt/a %u\n");
         assert_contains!(&text, "MimeType=x-scheme-handler/myapp;\n");
         Ok(())
@@ -278,7 +321,13 @@ mod tests {
 
     #[test]
     fn a_path_with_spaces_and_reserved_characters_stays_one_argument() -> Result<(), Failure> {
-        let text = entry_text("a", "a", Path::new("/home/x/My Apps/100% $cash/app"), &[]);
+        let text = entry_text(
+            "a",
+            "a",
+            Path::new("/home/x/My Apps/100% $cash/app"),
+            &[],
+            &Details::default(),
+        );
         // Quoted, `$` escaped inside quotes, `%` doubled, and the escaping backslash
         // itself doubled by the string-value rule.
         assert_contains!(&text, "Exec=\"/home/x/My Apps/100%% \\\\$cash/app\"\n");
