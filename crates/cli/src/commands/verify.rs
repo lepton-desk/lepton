@@ -80,6 +80,11 @@ pub fn verify(artifact: &Path, target: BundleTarget, binary: &str) -> Result<Rep
         let app_run = prefix.join("AppRun");
         let program = if target == BundleTarget::TarGz && app_run.is_file() {
             app_run
+        } else if target == BundleTarget::Zip
+            && prefix.join(crate::platform::executable(binary)).is_file()
+        {
+            // The portable zip: the program at its top.
+            prefix.join(crate::platform::executable(binary))
         } else if target == BundleTarget::AppImage {
             // Run as its user runs it: the file itself, which mounts its own file system.
             prefix.join(artifact.file_name().unwrap_or_default())

@@ -345,8 +345,9 @@ fn registerName(id: []const u16) void {
     _ = RegSetKeyValueW(hkey_current_user, @ptrCast(&key), wv.W("IconUri"), c.REG_SZ, &icon, @intCast((icon_units + 1) * 2));
 }
 
-/// `<prefix>\share\<name>\icon.ico` for `<prefix>\bin\<name>.exe`, NUL-terminated in
-/// `out`; its length in units, or null when the file is not there.
+/// `<prefix>\share\<name>\icon.ico` for `<prefix>\bin\<name>.exe` (an install, the MSI's),
+/// else `<dir>\share\<name>\icon.ico` for `<dir>\<name>.exe` (the portable zip's), NUL-
+/// terminated in `out`; its length in units, or null when neither file is there.
 fn iconPath(out: []u16) ?usize {
     var exe: [c.MAX_PATH]u16 = undefined;
     const length = c.GetModuleFileNameW(null, &exe, exe.len);
@@ -356,9 +357,15 @@ fn iconPath(out: []u16) ?usize {
 
 fn iconBeside(exe: []const u16, out: []u16) ?usize {
     const file_at = (std.mem.lastIndexOfScalar(u16, exe, '\\') orelse return null) + 1;
-    const bin = exe[0 .. file_at - 1];
-    const prefix = bin[0 .. std.mem.lastIndexOfScalar(u16, bin, '\\') orelse return null];
-    const file = exe[file_at..];
+    const dir = exe[0 .. file_at - 1];
+    if (std.mem.lastIndexOfScalar(u16, dir, '\\')) |parent| {
+        if (iconUnder(dir[0..parent], exe[file_at..], out)) |units| return units;
+    }
+    return iconUnder(dir, exe[file_at..], out);
+}
+
+/// `<prefix>\share\<stem of file>\icon.ico` when it exists.
+fn iconUnder(prefix: []const u16, file: []const u16, out: []u16) ?usize {
     const extension = wv.W(".exe");
     const stem = if (file.len > extension.len and std.ascii.eqlIgnoreCase(
         std.mem.sliceAsBytes(file[file.len - extension.len ..]),
@@ -528,4 +535,24 @@ test "the notification icon is the one installed beside the program" {
     const shown_len = try std.unicode.utf16LeToUtf8(&shown, out[0..units]);
     try std.testing.expect(std.mem.endsWith(u8, shown[0..shown_len], "\\share\\Notes\\icon.ico"));
     try std.testing.expect(std.mem.startsWith(u8, shown[0..shown_len], root[0..root_len]));
+}
+
+test "the portable zip's icon sits beside the program" {
+    const io = std.testing.io;
+    var dir = std.testing.tmpDir(.{});
+    defer dir.cleanup();
+    var root: [c.MAX_PATH]u8 = undefined;
+    const root_len = try dir.dir.realPath(io, &root);
+    var exe: [c.MAX_PATH]u16 = undefined;
+    const exe_len = try std.unicode.utf8ToUtf16Le(&exe, root[0..root_len]);
+    const program = wv.W("\\Notes\\Notes.exe");
+    @memcpy(exe[exe_len..][0..program.len], program);
+    const whole = exe[0 .. exe_len + program.len];
+    var out: [c.MAX_PATH + 64]u16 = undefined;
+    try dir.dir.createDirPath(io, "Notes/share/Notes");
+    try dir.dir.writeFile(io, .{ .sub_path = "Notes/share/Notes/icon.ico", .data = &.{ 0, 0, 1, 0 } });
+    const units = iconBeside(whole, &out) orelse return error.TestUnexpectedResult;
+    var shown: [c.MAX_PATH * 3]u8 = undefined;
+    const shown_len = try std.unicode.utf16LeToUtf8(&shown, out[0..units]);
+    try std.testing.expect(std.mem.endsWith(u8, shown[0..shown_len], "\\Notes\\share\\Notes\\icon.ico"));
 }

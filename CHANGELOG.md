@@ -136,6 +136,12 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Changed
 
+- The Windows zip is portable (`commands/portable.rs`): `<name>.exe` and its `<name>.ico`
+  (the build's `share\<name>\icon.ico`, else Lepton's mark) at its top, `share\` beside it
+  and a `README.txt` (CRLF) saying how to run it, where its data is and that the `.msi`
+  installs it. The bundle keeps `bin\` for the MSI; the template's `main.zig` and
+  `webview2/notifications.zig` now look for `share\<name>\…` beside the program too, after
+  the install layout. `--verify` starts the zip's program from its top.
 - A Linux `.tar.gz` is an AppDir (`commands/appdir.rs`): the bundle under `usr/`, and at
   the top `AppRun` (a POSIX sh script), `<identifier>.desktop`, `<identifier>.svg`,
   `.DirIcon` (the 256 px PNG), `install.sh` and `uninstall.sh`. `install.sh` copies `usr/`

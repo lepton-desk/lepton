@@ -385,16 +385,18 @@ fn frontendAddress(allocator: std.mem.Allocator, io: std.Io) ![:0]const u8 {{
     // from where it was started. `zig-out` is laid out the same way by the build.
     var exe_buffer: [std.fs.max_path_bytes]u8 = undefined;
     if (comptime windows) {{
-        // `<prefix>\bin\<name>.exe` beside `<prefix>\share\<name>\dist`, as on Linux.
+        // `<prefix>\bin\<name>.exe` beside `<prefix>\share\<name>\dist`, as on Linux (the
+        // MSI's install), else `<dir>\<name>.exe` beside `<dir>\share\<name>\dist` (the
+        // portable zip, the program at its top).
         if (std.process.executablePath(io, &exe_buffer)) |len| {{
             const exe = exe_buffer[0..len];
             const bin_dir = std.fs.path.dirname(exe) orelse "";
-            const prefix = std.fs.path.dirname(bin_dir) orelse "";
-            const directory = try std.fs.path.join(allocator, &.{{ prefix, "share", std.fs.path.stem(exe), frontend }});
-            defer allocator.free(directory);
-            const index = try std.fs.path.join(allocator, &.{{ directory, "index.html" }});
-            defer allocator.free(index);
-            if (prefix.len != 0) {{
+            for ([_][]const u8{{ std.fs.path.dirname(bin_dir) orelse "", bin_dir }}) |prefix| {{
+                if (prefix.len == 0) continue;
+                const directory = try std.fs.path.join(allocator, &.{{ prefix, "share", std.fs.path.stem(exe), frontend }});
+                defer allocator.free(directory);
+                const index = try std.fs.path.join(allocator, &.{{ directory, "index.html" }});
+                defer allocator.free(index);
                 if (std.Io.Dir.accessAbsolute(io, index, .{{}})) |_| {{
                     return std.fmt.allocPrintSentinel(allocator, "file://{{s}}", .{{directory}}, 0);
                 }} else |_| {{}}

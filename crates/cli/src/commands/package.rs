@@ -368,8 +368,10 @@ pub fn write_target(
         BundleTarget::Zip => {
             let name = bundle_name(spec);
             let out = spec.out.join(format!("{name}.zip"));
+            // Portable: the program at the top, `share\` beside it (`portable.rs`).
+            let portable = super::portable::lay_out(spec, bundle, &name)?;
             let digest = super::zip::write(
-                bundle,
+                &portable,
                 &name,
                 &[MARKER],
                 &out,
@@ -862,6 +864,34 @@ mod windows_tests {
             assert_contains!(&line, "notes-1.2.3-windows-");
             ensure!(artifact.is_file(), "{} written", artifact.display());
         }
+        // The zip is portable: the program at its top, `share\` and a README beside it.
+        let unpacked = scratch.path().join("unzipped");
+        let name = bundle_name(&spec);
+        assert_ok!(
+            crate::commands::zip::unpack(&spec.out.join(format!("{name}.zip")), &unpacked),
+            "unzip"
+        );
+        let top = unpacked.join(&name);
+        for file in [
+            "notes.exe",
+            "notes.ico",
+            "share/notes/dist/index.html",
+            "README.txt",
+        ] {
+            ensure!(top.join(file).is_file(), "{file} missing from the zip");
+        }
+        for absent in ["bin", MARKER] {
+            ensure!(!top.join(absent).exists(), "{absent} in the portable zip");
+        }
+        // No icon built in this test: Lepton's mark, an `.ico` (`ICONDIR`: 0, 1).
+        let icon = std::fs::read(top.join("notes.ico"))
+            .map_err(|error| lepton_orchestrator::testing::fail("read", error))?;
+        ensure!(icon.starts_with(&[0, 0, 1, 0]), "notes.ico is an .ico");
+        let readme = std::fs::read_to_string(top.join("README.txt"))
+            .map_err(|error| lepton_orchestrator::testing::fail("read", error))?;
+        assert_contains!(&readme, "Notes 1.2.3\r\n");
+        assert_contains!(&readme, "Run notes.exe.");
+        assert_contains!(&readme, "%LOCALAPPDATA%\\style.lepton.notes");
         Ok(())
     }
 }

@@ -39,6 +39,7 @@ pub mod package;
 pub mod package_manager;
 pub mod package_tree;
 pub mod plugins;
+pub mod portable;
 pub mod record;
 pub mod report;
 pub mod run;
