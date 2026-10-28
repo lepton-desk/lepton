@@ -16,8 +16,11 @@ const SOURCE: &str = "lepton.config.json";
 /// One release format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BundleTarget {
-    /// `<name>-<version>-linux-<arch>.tar.gz`: the install prefix, unpackable anywhere.
+    /// `<name>-<version>-linux-<arch>.tar.gz`: an AppDir that runs where it is unpacked and
+    /// installs itself (`install.sh`).
     TarGz,
+    /// `<name>-<version>-<arch>.AppImage`: the AppDir as one runnable file.
+    AppImage,
     /// An Arch Linux package (`.pkg.tar.zst`).
     Arch,
     /// A Debian package (`.deb`).
@@ -30,12 +33,20 @@ pub enum BundleTarget {
 
 impl BundleTarget {
     /// Every format, in the spelling the configuration uses.
-    pub const ALL: [Self; 5] = [Self::TarGz, Self::Arch, Self::Deb, Self::Zip, Self::Msi];
+    pub const ALL: [Self; 6] = [
+        Self::TarGz,
+        Self::AppImage,
+        Self::Arch,
+        Self::Deb,
+        Self::Zip,
+        Self::Msi,
+    ];
 
     /// The spelling in `bundle.targets`.
     pub fn name(self) -> &'static str {
         match self {
             Self::TarGz => "tar.gz",
+            Self::AppImage => "appimage",
             Self::Arch => "arch",
             Self::Deb => "deb",
             Self::Zip => "zip",
@@ -43,9 +54,10 @@ impl BundleTarget {
         }
     }
 
-    /// Whether the format is a Linux package (Arch, Debian): only a Linux build can be one.
+    /// Whether the format is a Linux package (AppImage, Arch, Debian): only a Linux build can
+    /// be one.
     pub fn linux_only(self) -> bool {
-        matches!(self, Self::Arch | Self::Deb)
+        matches!(self, Self::AppImage | Self::Arch | Self::Deb)
     }
 
     /// Whether the format installs on Windows only (it carries a Windows build).
@@ -623,11 +635,11 @@ mod tests {
     #[test]
     fn an_unknown_format_names_the_known_ones() -> Result<(), Failure> {
         let error = assert_err!(
-            parse_bundle(r#"{"bundle":{"targets":["appimage"]}}"#),
+            parse_bundle(r#"{"bundle":{"targets":["dmg"]}}"#),
             "unknown format"
         );
-        assert_contains!(&error.reason, "\"appimage\"");
-        assert_contains!(&error.reason, "tar.gz, arch, deb, zip, msi");
+        assert_contains!(&error.reason, "\"dmg\"");
+        assert_contains!(&error.reason, "tar.gz, appimage, arch, deb, zip, msi");
         Ok(())
     }
 

@@ -8,6 +8,7 @@
 //! untestable without a machine.
 
 pub mod appdir;
+pub mod appimage;
 pub mod arch;
 pub mod archive;
 pub mod build;

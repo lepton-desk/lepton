@@ -11,13 +11,20 @@ commit'i HEAD'den, `.SRCINFO`'lar yeniden. Platform paketini `stage.mjs` yazar.
 Sürüm hazırlığının nerede durduğu, neyin ölçüldüğü ve Windows'ta neyin ölçülmeyi beklediği: `docs/durum.md`.
 
 Yayımlanacaklar, bu sırayla: `@lepton-desk/cli-win32-x64` (**Windows'ta**, aşağıda) → `@lepton-desk/cli-linux-x64` → `@lepton-desk/cli` →
-`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `@lepton-desk/servo-linux-x64` (deneysel; kimse ona bağlı değil, projeler `-D` ile kurar) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
+`@lepton-desk/api` → eklentiler (`plugin-os`, `plugin-clipboard`, `plugin-fs`, `plugin-dialog`; `api`'ye eş bağımlı) → `@lepton-desk/servo-linux-x64` (deneysel; kimse ona bağlı değil, projeler `-D` ile kurar) → `@lepton-desk/appimage-runtime-linux-x64` (AppImage'ın runtime'ı; projeler `-D` ile kurar) → `create-lepton-app` (en son; `@lepton-desk/cli`'nin aynı sürümüne bağlı). Platform paketi önce gider; `cli` ona `optionalDependencies` ile bağlı.
 
 **Servo kitaplığı** (0.1.9-beta.2'den): CI derler (`servo-bridge` iş akışı, ~12 dk). O çalıştırmanın `liblepton_servo` artifact'ını indirip yerleştirin; betik ELF'i denetler, boyutu ve SHA-256'yı yazar (CI raporundaki `sha256:` satırıyla aynı olmalı):
 
 ```bash
 gh run download <run-id> -n liblepton_servo -D /tmp/servo
 node tools/stage-servo.mjs /tmp/servo/liblepton_servo.so.xz
+```
+
+**AppImage runtime'ı** (0.1.9-beta.3'ten): AppImage/type2-runtime `20251108` sürümünün `runtime-x86_64`'ü, değiştirilmeden. İndirip yerleştirin; betik SHA-256'yı (`2fca8b44…ec260d`, CLI'ın denetlediğiyle aynı) tutmazsa reddeder:
+
+```bash
+curl -fsSL -o /tmp/runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+node tools/stage-appimage-runtime.mjs /tmp/runtime-x86_64
 ```
 
 ## 1. Sizin kararınız gerekenler (ön kontrol bunlarsız geçmez)
@@ -131,6 +138,12 @@ cd packages/servo-linux-x64 && npm publish --tag beta
 ```
 
 `servo-linux-x64`'ün kitaplığı git'te değil: yayından önce yerleştirilmiş olmalı (yukarıda, "Servo kitaplığı").
+
+```bash
+cd packages/appimage-runtime-linux-x64 && npm publish --tag beta
+```
+
+Runtime da git'te değil: yukarıdaki "AppImage runtime'ı" adımıyla yerleştirilmiş olmalı.
 
 ```bash
 cd packages/create-lepton-app && npm publish --tag beta

@@ -17,6 +17,19 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Added
 
+- The `appimage` format (`commands/appimage.rs`): the AppDir as a squashfs behind
+  AppImage/type2-runtime `20251108`'s `runtime-x86_64`, `<binary>-<version>-x86_64.AppImage`.
+  The runtime ships unchanged in the new `@lepton-desk/appimage-runtime-linux-x64` (staged
+  by `tools/stage-appimage-runtime.mjs`, its SHA-256 `2fca8b44…ec260d` checked there and by
+  `lepton package`; `LICENSE` is the runtime's, `THIRD-PARTY.md` names the libfuse 3.15.0
+  and squashfuse 0.5.2 sources). The squashfs is written by `backhand` 0.25 with gzip only
+  (`flate2`, no C), root-owned, timed by `SOURCE_DATE_EPOCH`, entries sorted: two runs give
+  the same bytes, with and without it (measured). Measured on the probe app: 1 092 088
+  bytes; `--appimage-extract` gives the AppDir back exactly; `--verify` runs the file
+  (FUSE-mounted, 8 processes, closed in 0.08 s, no process or mount left). The runtime
+  needs a setuid-root `fusermount`/`fusermount3` on `PATH` (`runtime.c`). x86-64 only:
+  the arm64 runtime is for the arm64 packaging item. `tools/npm-preflight.sh`,
+  `release-version.mjs` and `docs/yayin.md` know the package.
 - AppStream metainfo in every Linux bundle (`commands/metainfo.rs`):
   `share/metainfo/<identifier>.metainfo.xml` with the required `id`, `name`, `summary`
   (`bundle.description`, else `productName`), `description` (`bundle.longDescription` in

@@ -301,6 +301,32 @@ pub fn write_target(
                 format!("{}  {} bytes  sha256 {digest}", out.display(), size),
             ))
         }
+        BundleTarget::AppImage => {
+            // The same AppDir the `.tar.gz` is (`appdir.rs`), as one file with AppImage's
+            // runtime in front of it (`appimage.rs`).
+            let name = bundle_name(spec);
+            let appdir = super::appdir::lay_out(spec, bundle, &name)?;
+            let root = spec
+                .prefix
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or(&spec.prefix);
+            let runtime = super::appimage::runtime(root)?;
+            let (out, digest) = super::appimage::write(
+                &appdir,
+                &runtime,
+                &spec.out,
+                &super::appimage::file_name(&spec.binary, &spec.version),
+                super::archive::release_time(),
+            )?;
+            let size = std::fs::metadata(&out)
+                .map_err(|error| io(&out, "inspect", &error))?
+                .len();
+            Ok((
+                out.clone(),
+                format!("{}  {} bytes  sha256 {digest}", out.display(), size),
+            ))
+        }
         BundleTarget::Msi => {
             let out = spec.out.join(format!("{}.msi", bundle_name(spec)));
             // The publisher Settings → Apps shows: `bundle.maintainer` when given, else the

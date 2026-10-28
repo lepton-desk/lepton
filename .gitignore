@@ -22,3 +22,4 @@ zig-out/
 
 # Staged by tools/stage-servo.mjs from the CI artifact; published to npm, not kept in git
 /packages/servo-linux-x64/lib/
+/packages/appimage-runtime-linux-x64/runtime-x86_64

@@ -80,6 +80,9 @@ pub fn verify(artifact: &Path, target: BundleTarget, binary: &str) -> Result<Rep
         let app_run = prefix.join("AppRun");
         let program = if target == BundleTarget::TarGz && app_run.is_file() {
             app_run
+        } else if target == BundleTarget::AppImage {
+            // Run as its user runs it: the file itself, which mounts its own file system.
+            prefix.join(artifact.file_name().unwrap_or_default())
         } else {
             prefix.join("bin").join(crate::platform::executable(binary))
         };
@@ -126,6 +129,15 @@ pub fn unpack(artifact: &Path, target: BundleTarget, into: &Path) -> Result<Path
                     CliError::Invalid(format!("{} is not a .tar.gz", artifact.display()))
                 })?;
             Ok(into.join(top))
+        }
+        BundleTarget::AppImage => {
+            // Nothing to unpack: a copy in the scratch directory, run from there.
+            let name = artifact.file_name().ok_or_else(|| {
+                CliError::Invalid(format!("{} has no file name", artifact.display()))
+            })?;
+            std::fs::copy(artifact, into.join(name))
+                .map_err(|error| io(artifact, "copy", &error))?;
+            Ok(into.to_path_buf())
         }
         BundleTarget::Arch => {
             let decoder = ruzstd::decoding::StreamingDecoder::new(file).map_err(|error| {

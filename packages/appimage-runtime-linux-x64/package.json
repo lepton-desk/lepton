@@ -1,0 +1,27 @@
+{
+  "name": "@lepton-desk/appimage-runtime-linux-x64",
+  "version": "0.1.9-beta.2",
+  "description": "The AppImage type-2 runtime for linux-x64, unchanged from AppImage/type2-runtime 20251108: what `lepton package` puts in front of an AppImage's file system. Install it as a dev dependency of a project that packages an AppImage.",
+  "license": "MIT AND LGPL-2.1-only AND BSD-2-Clause AND (BSD-3-Clause OR GPL-2.0-only) AND Zlib",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lepton-desk/lepton.git",
+    "directory": "packages/appimage-runtime-linux-x64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "runtime-x86_64",
+    "LICENSE",
+    "THIRD-PARTY.md",
+    "README.md"
+  ],
+  "preferUnplugged": true,
+  "publishConfig": {
+    "access": "public"
+  }
+}
