@@ -159,6 +159,33 @@ pub fn copyright_file(
     )
 }
 
+/// [`copy_tree`] without the top-level names in `skip` (the bundle's marker).
+pub(super) fn copy_tree_skipping(from: &Path, to: &Path, skip: &[&str]) -> Result<(), CliError> {
+    make_dir(to)?;
+    let entries = std::fs::read_dir(from).map_err(|error| io(from, "list", &error))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| io(from, "list", &error))?;
+        if skip.iter().any(|name| entry.file_name() == *name) {
+            continue;
+        }
+        let kind = entry
+            .file_type()
+            .map_err(|error| io(&entry.path(), "inspect", &error))?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else if kind.is_file() {
+            copy_file(&entry.path(), &target)?;
+        } else {
+            return Err(CliError::Invalid(format!(
+                "{} is not a regular file; a release ships only files it chose",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Copies a directory tree, refusing anything that is neither a file nor a directory.
 ///
 /// A symbolic link in a frontend bundle could point anywhere on the build machine, and

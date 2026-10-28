@@ -273,13 +273,26 @@ pub fn write_target(
         BundleTarget::TarGz => {
             let name = bundle_name(spec);
             let out = spec.out.join(format!("{name}.tar.gz"));
-            let digest = super::archive::tar_gz(
-                bundle,
-                &name,
-                &[MARKER],
-                &out,
-                super::archive::release_time(),
-            )?;
+            // On Linux the archive is the AppDir (`appdir.rs`): it runs where it is unpacked
+            // and installs itself. Its top directory keeps the bundle's name.
+            let digest = if spec.system == System::Linux {
+                let appdir = super::appdir::lay_out(spec, bundle, &name)?;
+                super::archive::tar_gz(
+                    &appdir,
+                    &name,
+                    &[MARKER],
+                    &out,
+                    super::archive::release_time(),
+                )?
+            } else {
+                super::archive::tar_gz(
+                    bundle,
+                    &name,
+                    &[MARKER],
+                    &out,
+                    super::archive::release_time(),
+                )?
+            };
             let size = std::fs::metadata(&out)
                 .map_err(|error| io(&out, "inspect", &error))?
                 .len();
@@ -599,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tarball_unpacks_to_the_bundle_without_its_marker() -> Result<(), Failure> {
+    fn the_tarball_is_an_appdir_without_the_marker() -> Result<(), Failure> {
         let scratch = Scratch::new("package-targz")?;
         built(&scratch, true)?;
         let spec = spec(&scratch);
@@ -618,28 +631,35 @@ mod tests {
         archive
             .unpack(&unpacked)
             .map_err(|error| lepton_orchestrator::testing::fail("unpack", error))?;
-        ensure!(
-            unpacked.join(&name).join("bin/notes").is_file(),
-            "binary missing"
-        );
-        ensure!(
-            unpacked
-                .join(&name)
-                .join("share/notes/dist/index.html")
-                .is_file(),
-            "frontend missing"
-        );
-        ensure!(
-            unpacked
-                .join(&name)
-                .join("share/applications/dev.example.notes.desktop")
-                .is_file(),
-            "desktop entry missing"
-        );
-        ensure!(
-            !unpacked.join(&name).join(MARKER).exists(),
-            "marker shipped"
-        );
+        let top = unpacked.join(&name);
+        // The AppImage specification's four at the top, and the bundle under `usr/`.
+        for file in [
+            "AppRun",
+            "install.sh",
+            "uninstall.sh",
+            "dev.example.notes.desktop",
+            "dev.example.notes.svg",
+            ".DirIcon",
+            "usr/bin/notes",
+            "usr/share/notes/dist/index.html",
+            "usr/share/applications/dev.example.notes.desktop",
+            "usr/share/metainfo/dev.example.notes.metainfo.xml",
+        ] {
+            ensure!(top.join(file).is_file(), "{file} missing");
+        }
+        for script in ["AppRun", "install.sh", "uninstall.sh", "usr/bin/notes"] {
+            let mode = std::fs::metadata(top.join(script))
+                .map_err(|error| lepton_orchestrator::testing::fail("stat", error))?
+                .permissions()
+                .mode();
+            ensure!(mode & 0o111 != 0, "{script} is not executable ({mode:o})");
+        }
+        let dir_icon = std::fs::read(top.join(".DirIcon"))
+            .map_err(|error| lepton_orchestrator::testing::fail("read", error))?;
+        ensure!(dir_icon.starts_with(b"\x89PNG"), ".DirIcon is a PNG");
+        for marked in [top.join(MARKER), top.join("usr").join(MARKER)] {
+            ensure!(!marked.exists(), "marker shipped: {}", marked.display());
+        }
         Ok(())
     }
 

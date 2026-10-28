@@ -76,7 +76,13 @@ pub fn verify(artifact: &Path, target: BundleTarget, binary: &str) -> Result<Rep
     let scratch = fresh_dir(target)?;
     let result = unpack(artifact, target, &scratch).and_then(|prefix| {
         let unpacked = tree_size(&scratch)?;
-        let program = prefix.join("bin").join(crate::platform::executable(binary));
+        // An AppDir (a Linux `.tar.gz`) is started as its user starts it, through `AppRun`.
+        let app_run = prefix.join("AppRun");
+        let program = if target == BundleTarget::TarGz && app_run.is_file() {
+            app_run
+        } else {
+            prefix.join("bin").join(crate::platform::executable(binary))
+        };
         #[cfg(windows)]
         let mut report = super::verify_windows::run_and_measure(&program, &scratch)?;
         #[cfg(unix)]

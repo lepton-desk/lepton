@@ -253,19 +253,27 @@ fn executable(meta: &std::fs::Metadata, _: &Path) -> bool {
 }
 
 /// Windows keeps no execute bit, so the archive's member is marked by where it sits: the
-/// program is `bin/<name>` in every bundle (`package.rs`). A `tar.gz` made on Windows
+/// program is `bin/<name>` in every bundle (`package.rs`), and an AppDir's `AppRun`,
+/// `install.sh` and `uninstall.sh` sit at its top (`appdir.rs`). A `tar.gz` made on Windows
 /// otherwise unpacked on Linux with a program that would not start.
 #[cfg(not(unix))]
 fn executable(_: &std::fs::Metadata, path: &Path) -> bool {
     marked_executable(path)
 }
 
-/// Whether `path` (inside the bundle) is the program: a file directly under a `bin` folder.
+/// Whether `path` (inside the bundle) is a program: a file directly under a `bin` folder,
+/// or one of the AppDir's scripts at the archive's top (`<top>/AppRun`).
 #[cfg_attr(unix, allow(dead_code))]
 fn marked_executable(path: &Path) -> bool {
-    path.parent()
+    let in_bin = path
+        .parent()
         .and_then(Path::file_name)
-        .is_some_and(|folder| folder == "bin")
+        .is_some_and(|folder| folder == "bin");
+    let script = path.components().count() == 2
+        && path
+            .file_name()
+            .is_some_and(|name| super::appdir::SCRIPTS.iter().any(|script| name == *script));
+    in_bin || script
 }
 
 pub(super) fn io(path: &Path, verb: &str, error: &std::io::Error) -> CliError {

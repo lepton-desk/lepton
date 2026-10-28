@@ -7,6 +7,7 @@
 //! run something. A command that reached past those boundaries would make the CLI
 //! untestable without a machine.
 
+pub mod appdir;
 pub mod arch;
 pub mod archive;
 pub mod build;

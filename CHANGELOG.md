@@ -123,6 +123,16 @@ both are listed here, though the Linux beta.2 core already answers them.
 
 ### Changed
 
+- A Linux `.tar.gz` is an AppDir (`commands/appdir.rs`): the bundle under `usr/`, and at
+  the top `AppRun` (a POSIX sh script), `<identifier>.desktop`, `<identifier>.svg`,
+  `.DirIcon` (the 256 px PNG), `install.sh` and `uninstall.sh`. `install.sh` copies `usr/`
+  into `~/.local` (or `/usr/local` with `--system`), makes the entry's `Exec` absolute and
+  lists the files it wrote and the directories that did not exist before; `uninstall.sh`
+  removes those, deepest directory first, a desktop cache left alone in one of them with
+  it. Measured in a fresh home (nothing left) and one shared with another app (its files
+  and the shared `mimeinfo.cache` kept); `desktop-file-validate` passes the installed
+  entry. `--system` not measured (needs sudo). `--verify` starts the `.tar.gz` through
+  `AppRun`; on Windows the archive marks the three scripts executable by name.
 - API freeze for 0.1.9 (`docs/plans/uyumluluk-0.2.0.md`): the transport's shapes left the
   SDK's entry points. `encodeRequest`, `decodeReply`, `wireLayout`, `commandId`, the layout
   types and `decodeEvents` are `src/wire.ts`; `decodeState`, `encodeMenu`, `decodeDownload`
