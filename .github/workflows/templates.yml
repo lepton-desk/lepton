@@ -2,7 +2,7 @@
 # dependencies installed and must pass `biome check` with the Biome it pins
 # (`BIOME_VERSION`, crates/template_injector/src/assets.rs). And the JavaScript forms of
 # the injected sources must still be what TypeScript 7 makes of their TypeScript
-# (`tools/transpile-assets.mjs --check`).
+# (`tools/transpile-assets.mjs --check`), and tools/ passes `biome check`.
 name: templates
 
 on:
@@ -11,7 +11,7 @@ on:
     paths:
       - "crates/template_injector/**"
       - "crates/cli/src/commands/new*.rs"
-      - "tools/transpile-assets.mjs"
+      - "tools/**"
       - "packages/api/package.json"
       - "packages/api/pnpm-lock.yaml"
       - ".github/workflows/templates.yml"
@@ -19,7 +19,7 @@ on:
     paths:
       - "crates/template_injector/**"
       - "crates/cli/src/commands/new*.rs"
-      - "tools/transpile-assets.mjs"
+      - "tools/**"
       - "packages/api/package.json"
       - "packages/api/pnpm-lock.yaml"
       - ".github/workflows/templates.yml"
@@ -42,6 +42,10 @@ jobs:
           packages/api/node_modules/.bin/biome --version
       - name: Generated files match their sources
         run: node tools/transpile-assets.mjs --check
+      # The scripts themselves, with tools/biome.json (packages/*'s rules).
+      - name: tools/ biome check
+        working-directory: tools
+        run: ../packages/api/node_modules/.bin/biome check .
 
   # The CLI once, for the 19 scaffolds.
   cli:

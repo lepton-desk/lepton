@@ -20,48 +20,67 @@ const check = process.argv.includes("--check");
 /// Each output: the source, its entry point, the profile (shader model 4.0: feature level
 /// 10_0, the floor that keeps Vista in reach), and the file the core embeds.
 const outputs = [
-	{ source: "scene.hlsl", entry: "vs_main", profile: "vs_4_0", output: "scene_vs.dxbc" },
-	{ source: "scene.hlsl", entry: "ps_main", profile: "ps_4_0", output: "scene_ps.dxbc" },
+  { source: "scene.hlsl", entry: "vs_main", profile: "vs_4_0", output: "scene_vs.dxbc" },
+  { source: "scene.hlsl", entry: "ps_main", profile: "ps_4_0", output: "scene_ps.dxbc" },
 ];
 
 function fxc() {
-	if (process.env.FXC) return process.env.FXC;
-	const kits = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
-	if (!existsSync(kits)) fail(`no Windows SDK under ${kits}; set FXC to fxc.exe`);
-	const versions = readdirSync(kits)
-		.filter((name) => /^10\.\d+\.\d+\.\d+$/.test(name) && existsSync(join(kits, name, "x64", "fxc.exe")))
-		.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-	if (versions.length === 0) fail(`no x64\\fxc.exe under ${kits}; set FXC to fxc.exe`);
-	return join(kits, versions[versions.length - 1], "x64", "fxc.exe");
+  if (process.env.FXC) return process.env.FXC;
+  const kits = "C:\\Program Files (x86)\\Windows Kits\\10\\bin";
+  if (!existsSync(kits)) fail(`no Windows SDK under ${kits}; set FXC to fxc.exe`);
+  const versions = readdirSync(kits)
+    .filter(
+      (name) => /^10\.\d+\.\d+\.\d+$/.test(name) && existsSync(join(kits, name, "x64", "fxc.exe")),
+    )
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (versions.length === 0) fail(`no x64\\fxc.exe under ${kits}; set FXC to fxc.exe`);
+  return join(kits, versions[versions.length - 1], "x64", "fxc.exe");
 }
 
 function fail(message) {
-	console.error(`d3d11-shaders: ${message}`);
-	process.exit(1);
+  console.error(`d3d11-shaders: ${message}`);
+  process.exit(1);
 }
 
 const compiler = fxc();
 const into = check ? mkdtempSync(join(tmpdir(), "lepton-dxbc-")) : shaders;
 let differ = 0;
 try {
-	for (const { source, entry, profile, output } of outputs) {
-		const target = join(into, output);
-		// Stripped of debug data and reflection: the bytes then depend only on the source
-		// and these flags, not on the path the source was compiled from.
-		execFileSync(compiler, ["/nologo", "/O3", "/Qstrip_debug", "/Qstrip_reflect", "/T", profile, "/E", entry, "/Fo", target, join(shaders, source)], {
-			stdio: ["ignore", "ignore", "inherit"],
-		});
-		const bytes = readFileSync(target);
-		if (check) {
-			const kept = join(shaders, output);
-			const same = existsSync(kept) && Buffer.compare(readFileSync(kept), bytes) === 0;
-			if (!same) differ += 1;
-			console.log(`${same ? "same  " : "DIFFER"} ${output} (${bytes.length} bytes)`);
-		} else {
-			console.log(`wrote ${output}: ${bytes.length} bytes (${profile} ${entry})`);
-		}
-	}
+  for (const { source, entry, profile, output } of outputs) {
+    const target = join(into, output);
+    // Stripped of debug data and reflection: the bytes then depend only on the source
+    // and these flags, not on the path the source was compiled from.
+    execFileSync(
+      compiler,
+      [
+        "/nologo",
+        "/O3",
+        "/Qstrip_debug",
+        "/Qstrip_reflect",
+        "/T",
+        profile,
+        "/E",
+        entry,
+        "/Fo",
+        target,
+        join(shaders, source),
+      ],
+      {
+        stdio: ["ignore", "ignore", "inherit"],
+      },
+    );
+    const bytes = readFileSync(target);
+    if (check) {
+      const kept = join(shaders, output);
+      const same = existsSync(kept) && Buffer.compare(readFileSync(kept), bytes) === 0;
+      if (!same) differ += 1;
+      console.log(`${same ? "same  " : "DIFFER"} ${output} (${bytes.length} bytes)`);
+    } else {
+      console.log(`wrote ${output}: ${bytes.length} bytes (${profile} ${entry})`);
+    }
+  }
 } finally {
-	if (check) rmSync(into, { recursive: true, force: true });
+  if (check) rmSync(into, { recursive: true, force: true });
 }
-if (differ > 0) fail(`${differ} shader(s) differ from their source: run node tools/d3d11-shaders.mjs`);
+if (differ > 0)
+  fail(`${differ} shader(s) differ from their source: run node tools/d3d11-shaders.mjs`);
