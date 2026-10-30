@@ -18,8 +18,8 @@ use servo::{
     ConsoleLogLevel, ContextMenu, ContextMenuAction, ContextMenuElementInformationFlags, Cursor,
     DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, InputEvent, JSValue,
     KeyboardEvent, LoadStatus, MouseButton, MouseButtonAction, MouseButtonEvent,
-    MouseLeftViewportEvent, MouseMoveEvent, NavigationRequest, Opts, Preferences, RenderingContext,
-    Servo, ServoBuilder, UserContentManager, UserScript, WebView, WebViewBuilder, WebViewDelegate,
+    MouseLeftViewportEvent, MouseMoveEvent, NavigationRequest, Opts, RenderingContext, Servo,
+    ServoBuilder, UserContentManager, UserScript, WebView, WebViewBuilder, WebViewDelegate,
     WheelDelta, WheelEvent, WheelMode, WindowRenderingContext,
 };
 use url::Url;
@@ -256,17 +256,13 @@ impl Engine {
             config_dir: data_directory,
             ..Opts::default()
         };
-        // WebGL 2, which Servo 0.6 ships switched off (`dom_webgl2_enabled`). Without it a 3D
-        // engine falls back to WebGL 1 and its slower paths: measured with Babylon.js, the main
-        // pass took 2-2.5x as long as in Chromium, one `uniformMatrix4fv` per matrix where
-        // WebGL 2 uploads a uniform buffer.
-        let preferences = Preferences {
-            dom_webgl2_enabled: true,
-            ..Preferences::default()
-        };
+        // WebGL 2 stays as Servo 0.6 ships it, off (`dom_webgl2_enabled`). Turned on (cd6de60)
+        // it panicked on sRGB image textures (fixed in `servo/patches/servo-webgl`), then drew
+        // a Babylon.js game's grass black where WebGL 1 draws it right, and measured no faster:
+        // bone matrices still go one `uniformMatrix4fv` each, and every WebGL call is a message
+        // to Servo's WebGL thread, so WebGL 2's extra binds per draw cost more there.
         let servo = ServoBuilder::default()
             .opts(opts)
-            .preferences(preferences)
             .protocol_registry(protocols)
             .event_loop_waker(Box::new(Waker(Arc::clone(&queue))))
             .build();
