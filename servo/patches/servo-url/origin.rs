@@ -39,7 +39,8 @@ pub fn register_tuple_origin_scheme(scheme: &str) {
     }
 }
 
-fn is_tuple_origin_scheme(scheme: &str) -> bool {
+/// Lepton: whether `scheme` was registered (`register_tuple_origin_scheme`).
+pub fn is_tuple_origin_scheme(scheme: &str) -> bool {
     TUPLE_SCHEMES
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())

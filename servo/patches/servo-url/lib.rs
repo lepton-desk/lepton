@@ -24,7 +24,8 @@ pub use url::Host;
 use url::{Position, Url};
 
 pub use crate::origin::{
-    ImmutableOrigin, MutableOrigin, OpaqueOrigin, OriginSnapshot, register_tuple_origin_scheme,
+    ImmutableOrigin, MutableOrigin, OpaqueOrigin, OriginSnapshot, is_tuple_origin_scheme,
+    register_tuple_origin_scheme,
 };
 
 const DATA_URL_DISPLAY_LENGTH: usize = 40;

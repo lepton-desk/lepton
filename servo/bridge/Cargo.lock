@@ -6138,8 +6138,6 @@ dependencies = [
 [[package]]
 name = "servo-net-traits"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c60f3b4b8b3bd09f703525c6328faba3a8c4bbe1fb252022eab42642622891b"
 dependencies = [
  "bytes",
  "content-security-policy",

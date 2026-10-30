@@ -97,6 +97,8 @@ fn test_registered_scheme_has_tuple_origin() {
     assert!(!before.origin().is_tuple());
 
     servo_url::register_tuple_origin_scheme("leptontest");
+    assert!(servo_url::is_tuple_origin_scheme("leptontest"));
+    assert!(!servo_url::is_tuple_origin_scheme("other"));
     let page = ServoUrl::parse("leptontest://localhost/index.html").unwrap();
     let asset = ServoUrl::parse("leptontest://localhost/assets/app.js").unwrap();
     assert!(page.origin().is_tuple());
