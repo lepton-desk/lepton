@@ -6583,8 +6583,6 @@ dependencies = [
 [[package]]
 name = "servo-webgl"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb207ee3a4f44ba5231441c339801a70fe1f344f1e584492ea3a6720290d68ad"
 dependencies = [
  "bitflags 2.13.2",
  "byteorder",

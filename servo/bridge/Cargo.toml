@@ -57,6 +57,9 @@ servo-script = { path = "../patches/servo-script" }
 # when the load did not claim it (`blob_url_store.rs`, marked `Lepton:`). Babylon loads a
 # GLB's textures as `blob:` images; Servo refused every one ("Unsupported scheme").
 servo-net-traits = { path = "../patches/servo-net-traits" }
+# servo-webgl 0.6.0: sRGB textures uploaded from an image (`webgl_thread.rs`, marked
+# `Lepton:`). With WebGL 2 on, Babylon's glTF textures panicked the WebGL thread.
+servo-webgl = { path = "../patches/servo-webgl" }
 
 [lints.rust]
 # Denied, not forbidden: the C boundary (`src/abi.rs`) is the one module allowed it,
