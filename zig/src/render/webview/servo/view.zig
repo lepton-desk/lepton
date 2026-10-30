@@ -301,6 +301,10 @@ pub const View = struct {
     cursors: cursor_x11.Cursors = .{},
     over_edge: bool = false,
 
+    /// The window system this view's window uses, whatever the session: Servo draws into an
+    /// X11 window (`x11.X11Window`), under Xwayland on a Wayland desktop.
+    pub const window_system = "x11";
+
     /// Opens the core's X11 window and starts Servo drawing into it.
     pub fn open() Error!View {
         var window = x11.X11Window.open(.{ .title = "Lepton", .size = .{ .width = 800, .height = 600 }, .mapped = false }) catch
