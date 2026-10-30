@@ -113,6 +113,13 @@ jobs:
           $env:GLSLANG = "$env:RUNNER_TEMP\glslang\bin\glslang.exe"
           node tools/vulkan-shaders.mjs --check
 
+      # The core's Windows half (`src/windows_tests.zig`: WebView2, notifications, the
+      # native window): built only for Windows, so `zig.yml` on Linux never reaches it.
+      - name: Core tests (Windows half)
+        if: ${{ !cancelled() }}
+        working-directory: zig
+        run: zig build test --summary all
+
       # The native path's GPU half: a Direct3D 11 device and swap chain on the native window,
       # the draw command list read back from the screen. The runner has no GPU of its own;
       # what it does have is measured, not assumed.
