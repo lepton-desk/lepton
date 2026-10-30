@@ -16,8 +16,12 @@ name = "lepton_servo"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Servo's LTS line, pinned exactly: monthly releases break the embedding API.
-servo = "=0.6.0"
+# Servo's LTS line, pinned exactly: monthly releases break the embedding API. Its default
+# features leave out WebGL and give media a dummy backend that plays nothing (measured on the
+# 0.1.9-beta.2 library: no GStreamer in NEEDED, no `WebGL2RenderingContext`), so a WebGL page
+# drew nothing and `<audio>` and Web Audio were silent. `media-gstreamer` is Servo's
+# GStreamer backend; the runner installs its -dev packages (Servo book list, servo-bridge.yml).
+servo = { version = "=0.6.0", features = ["webgl", "media-gstreamer"] }
 # Its library is named `net_traits`: the request body's stream types, which `servo`
 # does not re-export.
 servo-net-traits = "=0.6.0"
