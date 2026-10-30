@@ -257,10 +257,10 @@ impl Engine {
             ..Opts::default()
         };
         // WebGL 2 stays as Servo 0.6 ships it, off (`dom_webgl2_enabled`). Turned on (cd6de60)
-        // it panicked on sRGB image textures (fixed in `servo/patches/servo-webgl`), then drew
-        // a Babylon.js game's grass black where WebGL 1 draws it right, and measured no faster:
-        // bone matrices still go one `uniformMatrix4fv` each, and every WebGL call is a message
-        // to Servo's WebGL thread, so WebGL 2's extra binds per draw cost more there.
+        // it panicked on sRGB image textures (patched in `servo/patches/servo-webgl`); after
+        // that a Babylon.js game drew its grass black where WebGL 1 draws it right (seen, the
+        // cause not measured), and showed no frame-time gain in a run whose scene was not the
+        // same as the WebGL 1 run's, so not a like-for-like comparison.
         let servo = ServoBuilder::default()
             .opts(opts)
             .protocol_registry(protocols)

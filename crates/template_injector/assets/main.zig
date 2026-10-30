@@ -257,8 +257,8 @@ fn run(init: std.process.Init.Minimal) !void {{
 
     // The size is printed from the value the engine was given rather than from a second
     // copy baked in at substitution time, so the two cannot drift apart. It is the size the
-    // window asks for: the window manager decides the one it gets (a tiling desktop can
-    // give 910×422 for 1600×900, measured on COSMIC), and the page hears that one as
+    // window asks for: the window manager decides the one it gets (measured on COSMIC: a
+    // window asking 1229×691 got 910×422), and the page hears that one as
     // `window.resized`. The window system is the view's own where it has one (Servo's view
     // is an X11 window, under Xwayland on a Wayland desktop), else the session's.
     const window_system: []const u8 = if (comptime @hasDecl(@TypeOf(view), "window_system")) @TypeOf(view).window_system else session;
