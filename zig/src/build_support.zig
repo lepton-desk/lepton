@@ -307,6 +307,7 @@ const header_needs = .{
     .{ "c_windows", .{}, "webview2,vulkan" },
     .{ "c_win_text", .{}, "" },
     .{ "c_webview2_check", .{}, "webview2" },
+    .{ "c_setup", .{}, "" },
 };
 
 /// Adds the translated headers `names` (`src/c/<name>.h`) to `module` as imports of the

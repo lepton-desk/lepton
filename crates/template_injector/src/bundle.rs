@@ -29,17 +29,21 @@ pub enum BundleTarget {
     Zip,
     /// A Windows Installer package (`.msi`), written without WiX: a per-user install.
     Msi,
+    /// `<name>-<version>-windows-<arch>-setup.exe`: Lepton's own installer, the same install
+    /// as the MSI's, in one program with a window of its own.
+    Setup,
 }
 
 impl BundleTarget {
     /// Every format, in the spelling the configuration uses.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::TarGz,
         Self::AppImage,
         Self::Arch,
         Self::Deb,
         Self::Zip,
         Self::Msi,
+        Self::Setup,
     ];
 
     /// The spelling in `bundle.targets`.
@@ -51,6 +55,7 @@ impl BundleTarget {
             Self::Deb => "deb",
             Self::Zip => "zip",
             Self::Msi => "msi",
+            Self::Setup => "setup",
         }
     }
 
@@ -62,7 +67,7 @@ impl BundleTarget {
 
     /// Whether the format installs on Windows only (it carries a Windows build).
     pub fn windows_only(self) -> bool {
-        matches!(self, Self::Msi)
+        matches!(self, Self::Msi | Self::Setup)
     }
 
     pub fn parse(text: &str) -> Option<Self> {

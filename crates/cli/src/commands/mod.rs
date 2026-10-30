@@ -45,6 +45,7 @@ pub mod report;
 pub mod run;
 pub mod servo;
 pub mod session;
+pub mod setup;
 pub mod update;
 pub mod update_packages;
 pub mod verify;

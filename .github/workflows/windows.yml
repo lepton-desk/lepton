@@ -3,7 +3,7 @@
 # outside — the title bar's DWM attributes as the page changes its theme-color (Windows
 # 11's caption colour, which a Windows 10 machine cannot show), placement, icons, the
 # single instance, the native menu and the page's own bar with real mouse and keys —
-# then packaged as zip and msi, installed, run and removed, and built again with
+# then packaged as zip, msi and setup.exe, installed, run and removed, and built again with
 # "decorations": false (frameless: drag, double click, the resize border).
 # The same app is also packaged on Linux (`lepton package --windows`, job linux-package):
 # that MSI is installed, run, measured and removed here too, and both machines' zip and
@@ -43,6 +43,14 @@ jobs:
           cargo build --release --bin lepton
           ./target/release/lepton --version
 
+      # setup.exe's program from this checkout, cross-built (`zig build setup-exe`); the
+      # package's own copy is not on npm before a release.
+      - name: Setup program
+        working-directory: zig
+        run: |
+          zig build setup-exe
+          sha256sum zig-out/setup/setup.exe
+
       # The app the Windows job builds, made the same way (same name, owner, config, page).
       - name: Package for Windows
         run: |
@@ -64,16 +72,16 @@ jobs:
             fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
             const config = JSON.parse(fs.readFileSync("lepton.config.json", "utf8"));
             config.deepLinks = ["leptonci"];
-            config.bundle = { targets: ["zip", "msi"] };
+            config.bundle = { targets: ["zip", "msi", "setup"] };
             config.permissions = [...config.permissions, "window.start_drag", "window.menu", "window.maximize", "window.unmaximize", "window.state", "window.minimize", "window.close"];
             fs.writeFileSync("lepton.config.json", JSON.stringify(config, null, 2));
           '
           cp "$GITHUB_WORKSPACE/tools/ci/ci-page.ts" src/
           echo 'import "./ci-page.ts";' >> src/main.ts
           npm install --no-audit --no-fund
-          "$lepton" package --windows
+          LEPTON_SETUP_PROGRAM="$GITHUB_WORKSPACE/zig/zig-out/setup/setup.exe" "$lepton" package --windows
           mkdir -p "$RUNNER_TEMP/out"
-          cp src-lepton/bundle/*.msi src-lepton/bundle/*.zip "$RUNNER_TEMP/out/"
+          cp src-lepton/bundle/*.msi src-lepton/bundle/*.zip src-lepton/bundle/*-setup.exe "$RUNNER_TEMP/out/"
           sha256sum "$RUNNER_TEMP"/out/* | tee "$RUNNER_TEMP/out/sha256.txt"
 
       - uses: actions/upload-artifact@v4
@@ -81,12 +89,21 @@ jobs:
           name: windows-package-from-linux
           path: ${{ runner.temp }}/out
 
+      # What `node tools/stage-setup-program.mjs <file>` puts in the npm package.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup-program
+          path: zig/zig-out/setup/setup.exe
+
   app:
     needs: linux-package
     runs-on: windows-2025
     defaults:
       run:
         shell: pwsh
+    env:
+      # setup.exe's program, built here from this checkout (`Setup program` below).
+      LEPTON_SETUP_PROGRAM: ${{ github.workspace }}\zig\zig-out\setup\setup.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -119,6 +136,15 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: zig
         run: zig build test --summary all
+
+      # setup.exe's program, built on Windows too: its bytes are compared with the Linux
+      # build's in `Setup: install, open, update, remove`.
+      - name: Setup program
+        working-directory: zig
+        run: |
+          zig build setup-exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          (Get-FileHash zig-out\setup\setup.exe).Hash
 
       # The native path's GPU half: a Direct3D 11 device and swap chain on the native window,
       # the draw command list read back from the screen. The runner has no GPU of its own;
@@ -157,7 +183,7 @@ jobs:
           $pkg | ConvertTo-Json -Depth 20 | Set-Content package.json -Encoding utf8NoBOM
           $config = Get-Content lepton.config.json -Raw | ConvertFrom-Json
           $config | Add-Member -NotePropertyName deepLinks -NotePropertyValue @("leptonci") -Force
-          $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{ targets = @("zip", "msi") }) -Force
+          $config | Add-Member -NotePropertyName bundle -NotePropertyValue ([pscustomobject]@{ targets = @("zip", "msi", "setup") }) -Force
           # ci-page.ts moves the window from its own bar and opens the system's menu.
           $config.permissions = @($config.permissions) + @("window.start_drag", "window.menu", "window.maximize", "window.unmaximize", "window.state", "window.minimize", "window.close")
           $config | ConvertTo-Json -Depth 20 | Set-Content lepton.config.json -Encoding utf8NoBOM
@@ -260,6 +286,24 @@ jobs:
           $remove = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn /l*v `"$out\remove.log`"" -Wait -PassThru
           "remove: exit $($remove.ExitCode), folder left: $(Test-Path "$env:LOCALAPPDATA\Programs\$product")" | Tee-Object -Append "$out\result.txt"
           if ($remove.ExitCode -or (Test-Path "$env:LOCALAPPDATA\Programs\$product") -or $measured) { exit 1 }
+
+      # setup.exe made here (`tools/ci/windows/setup.ps1`), after both MSIs are removed:
+      # they install into the same folder. Then the setup.exe made on Linux beside it.
+      - name: "Setup: install, open, update, remove"
+        if: ${{ !cancelled() }}
+        run: |
+          $out = "$env:RUNNER_TEMP\report\setup"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $here = Get-ChildItem "$env:RUNNER_TEMP\ci-app\src-lepton\bundle\*-setup.exe" | Select-Object -First 1
+          $linux = Get-ChildItem "$env:RUNNER_TEMP\linux-package\*-setup.exe" | Select-Object -First 1
+          $a = (Get-FileHash $here.FullName).Hash
+          $b = (Get-FileHash $linux.FullName).Hash
+          "setup.exe  windows $($here.Length) $a  linux $($linux.Length) $b  identical: $($a -eq $b)" | Tee-Object -Append "$out\compare.txt"
+          "program  windows $((Get-FileHash $env:LEPTON_SETUP_PROGRAM).Hash)" | Tee-Object -Append "$out\compare.txt"
+          & "$env:GITHUB_WORKSPACE\tools\ci\windows\setup.ps1" -Setup $here.FullName -App "$env:RUNNER_TEMP\ci-app" -Out "$out\windows-made"
+          $made = $LASTEXITCODE
+          & "$env:GITHUB_WORKSPACE\tools\ci\windows\setup.ps1" -Setup $linux.FullName -App "$env:RUNNER_TEMP\ci-app" -Out "$out\linux-made"
+          if ($made -or $LASTEXITCODE) { exit 1 }
 
       # The same app with "window": { "decorations": false }: the page's bar is the title bar.
       - name: Frameless window

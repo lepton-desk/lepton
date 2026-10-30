@@ -676,6 +676,8 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .windows) {
         @import("src/build_windows_probes.zig").add(b, target, cHeaders(".", target, std.builtin.OptimizeMode.Debug, null), &core_c_headers);
     }
+    // setup.exe's program: x86-64 Windows from any host (`src/build_setup.zig`).
+    @import("src/build_setup.zig").add(b);
 
     // Only built where the engine is linked. A capability report on a build with no
     // engine would report "no pixels reachable" for the uninteresting reason that there

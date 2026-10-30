@@ -41,6 +41,7 @@ const npmPackages = [
   "create-lepton-app",
   "servo-linux-x64",
   "appimage-runtime-linux-x64",
+  "setup-windows-x64",
 ];
 
 function fail(message) {

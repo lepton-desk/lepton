@@ -365,6 +365,46 @@ pub fn write_target(
                 format!("{}  {} bytes  sha256 {digest}", out.display(), size),
             ))
         }
+        BundleTarget::Setup => {
+            // The MSI's install, as one program (`setup.rs`): the bundle tree and what it is.
+            let name = bundle_name(spec);
+            let root = spec
+                .prefix
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or(&spec.prefix);
+            let program = super::setup::program(root)?;
+            let executable = format!("bin/{}", spec.system.executable(&spec.binary));
+            let icon = format!("share/{}/icon.ico", spec.binary);
+            let schemes = super::deep_links::read(root)?;
+            let manifest = super::setup::Manifest {
+                identifier: &spec.app_id,
+                product: &spec.product,
+                version: &spec.version,
+                // The publisher Settings → Apps shows, as the MSI's (`Msi` above).
+                publisher: formats.maintainer.as_deref().unwrap_or(&spec.product),
+                program: &executable,
+                icon: bundle.join(&icon).is_file().then_some(icon.as_str()),
+                schemes: &schemes,
+            }
+            .text()?;
+            let dir = super::setup::lay_out(spec, bundle, &name, &manifest)?;
+            let (out, digest) = super::setup::write(
+                &program,
+                &dir,
+                &name,
+                &spec.out,
+                &super::setup::file_name(&name),
+                super::archive::release_time(),
+            )?;
+            let size = std::fs::metadata(&out)
+                .map_err(|error| io(&out, "inspect", &error))?
+                .len();
+            Ok((
+                out.clone(),
+                format!("{}  {} bytes  sha256 {digest}", out.display(), size),
+            ))
+        }
         BundleTarget::Zip => {
             let name = bundle_name(spec);
             let out = spec.out.join(format!("{name}.zip"));

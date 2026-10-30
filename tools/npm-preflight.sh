@@ -7,7 +7,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 plugins=(plugin-os plugin-clipboard plugin-fs plugin-dialog)
-packages=(cli-linux-x64 cli-win32-x64 cli api "${plugins[@]}" create-lepton-app servo-linux-x64 appimage-runtime-linux-x64)
+packages=(cli-linux-x64 cli-win32-x64 cli api "${plugins[@]}" create-lepton-app servo-linux-x64 appimage-runtime-linux-x64 setup-windows-x64)
 # Published from Windows first (docs/yayin.md): the Windows binary, and the packages with
 # no Linux-only half. plugin-os and plugin-fs have one each (`uname`, `openat2`), which
 # their prepublish tests only here, so they, the Linux binary, `cli` and create-lepton-app
@@ -30,7 +30,7 @@ for plugin in "${plugins[@]}"; do
   # `^0.1.6` does not admit `0.2.0-beta.1`: a plugin must name the API it ships with.
   [ "$peer" = "^$version" ] || fail "packages/$plugin wants @lepton-desk/api $peer, not ^$version"
 done
-for staged in servo-linux-x64 appimage-runtime-linux-x64; do
+for staged in servo-linux-x64 appimage-runtime-linux-x64 setup-windows-x64; do
   have="$(node -p "require('$root/packages/$staged/package.json').version")"
   [ "$have" = "$version" ] || fail "packages/$staged is $have, the CLI is $version"
 done
@@ -122,6 +122,14 @@ step "the AppImage runtime"
 runtime="$root/packages/appimage-runtime-linux-x64/runtime-x86_64"
 [ -f "$runtime" ] || fail "packages/appimage-runtime-linux-x64 has no runtime-x86_64: download it from https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64 and run node tools/stage-appimage-runtime.mjs on it"
 [ "$(sha256sum "$runtime" | cut -d' ' -f1)" = 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d ] || fail "$runtime is not type2-runtime 20251108's runtime-x86_64"
+echo "staged"
+
+# setup.exe's program, built from `zig/src/setup/`: `node tools/stage-setup-program.mjs`
+# (or with the `windows` run's `setup-program` artifact).
+step "the setup program"
+setup="$root/packages/setup-windows-x64/setup.exe"
+[ -f "$setup" ] || fail "packages/setup-windows-x64 has no setup.exe: run node tools/stage-setup-program.mjs"
+[ "$(head -c 2 "$setup")" = MZ ] || fail "$setup is not a Windows program"
 echo "staged"
 
 step "what each tarball will contain"

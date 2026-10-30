@@ -1,0 +1,21 @@
+{
+  "name": "@lepton-desk/setup-windows-x64",
+  "version": "0.1.9-beta.2",
+  "description": "Lepton's Windows installer program for x64: what `lepton package` puts in front of an application to make its setup.exe. Install it as a dev dependency of a project that packages a setup.exe, on any operating system.",
+  "license": "(MIT OR Apache-2.0) AND ZPL-2.1 AND MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lepton-desk/lepton.git",
+    "directory": "packages/setup-windows-x64"
+  },
+  "files": [
+    "setup.exe",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "THIRD-PARTY.md",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

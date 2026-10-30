@@ -39,6 +39,21 @@ pub fn write(
     mtime: u64,
 ) -> Result<String, CliError> {
     refuse_foreign(out)?;
+    let archive = bytes(dir, top, skip, out, mtime)?;
+    let partial = out.with_extension("part");
+    std::fs::write(&partial, &archive).map_err(|error| io(&partial, "write", &error))?;
+    publish(&partial, out)
+}
+
+/// The archive [`write`] writes, as bytes; `out` names it in errors. setup.exe carries one
+/// after its program (`setup.rs`).
+pub fn bytes(
+    dir: &Path,
+    top: &str,
+    skip: &[&str],
+    out: &Path,
+    mtime: u64,
+) -> Result<Vec<u8>, CliError> {
     let entries = sorted_entries(dir, Path::new(top), skip)?;
     let (time, date) = dos_stamp(mtime);
 
@@ -131,13 +146,10 @@ pub fn write(
     put32(&mut archive, central_len);
     put32(&mut archive, central_at);
     put16(&mut archive, 0);
-
-    let partial = out.with_extension("part");
-    std::fs::write(&partial, &archive).map_err(|error| io(&partial, "write", &error))?;
-    publish(&partial, out)
+    Ok(archive)
 }
 
-/// Unpacks a `.zip` this module wrote into `into`.
+/// Unpacks a `.zip` this module wrote into `into`, or the one at the end of a setup.exe.
 pub fn unpack(artifact: &Path, into: &Path) -> Result<(), CliError> {
     let bytes = std::fs::read(artifact).map_err(|error| io(artifact, "read", &error))?;
     let bad = |what: &str| {
@@ -151,7 +163,15 @@ pub fn unpack(artifact: &Path, into: &Path) -> Result<(), CliError> {
         .find(|&at| read32(&bytes, at) == Some(END))
         .ok_or_else(|| bad("no end of central directory"))?;
     let count = read16(&bytes, end + 10).ok_or_else(|| bad("short end record"))?;
-    let mut at = read32(&bytes, end + 16).ok_or_else(|| bad("short end record"))? as usize;
+    let central_len = read32(&bytes, end + 12).ok_or_else(|| bad("short end record"))? as usize;
+    let central_at = read32(&bytes, end + 16).ok_or_else(|| bad("short end record"))? as usize;
+    // Where the zip starts in the file: 0 for a `.zip`, the program's length for setup.exe,
+    // whose offsets count from the zip's own start.
+    let base = end
+        .checked_sub(central_len)
+        .and_then(|at| at.checked_sub(central_at))
+        .ok_or_else(|| bad("the central directory is out of place"))?;
+    let mut at = base + central_at;
     for _ in 0..count {
         if read32(&bytes, at) != Some(CENTRAL) {
             return Err(bad("a central directory entry is damaged"));
@@ -165,7 +185,8 @@ pub fn unpack(artifact: &Path, into: &Path) -> Result<(), CliError> {
         let name_len = usize::from(field(28)?);
         let extra_len = usize::from(field(30)?);
         let comment_len = usize::from(field(32)?);
-        let local = read32(&bytes, at + 42).ok_or_else(|| bad("short central entry"))? as usize;
+        let local =
+            base + read32(&bytes, at + 42).ok_or_else(|| bad("short central entry"))? as usize;
         let name = bytes
             .get(at + 46..at + 46 + name_len)
             .and_then(|raw| std::str::from_utf8(raw).ok())

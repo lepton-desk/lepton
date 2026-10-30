@@ -156,6 +156,20 @@ pub fn unpack(artifact: &Path, target: BundleTarget, into: &Path) -> Result<Path
             // without `msiexec`, so a verify registers nothing on this machine.
             super::installer::extract(artifact, into)
         }
+        BundleTarget::Setup => {
+            // The zip after the program, unpacked as the program would install it — without
+            // running it, so a verify registers nothing on this machine. CI installs it for
+            // real (`windows.yml`).
+            super::zip::unpack(artifact, into)?;
+            let top = artifact
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_suffix("-setup.exe"))
+                .ok_or_else(|| {
+                    CliError::Invalid(format!("{} is not a setup.exe", artifact.display()))
+                })?;
+            Ok(into.join(top))
+        }
         BundleTarget::Zip => {
             super::zip::unpack(artifact, into)?;
             let top = artifact
@@ -342,10 +356,23 @@ mod tests {
             "deb"
         );
 
+        let (setup, _) = assert_ok!(
+            super::super::setup::write(
+                b"MZ setup's program",
+                &bundle,
+                "notes-1.0.0-windows-x",
+                &out,
+                "notes-1.0.0-windows-x-setup.exe",
+                0
+            ),
+            "setup"
+        );
+
         for (artifact, target) in [
             (tarball, BundleTarget::TarGz),
             (arch, BundleTarget::Arch),
             (deb, BundleTarget::Deb),
+            (setup, BundleTarget::Setup),
         ] {
             let into = scratch.path().join(format!("u-{}", target.name()));
             std::fs::create_dir_all(&into).map_err(|error| fail("mkdir", error))?;
@@ -359,7 +386,12 @@ mod tests {
                 .map_err(|error| fail(format!("{} binary", target.name()), error))?
                 .permissions()
                 .mode();
-            ensure!(mode & 0o111 != 0, "{} binary not executable", target.name());
+            // Windows keeps no execute bit, and `zip.rs` restores none.
+            ensure!(
+                target.windows_only() || mode & 0o111 != 0,
+                "{} binary not executable",
+                target.name()
+            );
             ensure!(
                 prefix.join("share/notes/dist/index.html").is_file(),
                 "{} frontend missing",

@@ -82,6 +82,15 @@ jobs:
           zig test packages/plugin-os/zig/os.zig -lc -fllvm -flld
           zig test packages/plugin-dialog/zig/request.zig -fllvm -flld
 
+      # setup.exe's zip reader, manifest, versions and texts; its program cross-built for
+      # Windows with this matrix's Zig (`src/build_setup.zig`).
+      - name: Setup program
+        working-directory: zig
+        run: |
+          zig build setup-test --summary all
+          zig build setup-exe
+          sha256sum zig-out/setup/setup.exe
+
       - name: Cookie shim
         run: node --test zig/src/render/webview/cookie_shim.test.mjs
 
