@@ -89,6 +89,10 @@ typedef struct LeptonServoCallbacks {
  * 0 on success, -1 for an empty or non-UTF-8 path. */
 int32_t lepton_servo_set_data_directory(const uint8_t *path, size_t len);
 
+/* WebGL 2 in the pages (the app's `servo.webgl2`), before `lepton_servo_create`. Off
+ * without it, as Servo 0.6 ships it: experimental (a Babylon.js game drew wrongly). */
+void lepton_servo_enable_webgl2(void);
+
 /* Starts Servo drawing into `surface` and registers `scheme` (for example "lepton")
  * for the core. Null on failure, with the reason in `error` (terminated, truncated
  * to `error_capacity`). The callbacks are copied. */

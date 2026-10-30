@@ -7,6 +7,7 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use dpi::PhysicalSize;
@@ -18,8 +19,8 @@ use servo::{
     ConsoleLogLevel, ContextMenu, ContextMenuAction, ContextMenuElementInformationFlags, Cursor,
     DevicePoint, EmbedderControl, EmbedderControlId, EventLoopWaker, InputEvent, JSValue,
     KeyboardEvent, LoadStatus, MouseButton, MouseButtonAction, MouseButtonEvent,
-    MouseLeftViewportEvent, MouseMoveEvent, NavigationRequest, Opts, RenderingContext, Servo,
-    ServoBuilder, UserContentManager, UserScript, WebView, WebViewBuilder, WebViewDelegate,
+    MouseLeftViewportEvent, MouseMoveEvent, NavigationRequest, Opts, Preferences, RenderingContext,
+    Servo, ServoBuilder, UserContentManager, UserScript, WebView, WebViewBuilder, WebViewDelegate,
     WheelDelta, WheelEvent, WheelMode, WindowRenderingContext,
 };
 use url::Url;
@@ -53,6 +54,14 @@ pub fn set_data_directory(directory: PathBuf) {
     if let Ok(mut guard) = DATA_DIRECTORY.lock() {
         *guard = Some(directory);
     }
+}
+
+/// WebGL 2 in the pages, set before the engine starts (`lepton_servo_enable_webgl2`).
+static WEBGL2: AtomicBool = AtomicBool::new(false);
+
+/// Turns WebGL 2 on for the engine about to start: the app's `servo.webgl2`.
+pub fn enable_webgl2() {
+    WEBGL2.store(true, Ordering::Relaxed);
 }
 
 /// Servo's wake-up, from any thread, forwarded to the core through the queue's waker.
@@ -256,13 +265,19 @@ impl Engine {
             config_dir: data_directory,
             ..Opts::default()
         };
-        // WebGL 2 stays as Servo 0.6 ships it, off (`dom_webgl2_enabled`). Turned on (cd6de60)
-        // it panicked on sRGB image textures (patched in `servo/patches/servo-webgl`); after
+        // WebGL 2 is off, as Servo 0.6 ships it (`dom_webgl2_enabled`), unless the app turns
+        // it on (`servo.webgl2`, `enable_webgl2`). Turned on for every app (cd6de60) it
+        // panicked on sRGB image textures (patched in `servo/patches/servo-webgl`); after
         // that a Babylon.js game drew its grass black where WebGL 1 draws it right (seen, the
         // cause not measured), and showed no frame-time gain in a run whose scene was not the
         // same as the WebGL 1 run's, so not a like-for-like comparison.
+        let preferences = Preferences {
+            dom_webgl2_enabled: WEBGL2.load(Ordering::Relaxed),
+            ..Preferences::default()
+        };
         let servo = ServoBuilder::default()
             .opts(opts)
+            .preferences(preferences)
             .protocol_registry(protocols)
             .event_loop_waker(Box::new(Waker(Arc::clone(&queue))))
             .build();

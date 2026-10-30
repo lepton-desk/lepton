@@ -350,6 +350,8 @@ pub const View = struct {
         };
         var reason: [512]u8 = @splat(0);
         const scheme = "lepton";
+        // `servo.webgl2: true`: WebGL 2 in the pages; off as Servo 0.6 ships it otherwise.
+        if (@import("build_options").servo_webgl2) c.lepton_servo_enable_webgl2();
         const servo = c.lepton_servo_create(&surface, scheme, scheme.len, &callbacks, &reason, reason.len) orelse {
             std.debug.print("servo: {s}\n", .{std.mem.sliceTo(&reason, 0)});
             return error.Engine;

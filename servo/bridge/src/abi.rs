@@ -239,6 +239,12 @@ pub extern "C" fn lepton_servo_set_data_directory(path: *const u8, len: usize) -
     }
 }
 
+/// WebGL 2 in the pages (`servo.webgl2`), before `lepton_servo_create`; off without it.
+#[unsafe(no_mangle)]
+pub extern "C" fn lepton_servo_enable_webgl2() {
+    crate::engine::enable_webgl2();
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn lepton_servo_create(
     surface: *const LeptonServoSurface,

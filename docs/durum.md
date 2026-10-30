@@ -357,6 +357,12 @@ Yeni:
 - **CI'da ölçüldü (`bf24b67`):** WebView2 (windows 40341593712): kapalı → `isolated=false`, `SharedArrayBuffer` yok, paylaşımlı belleği Worker'a göndermek `DataCloneError`; açık → `isolated=true`, Worker 41 → 42; eksik özellikler yalnız `typeReflection`, `wideArithmetic` (threads açıkken). Servo 0.6 (servo-bridge 40341622993): açık da kapalı da `crossOriginIsolated` tanımsız, `SharedArrayBuffer` yok, paylaşımlı `WebAssembly.Memory` `LinkError`; eksik `threads`, `typeReflection`, `wideArithmetic`. Servo'da (kullanıcı kararı): uyarı yazılır, derleme sürer, belgede Servo'da thread olmadığı yazar (`window_shape.rs` `renders_in_servo`, test; uyarı gerçek `lepton build --servo`'da görüldü, WPE derlemesinde yok). Dev modunda WPE'de sayfanın Vite'tan gelip çekirdeğe CORS ile ulaşması pencerede ölçülmedi.
 - **Site:** yapılandırma sayfasında `wasm.threads` bölümü (güvenlik notu dahil) ve değişiklikler sayfası (tr+en); site derlendi, çapa `#wasmthreads-019-beta3` iki dilde var.
 
+## beta.3 işi: Servo'da WebGL 2, isteğe bağlı (2026-10-30)
+
+- **Ölçülenler (Babylon.js oyunu, fonnobal):** Servo 0.6'da `dom_webgl2_enabled` kapalı geliyor. Herkese açılınca (`cd6de60`) WebGL iş parçacığı sRGB görüntü dokusunda `unreachable!` ile çöktü; `servo/patches/servo-webgl` yamaladı (`ed25e76`). Sonra oyun çimi siyah çizdi, WebGL 1'de doğru; nedeni ölçülmedi. Kare süresinde WebGL 1'e göre kazanç görülmedi; iki çalıştırmanın sahnesi aynı değildi. Varsayılan yeniden kapalı (`1652cfe`).
+- **Ayar (kullanıcı kararı):** `"servo": { "webgl2": true }` → `-Dservo-webgl2=true` (yalnız Servo derlemesine, `window_shape.rs`) → `build_options.servo_webgl2` → `view.zig` `create`'ten önce `lepton_servo_enable_webgl2()` → köprü `dom_webgl2_enabled`. Yeni köprü fonksiyonu: eski Servo kitaplığıyla ayar açıkken bağlanmaz (ölçüldü: `undefined symbol: lepton_servo_enable_webgl2`; ayar kapalıyken eski kitaplıkla bağlanıyor). Belge: sitede `servo.webgl2`, şema, değişiklik günlüğü; WebGL 2 şartsa WPE/WebView2 yönlendirmesi.
+- **Açık:** siyah çimin nedeni (Chromium ile Servo'da çim malzemesini tek başına çizen bir test sayfasıyla ayrılacak).
+
 ## Sağ tık menüsü: ölçülecekler (2026-10-25)
 
 - Servo, CI kitaplığıyla (run 40223407188): menü düz metinde Türkçe etiketlerle açılıyor, Kes/Kopyala/Yapıştır pasif, Tümünü seç etkin; **Tümünü seç seçiyor (kullanıcı ekranda denedi)**. Benim aynı anda yaptığım deneme kullanıcının denemesiyle çakıştı, geçersiz. Metin kutusu içi ve Kopyala henüz denenmedi.

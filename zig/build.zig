@@ -68,6 +68,8 @@ pub const CoreOptions = struct {
     /// `wasm.threads`: COOP/COEP on the core's answers and, on WPE, JavaScriptCore's
     /// `SharedArrayBuffer` (`render/webview/wasm_threads.zig`).
     wasm_threads: bool = false,
+    /// `servo.webgl2`: WebGL 2 in a Servo build's pages (`render/webview/servo/view.zig`).
+    servo_webgl2: bool = false,
 };
 
 /// Configures the core module and returns it.
@@ -355,6 +357,7 @@ pub fn configureCore(b: *std.Build, options: CoreOptions) Configured {
     opts.addOption(bool, "have_servo", have_servo);
     opts.addOption(bool, "context_menu", options.context_menu);
     opts.addOption(bool, "wasm_threads", options.wasm_threads);
+    opts.addOption(bool, "servo_webgl2", options.servo_webgl2);
     opts.addOption(bool, "wpe_platform_abi", use_platform_abi);
     opts.addOption([]const u8, "wpe_backend_library", wpe_backend_library orelse "");
 
@@ -440,6 +443,7 @@ pub fn build(b: *std.Build) void {
     const servo_lib = b.option([]const u8, "servo-lib", "Directory holding liblepton_servo.so: Servo renders the pages");
     // The template's option of the same name; here so the tests run with it on too.
     const wasm_threads = b.option(bool, "wasm-threads", "WebAssembly threads in the page (default: false)") orelse false;
+    const servo_webgl2 = b.option(bool, "servo-webgl2", "WebGL 2 in a Servo build's pages (default: false)") orelse false;
     const configured = configureCore(b, .{
         .root = ".",
         .target = target,
@@ -447,6 +451,7 @@ pub fn build(b: *std.Build) void {
         .servo_lib = servo_lib,
         .render = render,
         .wasm_threads = wasm_threads,
+        .servo_webgl2 = servo_webgl2,
     });
     const core = configured.module;
     if (servo_lib) |dir| @import("src/build_servo.zig").windowCheck(b, target, core, configured.protocol_step, dir);
