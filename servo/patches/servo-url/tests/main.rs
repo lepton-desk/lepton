@@ -109,6 +109,14 @@ fn test_registered_scheme_has_tuple_origin() {
     // Another host is another origin; other schemes are unchanged.
     let other = ServoUrl::parse("leptontest://elsewhere/").unwrap();
     assert_ne!(other.origin(), page.origin());
+
+    // A blob URL the page creates has the page's origin, the same each time it is asked.
+    let blob = ServoUrl::parse("blob:leptontest://localhost/93947d57-a49f-4b00-bdcc-fbf1ed8b60ab").unwrap();
+    assert_eq!(blob.origin(), page.origin());
+    assert_eq!(blob.origin(), blob.origin());
+    let elsewhere = ServoUrl::parse("blob:leptontest://elsewhere/93947d57-a49f-4b00-bdcc-fbf1ed8b60ab").unwrap();
+    assert_ne!(elsewhere.origin(), page.origin());
+    assert!(!ServoUrl::parse("blob:other://localhost/93947d57-a49f-4b00-bdcc-fbf1ed8b60ab").unwrap().origin().is_tuple());
     assert!(!ServoUrl::parse("other://localhost/").unwrap().origin().is_tuple());
     assert!(!ServoUrl::parse("leptontest:no-host").unwrap().origin().is_tuple());
     assert_eq!(

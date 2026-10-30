@@ -96,6 +96,16 @@ impl ImmutableOrigin {
             );
         }
 
+        // Lepton: a blob URL has its creator's origin, so `blob:<scheme>://host/uuid` from a
+        // registered scheme's page is that page's (the url crate makes any scheme but http's
+        // opaque here, a fresh one each time, so the page could not read its own blobs).
+        if url.scheme() == "blob" &&
+            let Ok(inner) = Url::parse(url.path()) &&
+            is_tuple_origin_scheme(inner.scheme())
+        {
+            return Self::new(&inner);
+        }
+
         match url.origin() {
             Origin::Opaque(_) => ImmutableOrigin::new_opaque(),
             Origin::Tuple(scheme, host, port) => ImmutableOrigin::Tuple(scheme, host, port),
