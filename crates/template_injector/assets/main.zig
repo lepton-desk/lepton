@@ -262,7 +262,7 @@ fn run(init: std.process.Init.Minimal) !void {{
     // `window.resized`. The window system is the view's own where it has one (Servo's view
     // is an X11 window, under Xwayland on a Wayland desktop), else the session's.
     const window_system: []const u8 = if (comptime @hasDecl(@TypeOf(view), "window_system")) @TypeOf(view).window_system else session;
-    core.report.fact("window", .plain, who.product ++ " · {{s}} · asks {{d}}×{{d}}", .{{
+    core.report.fact("window", .plain, who.product ++ " · {{s}} · istenen {{d}}×{{d}}", .{{
         window_system,
         size.width,
         size.height,
