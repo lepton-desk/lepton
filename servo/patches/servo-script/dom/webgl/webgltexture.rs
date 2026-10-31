@@ -281,7 +281,14 @@ impl WebGLTexture {
             return Err(WebGLError::InvalidOperation);
         }
 
-        if !base_image_info.is_power_of_two() {
+        // Lepton: WebGL 1's rule only; WebGL 2 mipmaps a texture of any size. Refused, a
+        // non-power-of-two texture was left without mips and sampled black (measured:
+        // `generateMipmap` gave INVALID_OPERATION in Servo on WebGL 2, Chromium drew it).
+        let is_webgl2 = self
+            .upcast()
+            .context()
+            .is_some_and(|context| context.webgl_version() == WebGLVersion::WebGL2);
+        if !is_webgl2 && !base_image_info.is_power_of_two() {
             return Err(WebGLError::InvalidOperation);
         }
 

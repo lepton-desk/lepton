@@ -51,7 +51,8 @@ url = "2.5"
 servo-url = { path = "../patches/servo-url" }
 servo = { path = "../patches/servo" }
 # servo-script 0.6.0 with a module that awaits at its top level no longer reported as an
-# "uncaught exception: undefined" (`modules/script_module.rs`, marked `Lepton:`).
+# "uncaught exception: undefined" (`modules/script_module.rs`, marked `Lepton:`), and on
+# WebGL 2 `generateMipmap` accepting a non-power-of-two texture (`dom/webgl/webgltexture.rs`).
 servo-script = { path = "../patches/servo-script" }
 # servo-net-traits 0.6.0: a blob URL made by the app's page has the page's origin even
 # when the load did not claim it (`blob_url_store.rs`, marked `Lepton:`). Babylon loads a
