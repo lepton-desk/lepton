@@ -361,7 +361,11 @@ Yeni:
 
 - **Ölçülenler (Babylon.js oyunu, fonnobal):** Servo 0.6'da `dom_webgl2_enabled` kapalı geliyor. Herkese açılınca (`cd6de60`) WebGL iş parçacığı sRGB görüntü dokusunda `unreachable!` ile çöktü; `servo/patches/servo-webgl` yamaladı (`ed25e76`). Sonra oyun çimi siyah çizdi, WebGL 1'de doğru; nedeni ölçülmedi. Kare süresinde WebGL 1'e göre kazanç görülmedi; iki çalıştırmanın sahnesi aynı değildi. Varsayılan yeniden kapalı (`1652cfe`).
 - **Ayar (kullanıcı kararı):** `"servo": { "webgl2": true }` → `-Dservo-webgl2=true` (yalnız Servo derlemesine, `window_shape.rs`) → `build_options.servo_webgl2` → `view.zig` `create`'ten önce `lepton_servo_enable_webgl2()` → köprü `dom_webgl2_enabled`. Yeni köprü fonksiyonu: eski Servo kitaplığıyla ayar açıkken bağlanmaz (ölçüldü: `undefined symbol: lepton_servo_enable_webgl2`; ayar kapalıyken eski kitaplıkla bağlanıyor). Belge: sitede `servo.webgl2`, şema, değişiklik günlüğü; WebGL 2 şartsa WPE/WebView2 yönlendirmesi.
-- **Açık:** siyah çimin nedeni (Chromium ile Servo'da çim malzemesini tek başına çizen bir test sayfasıyla ayrılacak).
+- **Siyah çim (ölçüldü, 2026-10-31):** test sayfası, Servo'da WebGL 2 ile ikinin kuvveti olmayan dokuda `generateMipmap`'in `INVALID_OPERATION` verdiğini ve dokunun siyah örneklendiğini gösterdi (Chromium'da doğru; 2048×1024'te ve mipmap'siz Servo'da da doğru). `servo-script`'in `webgltexture.rs`'i WebGL 1 kuralını her bağlama uyguluyordu; yama `26e6632`. Oyunun çim dokusu koddan 2048×1377 ve mipmap'li; yamayla oyunda düzeldiği henüz görülmedi.
+
+## beta.3 işi: proje başına motor (2026-10-31, kullanıcı kararı)
+
+- Varsayılan WPE kalıyor; `"engine": "servo"` Linux'ta `build`/`run`/`dev`/`package`'ı `--servo` verilmiş gibi çalıştırıyor (`servo.rs` `configured`; native projede ve Windows'ta etkisiz). Varsayılanın değişmesi Servo'nun IME, pano ve Wayland eksikleri kapanınca yeniden konuşulacak. Testler: CLI 232 geçti; `deb::dpkg_names_the_owner_of_libc_where_it_exists` bu makinede değişiklikten önce de düşüyor (dpkg var, Debian veritabanı yok).
 
 ## Sağ tık menüsü: ölçülecekler (2026-10-25)
 

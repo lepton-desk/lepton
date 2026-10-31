@@ -87,6 +87,16 @@ impl Flags {
 
     /// Describes and prints the loop for the project rooted at `root`.
     pub fn dev_in(&self, root: &Path) -> Outcome {
+        // `"engine": "servo"`: the project's own choice on Linux, as `--servo`.
+        if !self.servo
+            && cfg!(target_os = "linux")
+            && !self.native
+            && super::servo::configured(root)?
+        {
+            let mut chosen = self.clone();
+            chosen.servo = true;
+            return chosen.dev_in(root);
+        }
         // Servo's library first, as `lepton build --servo` finds it.
         if self.servo && self.servo_lib.is_none() {
             super::servo::require_linux()?;

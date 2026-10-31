@@ -103,6 +103,17 @@ impl Flags {
         if self.macos {
             return Err(CliError::Invalid(MACOS_UNSUPPORTED.to_owned()));
         }
+        // `"engine": "servo"`: the project's own choice for a Linux web build, as `--servo`.
+        if !self.servo
+            && cfg!(target_os = "linux")
+            && !self.native
+            && !self.windows
+            && super::servo::configured(root)?
+        {
+            let mut chosen = self.clone();
+            chosen.servo = true;
+            return chosen.build_in(root);
+        }
         // Servo's library is found first, a dry run included: without it the core cannot
         // link, and a `--servo` build that quietly became WPE WebKit is what this flag
         // once did (measured 2026-10-18).

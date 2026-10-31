@@ -83,6 +83,16 @@ impl Flags {
     /// Builds the project as `run` does and says where the binary is — only prints the
     /// steps with `--print-plan`. `record` and `replay` start the same binary their own way.
     pub fn build_in(&self, root: &Path) -> Result<Built, CliError> {
+        // `"engine": "servo"`: the project's own choice on Linux, as `--servo`.
+        if !self.servo
+            && cfg!(target_os = "linux")
+            && !self.native
+            && super::servo::configured(root)?
+        {
+            let mut chosen = self.clone();
+            chosen.servo = true;
+            return chosen.build_in(root);
+        }
         // Servo's library first, as `lepton build --servo` finds it: without it the core
         // cannot link, and a run that quietly fell back to WPE WebKit would not be Servo.
         if self.servo && self.servo_lib.is_none() {

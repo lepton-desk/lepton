@@ -6,6 +6,9 @@
 //! (`-Dservo-lib=<dir>`, `zig/src/build_servo.zig`). The library comes with the npm
 //! package `@lepton-desk/servo-linux-x64` (CI builds it; `tools/stage-servo.mjs` puts it in),
 //! installed as a dev dependency of the project; `LEPTON_SERVO_LIB` names another directory.
+//!
+//! `"engine": "servo"` in `lepton.config.json` makes Servo the project's own choice on
+//! Linux, as if every `build`, `run`, `dev` and `package` had `--servo` ([`configured`]).
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -19,6 +22,34 @@ pub const LIBRARY: &str = "liblepton_servo.so";
 /// EGL (measured with `LD_DEBUG=files` on a packaged app). A package carrying Servo
 /// depends on them too.
 pub const LOADED: [&str; 1] = ["libEGL.so.1"];
+
+/// Whether the project at `root` renders its pages in Servo on Linux: its configuration's
+/// `engine` is `"servo"`. `"wpe"` or no `engine` keeps WPE WebKit, Linux's default; a
+/// native project (`renderPath: "native"`) has no web engine, so the setting does not
+/// apply to it. Windows always renders in WebView2, so callers ask only for a Linux build.
+pub fn configured(root: &Path) -> Result<bool, CliError> {
+    let path = root.join(lepton_orchestrator::CONFIG_FILE);
+    let text = std::fs::read_to_string(&path).map_err(|error| {
+        CliError::Invalid(format!("could not read {}: {error}", path.display()))
+    })?;
+    configured_in(&text)
+}
+
+/// [`configured`] for the configuration's text.
+pub fn configured_in(text: &str) -> Result<bool, CliError> {
+    let config: serde_json::Value = serde_json::from_str(text).map_err(|error| {
+        CliError::Invalid(format!("lepton.config.json is not valid JSON: {error}"))
+    })?;
+    let native = config.get("renderPath").and_then(|value| value.as_str()) == Some("native");
+    match config.get("engine") {
+        None => Ok(false),
+        Some(serde_json::Value::String(engine)) if engine == "wpe" => Ok(false),
+        Some(serde_json::Value::String(engine)) if engine == "servo" => Ok(!native),
+        Some(_) => Err(CliError::Invalid(
+            "\"engine\" must be \"wpe\" or \"servo\"".to_owned(),
+        )),
+    }
+}
 
 /// The variable naming the directory that holds [`LIBRARY`].
 pub const ENV: &str = "LEPTON_SERVO_LIB";
@@ -136,10 +167,34 @@ fn absolute(root: &Path, dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{LIBRARY, PACKAGE_DIR, carry, find, require_bundle_option};
+    use super::{LIBRARY, PACKAGE_DIR, carry, configured_in, find, require_bundle_option};
     use lepton_orchestrator::testing::{Failure, Scratch};
-    use lepton_orchestrator::{assert_contains, assert_ok, ensure};
+    use lepton_orchestrator::{assert_contains, assert_eq, assert_err, assert_ok, ensure};
     use std::ffi::OsStr;
+
+    #[test]
+    fn the_engine_is_wpe_unless_the_project_chooses_servo() -> Result<(), Failure> {
+        assert_eq!(assert_ok!(configured_in("{}"), "no engine"), false);
+        assert_eq!(
+            assert_ok!(configured_in(r#"{"engine":"wpe"}"#), "wpe"),
+            false
+        );
+        assert_eq!(
+            assert_ok!(configured_in(r#"{"engine":"servo"}"#), "servo"),
+            true
+        );
+        // A native project has no web engine to choose.
+        assert_eq!(
+            assert_ok!(
+                configured_in(r#"{"engine":"servo","renderPath":"native"}"#),
+                "servo, native"
+            ),
+            false
+        );
+        assert_err!(configured_in(r#"{"engine":"webkit"}"#), "an unknown engine");
+        assert_err!(configured_in(r#"{"engine":true}"#), "not a string");
+        Ok(())
+    }
 
     #[test]
     fn the_variable_names_a_directory_that_must_hold_the_library() -> Result<(), Failure> {

@@ -119,6 +119,13 @@ impl Flags {
             )));
         }
 
+        // `"engine": "servo"`: a Linux package of a web build carries Servo, as `--servo`.
+        if !self.servo && system == System::Linux && !self.native && super::servo::configured(root)?
+        {
+            let mut chosen = self.clone();
+            chosen.servo = true;
+            return chosen.package_in(root);
+        }
         if self.servo {
             super::servo::require_bundle_option(root)?;
         }
